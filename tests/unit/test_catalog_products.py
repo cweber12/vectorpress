@@ -97,7 +97,12 @@ def test_both_collection_slug_and_inline_membership_is_a_problem(catalog_copy: P
     slugs = {p.slug for p in inventory.products}
     assert "pacific_coast_tide_pool_standard_pack" not in slugs
     assert len(inventory.problems) == 1
-    assert "pacific_coast_tide_pool_standard_pack" in str(inventory.problems[0].path)
+    problem = inventory.problems[0]
+    assert "pacific_coast_tide_pool_standard_pack" in str(problem.path)
+    # issue #16: a cross-field check names every field it concerns, and its
+    # message loses pydantic's "Value error, " prefix.
+    assert problem.field == "collection_slug/membership"
+    assert not problem.message.startswith("Value error,")
 
 
 def test_neither_collection_slug_nor_inline_membership_is_a_problem(catalog_copy: Path) -> None:
@@ -113,6 +118,34 @@ def test_neither_collection_slug_nor_inline_membership_is_a_problem(catalog_copy
     slugs = {p.slug for p in inventory.products}
     assert "pacific_coast_tide_pool_standard_pack" not in slugs
     assert len(inventory.problems) == 1
+    problem = inventory.problems[0]
+    assert problem.field == "collection_slug/membership"
+    assert not problem.message.startswith("Value error,")
+
+
+def test_empty_inline_membership_is_a_problem_naming_the_membership_field(
+    catalog_copy: Path,
+) -> None:
+    """Issue #16: an empty ``[membership]`` table on a product is a
+    model-level check on the nested ``Membership`` (``_declares_at_least_one_form``),
+    same as on a collection (test_catalog_collections.py).
+    """
+    path = _product_toml(catalog_copy, "kelp_forest_mini_pack")
+    text = path.read_text(encoding="utf-8").replace(
+        '[membership.rule]\nfield = "ecosystems"\nvalues = ["Kelp forest"]\n',
+        "[membership]\n",
+    )
+    path.write_text(text, encoding="utf-8")
+    config = load_catalog_config(catalog_copy)
+
+    inventory = load_products(catalog_copy, config)
+
+    slugs = {p.slug for p in inventory.products}
+    assert "kelp_forest_mini_pack" not in slugs
+    assert len(inventory.problems) == 1
+    problem = inventory.problems[0]
+    assert problem.field == "membership"
+    assert not problem.message.startswith("Value error,")
 
 
 def test_unknown_derivative_type_is_a_problem_naming_file_and_field(catalog_copy: Path) -> None:

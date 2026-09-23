@@ -202,6 +202,55 @@ def test_load_catalog_root_is_the_catalog_root_passed_in() -> None:
     assert catalog.root == FIXTURE_CATALOG_ROOT
 
 
+def test_load_catalog_problem_messages_never_carry_pydantics_value_error_prefix(
+    catalog_copy: Path,
+) -> None:
+    """Issue #16: a cross-field ``model_validator`` check has nothing pydantic
+    can call "the field", and whatever the field, pydantic prefixes a raised
+    exception's message with "Value error, " (or, for an ``assert``,
+    "Assertion failed, "). Neither should ever reach a rendered
+    ``MetadataProblem``, across every hand-authored-file loader: this breaks
+    an asset, the brand, a collection and a product in the same load and
+    checks all four.
+    """
+    asset_path = catalog_copy / "assets" / "ochre_sea_star" / "asset.toml"
+    asset_path.write_text(
+        asset_path.read_text(encoding="utf-8").replace('subject_category = "Echinoderm"\n', ""),
+        encoding="utf-8",
+    )
+    brand_path = catalog_copy / "brand.toml"
+    brand_path.write_text(
+        brand_path.read_text(encoding="utf-8").replace(
+            'mark_file = "mark.png"', 'mark_file = "does_not_exist.png"'
+        ),
+        encoding="utf-8",
+    )
+    # Collection: an emptied-out [membership] table (model-level check).
+    collection_path = catalog_copy / "collections" / "kelp_forest_ecosystem.toml"
+    collection_path.write_text(
+        collection_path.read_text(encoding="utf-8").replace(
+            '[membership.rule]\nfield = "ecosystems"\nvalues = ["Kelp forest"]\n',
+            "[membership]\n",
+        ),
+        encoding="utf-8",
+    )
+    # Product: both a collection slug and an inline membership (model-level
+    # check with no single field pydantic can name).
+    product_path = catalog_copy / "products" / "pacific_coast_tide_pool_standard_pack.toml"
+    product_path.write_text(
+        product_path.read_text(encoding="utf-8")
+        + '\n[membership]\nasset_ids = ["ochre_sea_star"]\n',
+        encoding="utf-8",
+    )
+
+    catalog = load_catalog(catalog_copy)
+
+    assert len(catalog.problems) == 4
+    for problem in catalog.problems:
+        assert not problem.message.startswith("Value error,"), problem
+        assert not problem.message.startswith("Assertion failed,"), problem
+
+
 def test_load_catalog_aggregates_product_problems_alongside_collection_problems(
     catalog_copy: Path,
 ) -> None:
