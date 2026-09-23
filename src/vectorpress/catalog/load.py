@@ -1,17 +1,71 @@
-"""Read and validate a catalog root's ``catalog.toml``.
+"""Read and validate a catalog root's ``catalog.toml``, and the single load
+entry point that aggregates every hand-authored file's metadata problems.
 
 ``catalog.toml`` is hand-authored and read-only to the tool (ADR 0005): this
 module only ever reads it, through the standard-library ``tomllib``.
 """
 
 import tomllib
+from dataclasses import dataclass
 from pathlib import Path
 
 from pydantic import ValidationError
 
+from vectorpress.catalog.assets import load_assets
 from vectorpress.catalog.errors import CatalogConfigError
 from vectorpress.catalog.locate import CATALOG_CONFIG_FILENAME
+from vectorpress.catalog.metadata_problem import MetadataProblem
+from vectorpress.domain.asset import Asset
 from vectorpress.domain.catalog_config import CatalogConfig
+
+
+@dataclass(frozen=True)
+class LoadedCatalog:
+    """Everything loaded from one catalog root: config, assets, and every
+    metadata problem found across every hand-authored file (issue #6).
+
+    This is the catalog layer's single load entry point: ``cli`` (and later
+    ``ui``) render ``problems``, never producing report text themselves
+    (CLAUDE.md's "cli and ui are thin"). As brand (#3), collections (#5) and
+    products (#7) land, each adds one loader call here and merges its own
+    problems into ``problems``, so ``vpress status`` stays the one place a
+    catalog-wide metadata problem shows up (§34 "missing metadata").
+
+    ``config`` is ``None`` only when ``catalog.toml`` itself failed to load;
+    in that case ``assets`` is empty, since nothing that depends on config
+    (the assets directory, accepted source roles) could be located.
+    """
+
+    root: Path
+    config: CatalogConfig | None
+    assets: list[Asset]
+    problems: list[MetadataProblem]
+
+
+def load_catalog(root: Path) -> LoadedCatalog:
+    """Load a catalog root end to end: config, assets, and every metadata
+    problem found along the way.
+
+    A broken ``catalog.toml`` does not raise here: the root was already
+    located (its ``catalog.toml`` exists, or the caller would not have this
+    path), so a broken config is a metadata problem, not a "no catalog
+    found" error. It becomes one ``MetadataProblem`` naming ``catalog.toml``,
+    and loading stops there, since ``assets_dir`` and the accepted source
+    roles both come from config.
+    """
+    try:
+        config = load_catalog_config(root)
+    except CatalogConfigError as exc:
+        problem = MetadataProblem(exc.path.relative_to(root), None, exc.detail)
+        return LoadedCatalog(root=root, config=None, assets=[], problems=[problem])
+
+    inventory = load_assets(root, config)
+    return LoadedCatalog(
+        root=root,
+        config=config,
+        assets=inventory.assets,
+        problems=list(inventory.problems),
+    )
 
 
 def load_catalog_config(root: Path) -> CatalogConfig:
