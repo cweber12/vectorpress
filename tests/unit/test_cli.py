@@ -365,19 +365,34 @@ def test_collections_are_sorted_by_slug(monkeypatch: pytest.MonkeyPatch) -> None
 def test_products_lists_both_fixture_products_with_slug_title_tier_and_collection(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """Splits each line on the tab separator and asserts the exact 4-tuple
+    per product, rather than substring checks: ``"standard_pack"``,
+    ``"mini_pack"`` and ``"pacific_coast_tide_pool"`` are all substrings of
+    the product slugs themselves, so a dropped or garbled tier/collection
+    column would not have failed a substring-only assertion.
+    """
     monkeypatch.chdir(FIXTURE_CATALOG_ROOT)
 
     result = runner.invoke(app, ["products"])
 
     assert result.exit_code == 0
-    assert "pacific_coast_tide_pool_standard_pack" in result.stdout
-    assert "Pacific Coast Tide Pool Cut File Collection" in result.stdout
-    assert "standard_pack" in result.stdout
-    assert "pacific_coast_tide_pool" in result.stdout
-
-    assert "kelp_forest_mini_pack" in result.stdout
-    assert "mini_pack" in result.stdout
-    assert "inline" in result.stdout
+    lines = {
+        line.split("\t")[0]: tuple(line.split("\t"))
+        for line in result.stdout.splitlines()
+        if line.strip()
+    }
+    assert lines["pacific_coast_tide_pool_standard_pack"] == (
+        "pacific_coast_tide_pool_standard_pack",
+        "Pacific Coast Tide Pool Cut File Collection",
+        "standard_pack",
+        "pacific_coast_tide_pool",
+    )
+    assert lines["kelp_forest_mini_pack"] == (
+        "kelp_forest_mini_pack",
+        "kelp_forest_mini_pack",
+        "mini_pack",
+        "inline (rule)",
+    )
 
 
 def test_products_falls_back_to_slug_when_there_is_no_listing(
