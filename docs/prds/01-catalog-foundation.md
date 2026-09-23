@@ -1,6 +1,6 @@
 # PRD 1 — Catalog Foundation
 
-Status: not started
+Status: complete
 Depends on: see `docs/PLAN.md` Part 3 dependency graph
 
 **Goal.** A catalog directory on disk can be described, loaded, validated, and
