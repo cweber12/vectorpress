@@ -1,0 +1,21 @@
+# Hand-authored asset metadata (ADR 0005). The asset ID is this folder's name.
+
+common_name = "Purple sea urchin"
+display_name = "Purple Sea Urchin"
+scientific_name = "Strongylocentrotus purpuratus"
+description = """
+A spiny purple grazer common in tide pools and kelp forests along the
+Pacific coast, often found bored into shallow rock depressions.
+"""
+subject_category = "Echinoderm"
+tags = ["sea urchin", "tide pool", "kelp forest"]
+regions = ["California", "Oregon", "Pacific Coast"]
+ecosystems = ["Tide pool", "Kelp forest", "Rocky intertidal"]
+taxonomic_group = "Echinoderm"
+product_use_categories = ["apparel", "stickers"]
+notes = "Spine density stylized for the cut-file derivative."
+
+rights_status = "rights_verified"
+licensing_notes = "Reference photo licensed for commercial use; license on file."
+
+accuracy_status = "reviewed"

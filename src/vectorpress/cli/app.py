@@ -9,9 +9,11 @@ from pathlib import Path
 import typer
 
 from vectorpress import __version__
+from vectorpress.catalog.assets import load_assets
 from vectorpress.catalog.errors import CatalogConfigError, CatalogNotFoundError
 from vectorpress.catalog.load import load_catalog_config
 from vectorpress.catalog.locate import locate_catalog_root
+from vectorpress.domain.catalog_config import CatalogConfig
 
 app = typer.Typer(
     name="vpress",
@@ -49,9 +51,8 @@ def main(
     ctx.obj = {"catalog": catalog}
 
 
-@app.command()
-def status(ctx: typer.Context) -> None:
-    """Locate the catalog, load its config, and report the catalog name and root."""
+def _locate_and_load_config(ctx: typer.Context) -> tuple[Path, CatalogConfig]:
+    """Locate the catalog root and load its config, or exit with an actionable error."""
     explicit = ctx.obj.get("catalog") if ctx.obj else None
     try:
         root = locate_catalog_root(Path.cwd(), explicit=explicit)
@@ -65,4 +66,32 @@ def status(ctx: typer.Context) -> None:
         typer.echo(str(exc), err=True)
         raise typer.Exit(code=1) from exc
 
+    return root, config
+
+
+@app.command()
+def status(ctx: typer.Context) -> None:
+    """Locate the catalog, load its config and assets, and report an inventory."""
+    root, config = _locate_and_load_config(ctx)
+    inventory = load_assets(root, config)
+    problem_files = {problem.path for problem in inventory.problems}
+
     typer.echo(f"{config.name}\n{root}")
+    typer.echo(f"Assets: {len(inventory.assets)}")
+    typer.echo(f"Metadata problems: {len(problem_files)}")
+
+
+@app.command()
+def assets(ctx: typer.Context) -> None:
+    """List every loaded asset: ID, display name, rights status, accuracy status."""
+    root, config = _locate_and_load_config(ctx)
+    inventory = load_assets(root, config)
+
+    for asset in inventory.assets:
+        typer.echo(
+            f"{asset.id}\t{asset.display_name}\t"
+            f"{asset.rights_status.value}\t{asset.accuracy_status.value}"
+        )
+
+    for problem in inventory.problems:
+        typer.echo(str(problem), err=True)
