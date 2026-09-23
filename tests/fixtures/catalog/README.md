@@ -60,3 +60,18 @@ Two valid collections (§11, ADR 0008), populated by issue #5:
   `ecosystems` include "Kelp forest" (currently `purple_sea_urchin`).
   Resolving the rule into actual members is PRD 5's job; this fixture only
   exercises shape.
+
+## Products
+
+Two valid products (§7, §18, ADR 0008), populated by issue #7:
+
+- `pacific_coast_tide_pool_standard_pack` — references the
+  `pacific_coast_tide_pool` collection by slug and carries a full
+  `[listing]`.
+- `kelp_forest_mini_pack` — an inline collection (the same `Membership`
+  shape a collection file uses) instead of a collection slug reference,
+  and no `[listing]` yet, since PRD 7 drafts that on first build.
+
+Whether a referenced collection slug, or an inline membership's asset IDs
+and collection slugs, actually exist is PRD 5's job; this fixture only
+exercises shape.

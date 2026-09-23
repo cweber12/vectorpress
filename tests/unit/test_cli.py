@@ -127,6 +127,15 @@ def test_status_reports_the_collection_count(monkeypatch: pytest.MonkeyPatch) ->
     assert "Collections: 2" in result.stdout
 
 
+def test_status_reports_the_product_count(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.chdir(FIXTURE_CATALOG_ROOT)
+
+    result = runner.invoke(app, ["status"])
+
+    assert result.exit_code == 0
+    assert "Products: 2" in result.stdout
+
+
 def test_status_prints_the_brand_name(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.chdir(FIXTURE_CATALOG_ROOT)
 
@@ -346,6 +355,47 @@ def test_collections_are_sorted_by_slug(monkeypatch: pytest.MonkeyPatch) -> None
     monkeypatch.chdir(FIXTURE_CATALOG_ROOT)
 
     result = runner.invoke(app, ["collections"])
+
+    assert result.exit_code == 0
+    lines = [line for line in result.stdout.splitlines() if line.strip()]
+    slugs = [line.split("\t")[0] for line in lines]
+    assert slugs == sorted(slugs)
+
+
+def test_products_lists_both_fixture_products_with_slug_title_tier_and_collection(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.chdir(FIXTURE_CATALOG_ROOT)
+
+    result = runner.invoke(app, ["products"])
+
+    assert result.exit_code == 0
+    assert "pacific_coast_tide_pool_standard_pack" in result.stdout
+    assert "Pacific Coast Tide Pool Cut File Collection" in result.stdout
+    assert "standard_pack" in result.stdout
+    assert "pacific_coast_tide_pool" in result.stdout
+
+    assert "kelp_forest_mini_pack" in result.stdout
+    assert "mini_pack" in result.stdout
+    assert "inline" in result.stdout
+
+
+def test_products_falls_back_to_slug_when_there_is_no_listing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.chdir(FIXTURE_CATALOG_ROOT)
+
+    result = runner.invoke(app, ["products"])
+
+    assert result.exit_code == 0
+    lines = {line.split("\t")[0]: line for line in result.stdout.splitlines() if line.strip()}
+    assert lines["kelp_forest_mini_pack"].split("\t")[1] == "kelp_forest_mini_pack"
+
+
+def test_products_are_sorted_by_slug(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.chdir(FIXTURE_CATALOG_ROOT)
+
+    result = runner.invoke(app, ["products"])
 
     assert result.exit_code == 0
     lines = [line for line in result.stdout.splitlines() if line.strip()]

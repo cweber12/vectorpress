@@ -15,6 +15,7 @@ from vectorpress.catalog.errors import CatalogConfigError, CatalogNotFoundError
 from vectorpress.catalog.load import load_catalog, load_catalog_config
 from vectorpress.catalog.locate import locate_catalog_root
 from vectorpress.catalog.metadata_problem import MetadataProblem
+from vectorpress.catalog.products import load_products
 from vectorpress.domain.catalog_config import CatalogConfig
 
 app = typer.Typer(
@@ -104,9 +105,9 @@ def status(ctx: typer.Context) -> None:
     """Report the catalog's inventory and every metadata problem found.
 
     The single place that answers "is my catalog metadata sound?" (issue
-    #6): aggregates problems from catalog config, assets, collections, brand
-    and (once its slice lands) products. Exit code is non-zero when any
-    problem exists, so this works as a check in scripts.
+    #6): aggregates problems from catalog config, assets, collections,
+    products and brand. Exit code is non-zero when any problem exists, so
+    this works as a check in scripts.
     """
     root = _locate_root(ctx)
     catalog = load_catalog(root)
@@ -117,6 +118,7 @@ def status(ctx: typer.Context) -> None:
     typer.echo(f"Brand: {brand_name}")
     typer.echo(f"Assets: {len(catalog.assets)}")
     typer.echo(f"Collections: {len(catalog.collections)}")
+    typer.echo(f"Products: {len(catalog.products)}")
     _echo_problems(catalog.problems)
 
     if catalog.problems:
@@ -177,3 +179,27 @@ def collections(ctx: typer.Context) -> None:
 
     for loaded in inventory.collections:
         typer.echo(f"{loaded.slug}\t{loaded.name}\t{loaded.membership.form.value}")
+
+
+@app.command()
+def products(ctx: typer.Context) -> None:
+    """List every loaded product: slug, listing title, tier, and collection
+    reference.
+
+    The listing title falls back to the slug when the product has no
+    ``[listing]`` yet (issue #7: a product can exist before PRD 7 drafts
+    one). Metadata problems are ``vpress status``'s report, not this
+    command's; a catalog with a broken product still lists every product
+    that did load.
+    """
+    root, config = _locate_and_load_config(ctx)
+    inventory = load_products(root, config)
+
+    for loaded in inventory.products:
+        title = loaded.listing.title if loaded.listing is not None else loaded.slug
+        if loaded.collection_slug is not None:
+            collection_ref = loaded.collection_slug
+        else:
+            assert loaded.membership is not None  # enforced by Product's own validation
+            collection_ref = f"inline ({loaded.membership.form.value})"
+        typer.echo(f"{loaded.slug}\t{title}\t{loaded.tier.value}\t{collection_ref}")

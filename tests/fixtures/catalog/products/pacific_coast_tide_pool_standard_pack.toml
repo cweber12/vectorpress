@@ -1,0 +1,27 @@
+# Hand-authored product metadata (ADR 0005). The product slug is this
+# file's stem. References the "pacific_coast_tide_pool" collection by slug
+# (ADR 0008) and carries a full [listing] (§18, issue #7).
+
+collection_slug = "pacific_coast_tide_pool"
+derivative_types = ["cut_svg", "silhouette_svg", "transparent_png"]
+formats = ["svg", "png", "dxf"]
+tier = "standard_pack"
+family = "Pacific Coast Naturalist"
+price = 12.00
+
+[listing]
+title = "Pacific Coast Tide Pool Cut File Collection"
+short_title = "Tide Pool Collection"
+description = """
+A hand-illustrated set of Pacific coast tide pool species, ready for vinyl
+cutting, laser cutting, and craft printing.
+"""
+tags = ["tide pool", "pacific coast", "svg bundle"]
+search_terms = ["tide pool svg", "sea star cut file", "anemone svg"]
+intended_uses = ["vinyl cutting", "laser cutting", "stencils"]
+region = "Pacific Coast"
+species_names = ["Ochre Sea Star", "Giant Green Anemone", "Purple Sea Urchin"]
+category = "Nature & Wildlife"
+suggested_price = 12.00
+license_type = "Personal & Small Business Use"
+marketplace_notes = "Feature alongside other Pacific Coast Naturalist family products."
