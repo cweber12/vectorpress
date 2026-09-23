@@ -63,16 +63,25 @@ def problems_from_validation_error(path: Path, exc: ValidationError) -> list[Met
     return problems
 
 
-def duplicate_slug_problems(stems: list[tuple[Path, str]]) -> list[MetadataProblem]:
-    """Flag files whose slug (file stem) collides with another file's,
-    comparing case-insensitively so the result is the same on Windows and
-    Linux CI (issue #5's "normalise so CI on both agree") even though only
-    a case-sensitive filesystem can actually hold both files at once.
+def duplicate_slug_problems(
+    stems: list[tuple[Path, str]], *, field: str = "slug"
+) -> list[MetadataProblem]:
+    """Flag entries whose name collides with another's, comparing
+    case-insensitively so the result is the same on Windows and Linux CI
+    (issue #5's "normalise so CI on both agree") even though only a
+    case-sensitive filesystem can actually hold both entries at once.
 
-    Shared by every directory-of-``<slug>.toml``-files loader
-    (``collections``, ``products``, issue #7's "reuse or generalise
-    duplicate_slug_problems") instead of each one duplicating this
-    cross-file pass.
+    ``stems`` pairs each entry's problem path with the name to compare —
+    a file stem for a directory-of-``<slug>.toml``-files loader, a folder
+    name for a directory-of-asset-folders loader. ``field`` names the
+    offending field on the resulting problems, so a caller comparing
+    something other than a slug (``assets``, on asset ID — issue #17) gets
+    problems attributed correctly.
+
+    Shared by every loader with this collide-on-name shape (``collections``,
+    ``products``, issue #7's "reuse or generalise duplicate_slug_problems";
+    ``assets``, issue #17) instead of each one duplicating this cross-file
+    pass.
     """
     by_normalized: dict[str, list[Path]] = {}
     for rel_path, stem in stems:
@@ -87,8 +96,8 @@ def duplicate_slug_problems(stems: list[tuple[Path, str]]) -> list[MetadataProbl
             problems.append(
                 MetadataProblem(
                     rel_path,
-                    "slug",
-                    f"duplicate slug across files: {other_names}",
+                    field,
+                    f"duplicate {field} across files: {other_names}",
                 )
             )
     return problems

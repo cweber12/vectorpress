@@ -5,7 +5,11 @@ from pathlib import Path
 
 import pytest
 
-from vectorpress.catalog.assets import find_asset, load_assets
+from vectorpress.catalog.assets import (
+    duplicate_slug_problems,  # pure helper, tested directly below
+    find_asset,
+    load_assets,
+)
 from vectorpress.catalog.load import load_catalog_config
 from vectorpress.domain.asset import AccuracyStatus, RightsStatus, Source
 
@@ -333,3 +337,93 @@ def test_find_asset_returns_none_for_an_unknown_id() -> None:
     inventory = load_assets(FIXTURE_CATALOG_ROOT, config)
 
     assert find_asset(inventory, "not_a_real_asset") is None
+
+
+# --- duplicate asset ID across case-variant folders (issue #17) -------------------
+
+
+# A real filesystem is not exercised here: on Linux/macOS, two asset folders
+# named e.g. "Sea_Otter" and "sea_otter" both exist, but on Windows they
+# coalesce into one, so a test that creates such folders for real would see
+# two candidate folders on Linux and one on Windows, diverging exactly like
+# the issue warns against. The normalising comparison itself is therefore
+# tested directly, against fabricated paths, independent of what a given
+# OS's filesystem allows.
+
+
+def test_duplicate_slug_problems_flags_case_variant_asset_ids() -> None:
+    problems = duplicate_slug_problems(
+        [
+            (Path("assets/Sea_Otter/asset.toml"), "Sea_Otter"),
+            (Path("assets/sea_otter/asset.toml"), "sea_otter"),
+        ],
+        field="id",
+    )
+
+    assert len(problems) == 2
+    paths = {p.path for p in problems}
+    assert paths == {
+        Path("assets/Sea_Otter/asset.toml"),
+        Path("assets/sea_otter/asset.toml"),
+    }
+    assert all(p.field == "id" for p in problems)
+    assert all("duplicate id" in p.message for p in problems)
+
+
+def test_duplicate_slug_problems_is_empty_for_distinct_asset_ids() -> None:
+    problems = duplicate_slug_problems(
+        [
+            (Path("assets/ochre_sea_star/asset.toml"), "ochre_sea_star"),
+            (Path("assets/purple_sea_urchin/asset.toml"), "purple_sea_urchin"),
+        ],
+        field="id",
+    )
+
+    assert problems == []
+
+
+def test_load_assets_excludes_duplicate_id_folders_from_assets(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Pins the same exclusion as collections'
+    ``test_load_collections_excludes_duplicate_slug_files_from_collections``,
+    but for asset folders: two real folders live in separate real parent
+    directories (so both always exist, on every OS), and the assets
+    directory's listing is faked to present them as if they were siblings
+    named ``Sea_Otter``/``sea_otter``.
+
+    This is the one duplicate-ID test that is not skipped on Windows, so the
+    exclusion behaviour itself is always pinned somewhere in CI.
+    """
+    root = tmp_path / "catalog"
+    assets_dir = root / "assets"
+    parent_a = assets_dir / "a"
+    parent_b = assets_dir / "b"
+    otter_upper = parent_a / "Sea_Otter"
+    otter_lower = parent_b / "sea_otter"
+    otter_upper.mkdir(parents=True)
+    otter_lower.mkdir(parents=True)
+    (root / "catalog.toml").write_text('name = "Dup Test"\n', encoding="utf-8")
+    (otter_upper / "asset.toml").write_text('common_name = "Sea Otter"\n', encoding="utf-8")
+    (otter_lower / "asset.toml").write_text('common_name = "Sea Otter"\n', encoding="utf-8")
+
+    real_iterdir = Path.iterdir
+
+    def fake_iterdir(self: Path):
+        if self == assets_dir:
+            return iter([otter_upper, otter_lower])
+        return real_iterdir(self)
+
+    monkeypatch.setattr(Path, "iterdir", fake_iterdir)
+    config = load_catalog_config(root)
+
+    inventory = load_assets(root, config)
+
+    assert inventory.assets == []
+    assert len(inventory.problems) == 2
+    assert all(p.field == "id" for p in inventory.problems)
+    paths = {p.path for p in inventory.problems}
+    assert paths == {
+        Path("assets/a/Sea_Otter/asset.toml"),
+        Path("assets/b/sea_otter/asset.toml"),
+    }

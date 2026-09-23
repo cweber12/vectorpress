@@ -14,7 +14,11 @@ from pathlib import Path
 
 from pydantic import ValidationError
 
-from vectorpress.catalog.metadata_problem import MetadataProblem, problems_from_validation_error
+from vectorpress.catalog.metadata_problem import (
+    MetadataProblem,
+    duplicate_slug_problems,
+    problems_from_validation_error,
+)
 from vectorpress.domain.asset import Asset, AssetId
 from vectorpress.domain.catalog_config import CatalogConfig
 
@@ -29,7 +33,11 @@ class AssetInventory:
     ``assets`` excludes any folder whose ``asset.toml`` failed schema
     validation, or whose declared sources produced a problem (unknown
     role, missing or undeclared file, duplicate declaration, zero
-    sources); ``assets`` is sorted by asset ID.
+    sources), or whose folder name shares an asset ID with another folder
+    (case-insensitively — Windows and macOS filesystems disagree with
+    Linux on whether ``Sea_Otter/`` and ``sea_otter/`` can coexist, so
+    this check normalises rather than comparing exact case, same as
+    collections and products, issue #17); ``assets`` is sorted by asset ID.
     """
 
     assets: list[Asset]
@@ -55,13 +63,33 @@ def load_assets(root: Path, config: CatalogConfig) -> AssetInventory:
     if not assets_root.is_dir():
         return AssetInventory(assets=[], problems=[])
 
-    assets: list[Asset] = []
-    problems: list[MetadataProblem] = []
+    # A folder without asset.toml is not an asset, so it is excluded here,
+    # before the duplicate-ID pass, rather than being mistaken for one that
+    # collides with a real asset folder of the same (case-folded) name.
+    candidate_dirs = [
+        asset_dir
+        for asset_dir in sorted(p for p in assets_root.iterdir() if p.is_dir())
+        if (asset_dir / ASSET_CONFIG_FILENAME).is_file()
+    ]
 
-    for asset_dir in sorted(p for p in assets_root.iterdir() if p.is_dir()):
+    problems = duplicate_slug_problems(
+        [
+            ((asset_dir / ASSET_CONFIG_FILENAME).relative_to(root), asset_dir.name)
+            for asset_dir in candidate_dirs
+        ],
+        field="id",
+    )
+    # A folder flagged above is a problem folder; problem folders are not
+    # "loaded" (the same rule collections and products follow), so skip
+    # parsing it rather than let a duplicate ID quietly end up in ``assets``
+    # alongside its twin.
+    duplicate_paths = {problem.path for problem in problems}
+
+    assets: list[Asset] = []
+    for asset_dir in candidate_dirs:
         toml_path = asset_dir / ASSET_CONFIG_FILENAME
-        if not toml_path.is_file():
-            continue  # a folder without asset.toml is not an asset
+        if toml_path.relative_to(root) in duplicate_paths:
+            continue
 
         asset, file_problems = _load_one(root, asset_dir, toml_path, config)
         problems.extend(file_problems)
