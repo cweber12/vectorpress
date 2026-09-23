@@ -13,7 +13,7 @@ from pathlib import Path
 
 from pydantic import ValidationError
 
-from vectorpress.catalog.metadata_problem import MetadataProblem
+from vectorpress.catalog.metadata_problem import MetadataProblem, problems_from_validation_error
 from vectorpress.domain.brand import Brand
 
 BRAND_CONFIG_FILENAME = "brand.toml"
@@ -64,7 +64,7 @@ def load_brand(root: Path) -> BrandResult:
     try:
         brand = Brand.model_validate(data)
     except ValidationError as exc:
-        return BrandResult(brand=None, problems=_problems_from_validation_error(rel_path, exc))
+        return BrandResult(brand=None, problems=problems_from_validation_error(rel_path, exc))
 
     if not (root / brand.mark_file).is_file():
         return BrandResult(
@@ -79,11 +79,3 @@ def load_brand(root: Path) -> BrandResult:
         )
 
     return BrandResult(brand=brand, problems=[])
-
-
-def _problems_from_validation_error(path: Path, exc: ValidationError) -> list[MetadataProblem]:
-    problems: list[MetadataProblem] = []
-    for error in exc.errors():
-        field = ".".join(str(part) for part in error["loc"]) or None
-        problems.append(MetadataProblem(path, field, error["msg"]))
-    return problems

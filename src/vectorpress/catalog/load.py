@@ -13,12 +13,14 @@ from pydantic import ValidationError
 
 from vectorpress.catalog.assets import load_assets
 from vectorpress.catalog.brand import load_brand
+from vectorpress.catalog.collections import load_collections
 from vectorpress.catalog.errors import CatalogConfigError
 from vectorpress.catalog.locate import CATALOG_CONFIG_FILENAME
 from vectorpress.catalog.metadata_problem import MetadataProblem
 from vectorpress.domain.asset import Asset
 from vectorpress.domain.brand import Brand
 from vectorpress.domain.catalog_config import CatalogConfig
+from vectorpress.domain.collection import Collection
 
 
 @dataclass(frozen=True)
@@ -28,50 +30,56 @@ class LoadedCatalog:
 
     This is the catalog layer's single load entry point: ``cli`` (and later
     ``ui``) render ``problems``, never producing report text themselves
-    (CLAUDE.md's "cli and ui are thin"). As collections (#5) and products
-    (#7) land, each adds one loader call here and merges its own problems
-    into ``problems``, so ``vpress status`` stays the one place a
-    catalog-wide metadata problem shows up (§34 "missing metadata").
+    (CLAUDE.md's "cli and ui are thin"). As products (#7) land, it adds one
+    loader call here and merges its own problems into ``problems``, so
+    ``vpress status`` stays the one place a catalog-wide metadata problem
+    shows up (§34 "missing metadata").
 
     ``config`` is ``None`` only when ``catalog.toml`` itself failed to load;
-    in that case ``assets`` is empty and ``brand`` is ``None``, since nothing
-    that depends on config (the assets directory, accepted source roles)
-    could be located, and loading stops there. ``brand`` is otherwise
-    ``None`` when ``brand.toml`` is missing, malformed, or invalid (issue
-    #3): a catalog can exist before its brand is written.
+    in that case ``assets`` and ``collections`` are empty and ``brand`` is
+    ``None``, since nothing that depends on config (the assets and
+    collections directories, accepted source roles) could be located, and
+    loading stops there. ``brand`` is otherwise ``None`` when ``brand.toml``
+    is missing, malformed, or invalid (issue #3): a catalog can exist before
+    its brand is written.
     """
 
     root: Path
     config: CatalogConfig | None
     assets: list[Asset]
+    collections: list[Collection]
     brand: Brand | None
     problems: list[MetadataProblem]
 
 
 def load_catalog(root: Path) -> LoadedCatalog:
-    """Load a catalog root end to end: config, assets, brand, and every
-    metadata problem found along the way.
+    """Load a catalog root end to end: config, assets, collections, brand,
+    and every metadata problem found along the way.
 
     A broken ``catalog.toml`` does not raise here: the root was already
     located (its ``catalog.toml`` exists, or the caller would not have this
     path), so a broken config is a metadata problem, not a "no catalog
     found" error. It becomes one ``MetadataProblem`` naming ``catalog.toml``,
-    and loading stops there, since ``assets_dir`` and the accepted source
-    roles both come from config.
+    and loading stops there, since ``assets_dir`` and ``collections_dir``
+    both come from config.
     """
     try:
         config = load_catalog_config(root)
     except CatalogConfigError as exc:
         problem = MetadataProblem(exc.path.relative_to(root), None, exc.detail)
-        return LoadedCatalog(root=root, config=None, assets=[], brand=None, problems=[problem])
+        return LoadedCatalog(
+            root=root, config=None, assets=[], collections=[], brand=None, problems=[problem]
+        )
 
     inventory = load_assets(root, config)
+    collection_inventory = load_collections(root, config)
     brand_result = load_brand(root)
-    problems = [*inventory.problems, *brand_result.problems]
+    problems = [*inventory.problems, *collection_inventory.problems, *brand_result.problems]
     return LoadedCatalog(
         root=root,
         config=config,
         assets=inventory.assets,
+        collections=collection_inventory.collections,
         brand=brand_result.brand,
         problems=problems,
     )

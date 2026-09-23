@@ -1,0 +1,13 @@
+# Hand-authored collection metadata (ADR 0005). The collection slug is this
+# file's stem. Explicit membership: a hand-picked list of asset IDs (ADR 0008).
+
+name = "Pacific Coast Tide Pool"
+description = """
+The tide pool subjects in this catalog, hand-picked rather than grouped by a
+rule.
+"""
+tags = ["tide pool", "pacific coast"]
+marketplace_category = "Nature & Wildlife"
+
+[membership]
+asset_ids = ["ochre_sea_star", "giant_green_anemone", "purple_sea_urchin"]

@@ -10,6 +10,7 @@ import typer
 
 from vectorpress import __version__
 from vectorpress.catalog.assets import find_asset, load_assets
+from vectorpress.catalog.collections import load_collections
 from vectorpress.catalog.errors import CatalogConfigError, CatalogNotFoundError
 from vectorpress.catalog.load import load_catalog, load_catalog_config
 from vectorpress.catalog.locate import locate_catalog_root
@@ -103,9 +104,9 @@ def status(ctx: typer.Context) -> None:
     """Report the catalog's inventory and every metadata problem found.
 
     The single place that answers "is my catalog metadata sound?" (issue
-    #6): aggregates problems from catalog config, assets and (once their
-    slices land) collections, products and brand. Exit code is non-zero
-    when any problem exists, so this works as a check in scripts.
+    #6): aggregates problems from catalog config, assets, collections, brand
+    and (once its slice lands) products. Exit code is non-zero when any
+    problem exists, so this works as a check in scripts.
     """
     root = _locate_root(ctx)
     catalog = load_catalog(root)
@@ -115,6 +116,7 @@ def status(ctx: typer.Context) -> None:
     typer.echo(f"{name}\n{root}")
     typer.echo(f"Brand: {brand_name}")
     typer.echo(f"Assets: {len(catalog.assets)}")
+    typer.echo(f"Collections: {len(catalog.collections)}")
     _echo_problems(catalog.problems)
 
     if catalog.problems:
@@ -159,3 +161,19 @@ def asset(
     typer.echo("Sources:")
     for source in found.sources:
         typer.echo(f"  {source.file}\t{source.role}")
+
+
+@app.command()
+def collections(ctx: typer.Context) -> None:
+    """List every loaded collection: slug, name, and membership form.
+
+    Membership resolution (which assets actually match) is PRD 5's job;
+    this only reports the declared shape (issue #5). Metadata problems are
+    ``vpress status``'s report, not this command's; a catalog with a broken
+    collection still lists every collection that did load.
+    """
+    root, config = _locate_and_load_config(ctx)
+    inventory = load_collections(root, config)
+
+    for loaded in inventory.collections:
+        typer.echo(f"{loaded.slug}\t{loaded.name}\t{loaded.membership.form.value}")

@@ -118,6 +118,15 @@ def test_status_reports_the_asset_count_on_a_partially_broken_catalog(
     assert "Assets: 2" in result.stdout
 
 
+def test_status_reports_the_collection_count(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.chdir(FIXTURE_CATALOG_ROOT)
+
+    result = runner.invoke(app, ["status"])
+
+    assert result.exit_code == 0
+    assert "Collections: 2" in result.stdout
+
+
 def test_status_prints_the_brand_name(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.chdir(FIXTURE_CATALOG_ROOT)
 
@@ -314,3 +323,31 @@ def test_asset_with_unknown_id_exits_non_zero_and_names_the_id(
 
     assert result.exit_code != 0
     assert "not_a_real_asset" in result.output
+
+
+def test_collections_lists_both_fixture_collections_with_slug_name_and_form(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.chdir(FIXTURE_CATALOG_ROOT)
+
+    result = runner.invoke(app, ["collections"])
+
+    assert result.exit_code == 0
+    for slug, name, form in [
+        ("pacific_coast_tide_pool", "Pacific Coast Tide Pool", "explicit"),
+        ("kelp_forest_ecosystem", "Kelp Forest Ecosystem", "rule"),
+    ]:
+        assert slug in result.stdout
+        assert name in result.stdout
+        assert form in result.stdout
+
+
+def test_collections_are_sorted_by_slug(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.chdir(FIXTURE_CATALOG_ROOT)
+
+    result = runner.invoke(app, ["collections"])
+
+    assert result.exit_code == 0
+    lines = [line for line in result.stdout.splitlines() if line.strip()]
+    slugs = [line.split("\t")[0] for line in lines]
+    assert slugs == sorted(slugs)
