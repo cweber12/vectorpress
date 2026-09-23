@@ -1,0 +1,13 @@
+# Root config for the fixture catalog (tests/fixtures/catalog).
+#
+# Hand-authored and read-only to the tool (ADR 0005). See the layout in this
+# directory's README.md.
+
+name = "Tide Pool Studio"
+
+# assets_dir, collections_dir, products_dir and reference_size_in are left
+# unset here on purpose, to exercise their documented defaults:
+#   assets_dir       = "assets"
+#   collections_dir  = "collections"
+#   products_dir     = "products"
+#   reference_size_in = 3.0

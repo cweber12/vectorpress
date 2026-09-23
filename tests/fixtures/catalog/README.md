@@ -10,4 +10,26 @@ Rules:
 - Include subjects that deliberately trip each cut-file finding type once PRD 3 lands.
 - Never point the tool's tests at a real catalog.
 
+## Layout
+
+A catalog root is identified by `catalog.toml` at its top. The full on-disk layout
+(later slices add the directories not yet present here):
+
+```text
+catalog/
+├── catalog.toml          # hand-authored, read-only to the tool (ADR 0005)
+├── brand.toml             # hand-authored brand config
+├── assets/                # name configurable via catalog.toml's assets_dir
+│   └── <asset_id>/        # one folder per asset, named by asset ID
+│       ├── asset.toml      # hand-authored asset metadata
+│       └── sources/        # preserved source images, never modified (ADR 0002)
+├── collections/            # name configurable via catalog.toml's collections_dir
+│   └── <collection_id>.toml
+└── products/                # name configurable via catalog.toml's products_dir
+    └── <product_id>.toml
+```
+
+Later slices add, per asset, `derived/` (generated derivatives + `_state.json`) and
+`overrides/` (hand-edited effective derivatives) — see ADR 0005 and ADR 0007.
+
 Populated by PRD 1.
