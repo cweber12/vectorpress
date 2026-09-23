@@ -300,3 +300,53 @@ def test_load_collections_reports_a_duplicate_slug_problem_from_the_directory_sc
 
     assert len(inventory.problems) == 2
     assert all(p.field == "slug" for p in inventory.problems)
+    # A duplicate-slug file is a problem file, not a loaded one (the same
+    # rule assets follow): neither twin ends up in ``collections``, so
+    # ``find_collection`` can never return an arbitrary pick between them.
+    assert inventory.collections == []
+
+
+def test_load_collections_excludes_duplicate_slug_files_from_collections(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Pins the same exclusion as the test above, but without depending on
+    a real filesystem allowing two case-variant filenames to coexist: two
+    real files live in separate real subdirectories (so both always exist,
+    on every OS), and the collections directory's listing is faked to
+    present them as if they were siblings named ``Foo.toml``/``foo.toml``
+    (the controller's "faking the directory listing is acceptable").
+
+    This is the one duplicate-slug test that is not skipped on Windows, so
+    the exclusion behaviour itself is always pinned somewhere in CI.
+    """
+    root = tmp_path / "catalog"
+    collections_dir = root / "collections"
+    sub_a = collections_dir / "a"
+    sub_b = collections_dir / "b"
+    sub_a.mkdir(parents=True)
+    sub_b.mkdir(parents=True)
+    (root / "catalog.toml").write_text('name = "Dup Test"\n', encoding="utf-8")
+    collection_toml = (
+        'name = "X"\ndescription = "d"\nmarketplace_category = "c"\n'
+        '\n[membership]\nasset_ids = ["a"]\n'
+    )
+    foo_upper = sub_a / "Foo.toml"
+    foo_lower = sub_b / "foo.toml"
+    foo_upper.write_text(collection_toml, encoding="utf-8")
+    foo_lower.write_text(collection_toml, encoding="utf-8")
+
+    real_iterdir = Path.iterdir
+
+    def fake_iterdir(self: Path):
+        if self == collections_dir:
+            return iter([foo_upper, foo_lower])
+        return real_iterdir(self)
+
+    monkeypatch.setattr(Path, "iterdir", fake_iterdir)
+    config = load_catalog_config(root)
+
+    inventory = load_collections(root, config)
+
+    assert inventory.collections == []
+    assert len(inventory.problems) == 2
+    assert all(p.field == "slug" for p in inventory.problems)

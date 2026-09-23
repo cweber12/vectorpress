@@ -65,9 +65,15 @@ def load_collections(root: Path, config: CatalogConfig) -> CollectionInventory:
     )
 
     problems = duplicate_slug_problems([(p.relative_to(root), p.stem) for p in toml_paths])
+    # A file flagged above is a problem file; problem files are not "loaded"
+    # (the same rule assets follow), so skip parsing it rather than let a
+    # duplicate slug quietly end up in ``collections`` alongside its twin.
+    duplicate_paths = {problem.path for problem in problems}
 
     collections: list[Collection] = []
     for toml_path in toml_paths:
+        if toml_path.relative_to(root) in duplicate_paths:
+            continue
         collection, file_problems = _load_one(root, toml_path)
         problems.extend(file_problems)
         if collection is not None:
