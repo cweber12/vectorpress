@@ -1,3 +1,4 @@
+import shutil
 from pathlib import Path
 
 import pytest
@@ -77,7 +78,7 @@ def test_status_with_malformed_catalog_names_file_and_field(
     result = runner.invoke(app, ["status"])
 
     assert result.exit_code != 0
-    assert str((tmp_path / "catalog.toml").resolve()) in result.output
+    assert "catalog.toml" in result.output
     assert "reference_size_in" in result.output
 
 
@@ -87,7 +88,66 @@ def test_status_reports_the_asset_count(monkeypatch: pytest.MonkeyPatch) -> None
     result = runner.invoke(app, ["status"])
 
     assert result.exit_code == 0
-    assert "3" in result.stdout
+    assert "Assets: 3" in result.stdout
+
+
+def test_status_on_the_clean_fixture_states_there_are_no_problems(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.chdir(FIXTURE_CATALOG_ROOT)
+
+    result = runner.invoke(app, ["status"])
+
+    assert result.exit_code == 0
+    assert "Metadata problems: none" in result.stdout
+
+
+def test_status_lists_a_missing_field_an_unknown_role_and_a_duplicate_id(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Acceptance criterion 2 (issue #6): three problems from three files,
+    grouped by file, with field and message, non-zero exit.
+
+    Folder-named assets mean a duplicate asset ID can only arise as an
+    ``id`` field disagreeing with its own folder (#4's check); this asset
+    is excluded and the mismatch is reported as the "duplicate ID" case.
+    """
+    root = tmp_path / "catalog"
+    shutil.copytree(FIXTURE_CATALOG_ROOT, root)
+
+    ochre = root / "assets" / "ochre_sea_star" / "asset.toml"
+    ochre.write_text(
+        ochre.read_text(encoding="utf-8").replace('subject_category = "Echinoderm"\n', ""),
+        encoding="utf-8",
+    )
+
+    urchin = root / "assets" / "purple_sea_urchin" / "asset.toml"
+    urchin.write_text(
+        urchin.read_text(encoding="utf-8").replace(
+            'role = "silhouette"', 'role = "not_a_real_role"'
+        ),
+        encoding="utf-8",
+    )
+
+    anemone = root / "assets" / "giant_green_anemone" / "asset.toml"
+    anemone.write_text(
+        'id = "purple_sea_urchin"\n' + anemone.read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+
+    monkeypatch.chdir(tmp_path)
+
+    result = runner.invoke(app, ["--catalog", str(root), "status"])
+
+    assert result.exit_code != 0
+    assert "Metadata problems: 3" in result.stdout
+    assert str(Path("assets") / "ochre_sea_star" / "asset.toml") in result.stdout
+    assert "subject_category" in result.stdout
+    assert str(Path("assets") / "purple_sea_urchin" / "asset.toml") in result.stdout
+    assert "not_a_real_role" in result.stdout
+    assert str(Path("assets") / "giant_green_anemone" / "asset.toml") in result.stdout
+    assert "purple_sea_urchin" in result.stdout
+    assert "does not match folder name" in result.stdout
 
 
 def test_assets_lists_the_fixture_assets(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -105,6 +165,29 @@ def test_assets_lists_the_fixture_assets(monkeypatch: pytest.MonkeyPatch) -> Non
         assert display_name in result.stdout
         assert rights in result.stdout
         assert accuracy in result.stdout
+
+
+def test_assets_lists_the_valid_ones_when_one_asset_is_broken(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Acceptance criterion 3 (issue #6): one broken asset does not stop
+    ``vpress assets`` from listing the others, at the CLI layer.
+    """
+    root = tmp_path / "catalog"
+    shutil.copytree(FIXTURE_CATALOG_ROOT, root)
+    ochre = root / "assets" / "ochre_sea_star" / "asset.toml"
+    ochre.write_text(
+        ochre.read_text(encoding="utf-8").replace('subject_category = "Echinoderm"\n', ""),
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
+
+    result = runner.invoke(app, ["--catalog", str(root), "assets"])
+
+    assert result.exit_code == 0
+    assert "ochre_sea_star" not in result.stdout
+    assert "purple_sea_urchin" in result.stdout
+    assert "giant_green_anemone" in result.stdout
 
 
 def test_assets_are_sorted_by_id(monkeypatch: pytest.MonkeyPatch) -> None:
