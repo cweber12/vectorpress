@@ -11,6 +11,8 @@ from pathlib import Path
 
 from pydantic import ValidationError
 
+from vectorpress.domain.metadata_field_error import MetadataFieldError
+
 
 @dataclass(frozen=True)
 class MetadataProblem:
@@ -35,11 +37,29 @@ def problems_from_validation_error(path: Path, exc: ValidationError) -> list[Met
     Shared by every hand-authored-file loader (``assets``, ``brand``,
     ``collections``, ``products``) instead of each one duplicating this
     translation (deferred from issue #3).
+
+    Pydantic prefixes a raised exception's own message with a wrapper
+    string ("Value error, ...", "Assertion failed, ...") in ``msg``; the
+    raised exception itself (``error["ctx"]["error"]``, present only when
+    the error came from a raised exception rather than a built-in pydantic
+    check) does not carry that prefix, so it is used for the message
+    whenever present (issue #16). A cross-field ``model_validator`` check
+    has an empty ``loc`` — pydantic has no single field to blame — so when
+    the raised exception is a ``MetadataFieldError`` its ``field`` is used
+    instead (issue #16).
     """
     problems: list[MetadataProblem] = []
     for error in exc.errors():
         field = ".".join(str(part) for part in error["loc"]) or None
-        problems.append(MetadataProblem(path, field, error["msg"]))
+        message = error["msg"]
+
+        raised = error.get("ctx", {}).get("error")
+        if isinstance(raised, Exception):
+            message = str(raised)
+            if field is None and isinstance(raised, MetadataFieldError):
+                field = raised.field
+
+        problems.append(MetadataProblem(path, field, message))
     return problems
 
 

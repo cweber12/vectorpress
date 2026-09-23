@@ -206,6 +206,12 @@ def test_empty_membership_is_a_problem(catalog_copy: Path) -> None:
     slugs = {c.slug for c in inventory.collections}
     assert "pacific_coast_tide_pool" not in slugs
     assert len(inventory.problems) == 1
+    problem = inventory.problems[0]
+    # issue #16: the model-level "must declare at least one form" check
+    # names the "membership" field, and its message loses pydantic's
+    # "Value error, " prefix.
+    assert problem.field == "membership"
+    assert not problem.message.startswith("Value error,")
 
 
 def test_find_collection_returns_the_matching_loaded_collection() -> None:

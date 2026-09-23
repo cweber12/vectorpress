@@ -22,6 +22,7 @@ from vectorpress.domain.collection import CollectionSlug
 from vectorpress.domain.derivative_type import DerivativeType
 from vectorpress.domain.listing import Listing
 from vectorpress.domain.membership import Membership
+from vectorpress.domain.metadata_field_error import MetadataFieldError
 
 #: A product's stable identifier; also its file's stem (CONTEXT.md).
 ProductSlug = str
@@ -86,9 +87,10 @@ class Product(BaseModel):
     @model_validator(mode="after")
     def _references_exactly_one_collection(self) -> "Product":
         if (self.collection_slug is None) == (self.membership is None):
-            raise ValueError(
+            raise MetadataFieldError(
+                "collection_slug/membership",
                 "product must reference a collection slug or declare an inline "
-                "collection, not both or neither"
+                "collection, not both or neither",
             )
         return self
 

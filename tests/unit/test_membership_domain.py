@@ -100,8 +100,21 @@ def test_membership_combining_all_three_forms_is_mixed() -> None:
 
 
 def test_empty_membership_is_rejected() -> None:
-    with pytest.raises(ValidationError):
+    """``Membership`` is validated as its own top-level model here (not
+    nested under a ``Product`` or ``Collection``), so pydantic's ``loc`` is
+    empty and its ``msg`` still carries the raw "Value error, " prefix at
+    this layer. Stripping that prefix, and (when nested) attributing this
+    check to the "membership" field, is catalog.metadata_problem's job
+    (issue #16) — see test_catalog_products.py and
+    test_catalog_collections.py, where ``Membership`` is always nested
+    under a product or collection.
+    """
+    with pytest.raises(ValidationError) as exc_info:
         Membership.model_validate({})
+
+    errors = exc_info.value.errors()
+    assert len(errors) == 1
+    assert errors[0]["loc"] == ()
 
 
 def test_membership_rejects_an_unknown_key() -> None:

@@ -4,6 +4,7 @@ import pytest
 from pydantic import ValidationError
 
 from vectorpress.domain.derivative_type import DerivativeType
+from vectorpress.domain.metadata_field_error import MetadataFieldError
 from vectorpress.domain.product import Format, Product, ProductTier
 
 VALID_WITH_COLLECTION_SLUG = {
@@ -51,15 +52,32 @@ def test_product_with_both_a_collection_slug_and_inline_membership_is_rejected()
         "membership": {"asset_ids": ["ochre_sea_star"]},
     }
 
-    with pytest.raises(ValidationError):
+    with pytest.raises(ValidationError) as exc_info:
         Product.model_validate(data)
+
+    errors = exc_info.value.errors()
+    assert len(errors) == 1
+    # loc is empty (this is a cross-field check on Product itself), so the
+    # raised MetadataFieldError is how catalog.metadata_problem attributes
+    # the resulting problem to a field (issue #16).
+    assert errors[0]["loc"] == ()
+    raised = errors[0].get("ctx", {}).get("error")
+    assert isinstance(raised, MetadataFieldError)
+    assert raised.field == "collection_slug/membership"
 
 
 def test_product_with_neither_a_collection_slug_nor_inline_membership_is_rejected() -> None:
     data = {k: v for k, v in VALID_WITH_COLLECTION_SLUG.items() if k != "collection_slug"}
 
-    with pytest.raises(ValidationError):
+    with pytest.raises(ValidationError) as exc_info:
         Product.model_validate(data)
+
+    errors = exc_info.value.errors()
+    assert len(errors) == 1
+    assert errors[0]["loc"] == ()
+    raised = errors[0].get("ctx", {}).get("error")
+    assert isinstance(raised, MetadataFieldError)
+    assert raised.field == "collection_slug/membership"
 
 
 def test_unknown_derivative_type_is_rejected() -> None:
