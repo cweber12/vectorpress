@@ -33,11 +33,42 @@ def problems_from_validation_error(path: Path, exc: ValidationError) -> list[Met
     """Turn a pydantic ``ValidationError`` into one ``MetadataProblem`` per error.
 
     Shared by every hand-authored-file loader (``assets``, ``brand``,
-    ``collections``) instead of each one duplicating this translation
-    (deferred from issue #3).
+    ``collections``, ``products``) instead of each one duplicating this
+    translation (deferred from issue #3).
     """
     problems: list[MetadataProblem] = []
     for error in exc.errors():
         field = ".".join(str(part) for part in error["loc"]) or None
         problems.append(MetadataProblem(path, field, error["msg"]))
+    return problems
+
+
+def duplicate_slug_problems(stems: list[tuple[Path, str]]) -> list[MetadataProblem]:
+    """Flag files whose slug (file stem) collides with another file's,
+    comparing case-insensitively so the result is the same on Windows and
+    Linux CI (issue #5's "normalise so CI on both agree") even though only
+    a case-sensitive filesystem can actually hold both files at once.
+
+    Shared by every directory-of-``<slug>.toml``-files loader
+    (``collections``, ``products``, issue #7's "reuse or generalise
+    duplicate_slug_problems") instead of each one duplicating this
+    cross-file pass.
+    """
+    by_normalized: dict[str, list[Path]] = {}
+    for rel_path, stem in stems:
+        by_normalized.setdefault(stem.casefold(), []).append(rel_path)
+
+    problems: list[MetadataProblem] = []
+    for paths in by_normalized.values():
+        if len(paths) < 2:
+            continue
+        other_names = ", ".join(str(p) for p in paths)
+        for rel_path in paths:
+            problems.append(
+                MetadataProblem(
+                    rel_path,
+                    "slug",
+                    f"duplicate slug across files: {other_names}",
+                )
+            )
     return problems

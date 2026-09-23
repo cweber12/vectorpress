@@ -87,6 +87,10 @@ def test_load_catalog_on_the_clean_fixture_has_no_problems() -> None:
         "kelp_forest_ecosystem",
         "pacific_coast_tide_pool",
     ]
+    assert [p.slug for p in catalog.products] == [
+        "kelp_forest_mini_pack",
+        "pacific_coast_tide_pool_standard_pack",
+    ]
     assert catalog.brand is not None
     assert catalog.brand.name == "Tide Pool Studio"
     assert catalog.problems == []
@@ -196,3 +200,31 @@ def test_load_catalog_root_is_the_catalog_root_passed_in() -> None:
     catalog = load_catalog(FIXTURE_CATALOG_ROOT)
 
     assert catalog.root == FIXTURE_CATALOG_ROOT
+
+
+def test_load_catalog_aggregates_product_problems_alongside_collection_problems(
+    catalog_copy: Path,
+) -> None:
+    collection_path = catalog_copy / "collections" / "pacific_coast_tide_pool.toml"
+    collection_path.write_text(
+        collection_path.read_text(encoding="utf-8").replace(
+            'marketplace_category = "Nature & Wildlife"\n', ""
+        ),
+        encoding="utf-8",
+    )
+    product_path = catalog_copy / "products" / "kelp_forest_mini_pack.toml"
+    product_path.write_text(
+        product_path.read_text(encoding="utf-8").replace(
+            'derivative_types = ["cut_svg"]', 'derivative_types = ["not_a_real_type"]'
+        ),
+        encoding="utf-8",
+    )
+
+    catalog = load_catalog(catalog_copy)
+
+    assert len(catalog.problems) == 2
+    paths = {problem.path for problem in catalog.problems}
+    assert Path("collections") / "pacific_coast_tide_pool.toml" in paths
+    assert Path("products") / "kelp_forest_mini_pack.toml" in paths
+    loaded_slugs = {p.slug for p in catalog.products}
+    assert loaded_slugs == {"pacific_coast_tide_pool_standard_pack"}

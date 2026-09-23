@@ -15,7 +15,11 @@ from pathlib import Path
 
 from pydantic import ValidationError
 
-from vectorpress.catalog.metadata_problem import MetadataProblem, problems_from_validation_error
+from vectorpress.catalog.metadata_problem import (
+    MetadataProblem,
+    duplicate_slug_problems,
+    problems_from_validation_error,
+)
 from vectorpress.domain.catalog_config import CatalogConfig
 from vectorpress.domain.collection import Collection, CollectionSlug
 
@@ -81,37 +85,6 @@ def load_collections(root: Path, config: CatalogConfig) -> CollectionInventory:
 
     collections.sort(key=lambda c: c.slug)
     return CollectionInventory(collections=collections, problems=problems)
-
-
-def duplicate_slug_problems(stems: list[tuple[Path, str]]) -> list[MetadataProblem]:
-    """Flag files whose slug (file stem) collides with another file's,
-    comparing case-insensitively so the result is the same on Windows and
-    Linux CI (issue #5's "normalise so CI on both agree") even though only
-    a case-sensitive filesystem can actually hold both files at once.
-
-    Public (not the directory-scanning loader's private detail) so the
-    normalising comparison itself can be unit tested directly against
-    fabricated paths, independent of what a given OS's filesystem allows
-    two real files on disk to do.
-    """
-    by_normalized: dict[str, list[Path]] = {}
-    for rel_path, stem in stems:
-        by_normalized.setdefault(stem.casefold(), []).append(rel_path)
-
-    problems: list[MetadataProblem] = []
-    for paths in by_normalized.values():
-        if len(paths) < 2:
-            continue
-        other_names = ", ".join(str(p) for p in paths)
-        for rel_path in paths:
-            problems.append(
-                MetadataProblem(
-                    rel_path,
-                    "slug",
-                    f"duplicate slug across files: {other_names}",
-                )
-            )
-    return problems
 
 
 def _load_one(root: Path, toml_path: Path) -> tuple[Collection | None, list[MetadataProblem]]:

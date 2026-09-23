@@ -1,0 +1,13 @@
+# Hand-authored product metadata (ADR 0005). The product slug is this
+# file's stem. Declares an inline collection (same Membership shape as a
+# collection file, ADR 0008) instead of referencing a collection slug, and
+# has no [listing] yet, since PRD 7 drafts that on first build (issue #7).
+
+derivative_types = ["cut_svg"]
+formats = ["svg"]
+tier = "mini_pack"
+price = 6.00
+
+[membership.rule]
+field = "ecosystems"
+values = ["Kelp forest"]
