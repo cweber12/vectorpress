@@ -460,20 +460,30 @@ def test_lookup_asset_does_not_leak_a_colliding_prefix_neighbours_problems(
     catalog_copy: Path,
 ) -> None:
     """A problem tied to ``ochre_sea_star`` is not attributed to
-    ``ochre_sea_star_2``, a second asset folder whose name has the first as
-    a string prefix. This guards the folder match against degrading to
-    ``str(path).startswith(str(folder))``: that comparison would wrongly
-    treat ``assets/ochre_sea_star_2/asset.toml`` as belonging to the
-    ``ochre_sea_star`` folder, since ``"ochre_sea_star_2"`` starts with
-    ``"ochre_sea_star"`` as a string even though it is a sibling folder, not
-    a child (issue #15 review).
+    ``ochre_sea_star_2`` (a second asset folder whose name has the first as
+    a string prefix), and vice versa. This guards the folder match against
+    degrading to ``str(path).startswith(str(folder))``: that comparison
+    would wrongly treat ``assets/ochre_sea_star_2/asset.toml`` as belonging
+    to the ``ochre_sea_star`` folder, since ``"ochre_sea_star_2"`` starts
+    with ``"ochre_sea_star"`` as a string even though it is a sibling
+    folder, not a child (issue #15 review, round 2: both folders must carry
+    a *distinct* problem, or neither ``find_asset`` call short-circuits
+    before the folder comparison and the naive and correct implementations
+    agree by coincidence).
     """
     shutil.copytree(
         catalog_copy / "assets" / "ochre_sea_star", catalog_copy / "assets" / "ochre_sea_star_2"
     )
-    path = _asset_toml(catalog_copy, "ochre_sea_star")
-    text = path.read_text(encoding="utf-8").replace('subject_category = "Echinoderm"\n', "")
-    path.write_text(text, encoding="utf-8")
+    ochre_path = _asset_toml(catalog_copy, "ochre_sea_star")
+    ochre_path.write_text(
+        ochre_path.read_text(encoding="utf-8").replace('subject_category = "Echinoderm"\n', ""),
+        encoding="utf-8",
+    )
+    neighbour_path = _asset_toml(catalog_copy, "ochre_sea_star_2")
+    neighbour_path.write_text(
+        neighbour_path.read_text(encoding="utf-8").replace('display_name = "Ochre Sea Star"\n', ""),
+        encoding="utf-8",
+    )
     config = load_catalog_config(catalog_copy)
     inventory = load_assets(catalog_copy, config)
 
@@ -484,9 +494,9 @@ def test_lookup_asset_does_not_leak_a_colliding_prefix_neighbours_problems(
     assert len(broken.problems) == 1
     assert broken.problems[0].field == "subject_category"
 
-    assert neighbour.asset is not None
-    assert neighbour.asset.id == "ochre_sea_star_2"
-    assert neighbour.problems == []
+    assert neighbour.asset is None
+    assert len(neighbour.problems) == 1
+    assert neighbour.problems[0].field == "display_name"
 
 
 def test_load_assets_excludes_duplicate_id_folders_from_assets(
