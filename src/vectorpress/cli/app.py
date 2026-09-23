@@ -111,7 +111,9 @@ def status(ctx: typer.Context) -> None:
     catalog = load_catalog(root)
 
     name = catalog.config.name if catalog.config is not None else root.name
+    brand_name = catalog.brand.name if catalog.brand is not None else "none"
     typer.echo(f"{name}\n{root}")
+    typer.echo(f"Brand: {brand_name}")
     typer.echo(f"Assets: {len(catalog.assets)}")
     _echo_problems(catalog.problems)
 
