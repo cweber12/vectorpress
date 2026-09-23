@@ -83,7 +83,50 @@ def test_load_catalog_on_the_clean_fixture_has_no_problems() -> None:
         "ochre_sea_star",
         "purple_sea_urchin",
     ]
+    assert catalog.brand is not None
+    assert catalog.brand.name == "Tide Pool Studio"
     assert catalog.problems == []
+
+
+def test_load_catalog_without_brand_toml_reports_its_absence(catalog_copy: Path) -> None:
+    (catalog_copy / "brand.toml").unlink()
+
+    catalog = load_catalog(catalog_copy)
+
+    assert catalog.config is not None
+    assert [asset.id for asset in catalog.assets] == [
+        "giant_green_anemone",
+        "ochre_sea_star",
+        "purple_sea_urchin",
+    ]
+    assert catalog.brand is None
+    assert len(catalog.problems) == 1
+    assert catalog.problems[0].path == Path("brand.toml")
+
+
+def test_load_catalog_aggregates_brand_problems_alongside_asset_problems(
+    catalog_copy: Path,
+) -> None:
+    asset_path = catalog_copy / "assets" / "ochre_sea_star" / "asset.toml"
+    asset_path.write_text(
+        asset_path.read_text(encoding="utf-8").replace('subject_category = "Echinoderm"\n', ""),
+        encoding="utf-8",
+    )
+    brand_path = catalog_copy / "brand.toml"
+    brand_path.write_text(
+        brand_path.read_text(encoding="utf-8").replace(
+            'mark_file = "mark.png"', 'mark_file = "does_not_exist.png"'
+        ),
+        encoding="utf-8",
+    )
+
+    catalog = load_catalog(catalog_copy)
+
+    assert catalog.brand is None
+    assert len(catalog.problems) == 2
+    paths = {problem.path for problem in catalog.problems}
+    assert Path("assets") / "ochre_sea_star" / "asset.toml" in paths
+    assert Path("brand.toml") in paths
 
 
 def test_load_catalog_with_a_broken_catalog_toml_is_a_problem_not_a_raise(

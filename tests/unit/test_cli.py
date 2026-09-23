@@ -33,6 +33,11 @@ def test_status_from_the_catalog_root_prints_name_and_root(
 def test_status_from_a_subdirectory_walks_up_to_the_catalog_root(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
+    """Locating the root by walking up works even though this catalog has no
+    ``brand.toml`` (that absence is its own problem, asserted elsewhere);
+    the outcome checked here is that the walk-up finds the right root, not
+    that the catalog is otherwise clean.
+    """
     root = tmp_path / "catalog"
     subdir = root / "assets" / "ochre_sea_star"
     subdir.mkdir(parents=True)
@@ -41,7 +46,7 @@ def test_status_from_a_subdirectory_walks_up_to_the_catalog_root(
 
     result = runner.invoke(app, ["status"])
 
-    assert result.exit_code == 0
+    assert "No catalog.toml found" not in result.output
     assert "Tide Pool Studio" in result.stdout
 
 
@@ -89,6 +94,75 @@ def test_status_reports_the_asset_count(monkeypatch: pytest.MonkeyPatch) -> None
 
     assert result.exit_code == 0
     assert "Assets: 3" in result.stdout
+
+
+def test_status_reports_the_asset_count_on_a_partially_broken_catalog(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Deferred from issue #6: the ``Assets: N`` line counts only the assets
+    that loaded, even when one asset's ``asset.toml`` is broken, at the CLI
+    layer end to end (locate, load, render).
+    """
+    root = tmp_path / "catalog"
+    shutil.copytree(FIXTURE_CATALOG_ROOT, root)
+    ochre = root / "assets" / "ochre_sea_star" / "asset.toml"
+    ochre.write_text(
+        ochre.read_text(encoding="utf-8").replace('subject_category = "Echinoderm"\n', ""),
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
+
+    result = runner.invoke(app, ["--catalog", str(root), "status"])
+
+    assert result.exit_code != 0
+    assert "Assets: 2" in result.stdout
+
+
+def test_status_prints_the_brand_name(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.chdir(FIXTURE_CATALOG_ROOT)
+
+    result = runner.invoke(app, ["status"])
+
+    assert result.exit_code == 0
+    assert "Brand: Tide Pool Studio" in result.stdout
+
+
+def test_status_without_brand_toml_reports_its_absence(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    root = tmp_path / "catalog"
+    shutil.copytree(FIXTURE_CATALOG_ROOT, root)
+    (root / "brand.toml").unlink()
+    monkeypatch.chdir(tmp_path)
+
+    result = runner.invoke(app, ["--catalog", str(root), "status"])
+
+    assert result.exit_code != 0
+    assert "Brand: none" in result.stdout
+    assert "brand.toml" in result.stdout
+    assert "not found" in result.stdout
+
+
+def test_status_with_a_bad_brand_names_file_and_field(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    root = tmp_path / "catalog"
+    shutil.copytree(FIXTURE_CATALOG_ROOT, root)
+    brand_path = root / "brand.toml"
+    brand_path.write_text(
+        brand_path.read_text(encoding="utf-8").replace(
+            'mark_file = "mark.png"', 'mark_file = "does_not_exist.png"'
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
+
+    result = runner.invoke(app, ["--catalog", str(root), "status"])
+
+    assert result.exit_code != 0
+    assert "brand.toml" in result.stdout
+    assert "mark_file" in result.stdout
+    assert "does_not_exist.png" in result.stdout
 
 
 def test_status_on_the_clean_fixture_states_there_are_no_problems(
