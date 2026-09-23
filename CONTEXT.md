@@ -1,0 +1,138 @@
+# vectorpress domain context
+
+The vocabulary the code, tests, issues and docs use. When a term here has an
+"avoid" note, do not use the avoided synonym.
+
+## Glossary
+
+**Catalog** — A directory (its own git repo, outside the tool) holding everything for
+one brand: assets, collections, products, brand config, and tool-owned state. Located
+by a root `catalog.toml`. The tool is *pointed at* a catalog; it never lives inside one.
+
+**Asset** — The identity of one design subject (`ochre_sea_star`). Owns metadata,
+rights status and accuracy status. Has one or more source images. Avoid: "design",
+"subject" (in code; "subject" is fine in prose about the artwork).
+
+**Asset ID** — The stable snake_case identifier of an asset, also its folder name.
+Never customer-facing.
+
+**Source image** — A preserved input file under an asset's `sources/`. Each has a
+**role**. Never modified by the tool. Avoid: "master file", "original" (say "source").
+
+**Role** — What kind of artwork a source image is: `silhouette`, `lineart`,
+`flatcolor`, `detailed` (extensible). Recipes select sources by role.
+
+**Derivative** — A generated (or overridden) output file for one asset and one
+**derivative type**. Has status and provenance. Avoid: "variant" (reserved for color
+variants), "output" (ambiguous with build output).
+
+**Derivative type** — One of the standardized outputs: `transparent_png`,
+`silhouette_svg`, `cut_svg`, `flatcolor_svg`, `outline_svg`, `detailed_mono_svg`,
+`layered_svg`. Each has a **recipe**.
+
+**Recipe** — The declaration of how a derivative type is produced: which roles it
+accepts in preference order, the generator, and its parameters. The recipe identity
+(including parameters) is part of provenance.
+
+**Color variant** — A mechanical recolor of a parent derivative (black, white,
+palette). Inherits the parent's status; not separately approved.
+
+**Provenance** — Tool-owned record for a derivative: source hash, recipe identity,
+generator versions, output hash. Content-addressed; no version numbers.
+
+**Stale** — A derivative whose recorded source hash no longer matches the current
+source. An **override** is stale when the source it was edited against has changed.
+
+**Override** — A hand-edited derivative placed under `overrides/`. It is the
+**effective derivative** for that type, is validated and approved like any other, is
+never overwritten, and can be discarded to revert to the generated version.
+
+**Effective derivative** — The file a product actually uses for a given asset and
+derivative type: the override if present, else the generated file.
+
+**Status** — Per (asset, derivative type): `generated`, `needs_review`, `approved`,
+`rejected`, `regenerate`. Lives in tool-owned state.
+
+**Findings** — Structured cut-file quality problems (§9) with locations. A cut file
+resolves to **pass** or **needs review** from its findings.
+
+**Reference size** — The physical size (e.g. 3 in on the longest side) at which
+cut-file thresholds are evaluated. Catalog default; product override; recorded with
+findings.
+
+**Rights status** — Asset-level licensing state (§26). Hand-authored.
+
+**Accuracy status** — Asset-level scientific-accuracy state (§25). Hand-authored.
+
+**Blocked** — An asset excluded from sellable packages by a publication blocking rule
+(§10.1). Distinct from a **warning**, which does not block.
+
+**Eligible** — An asset that, for a given set of derivative types, has every included
+effective derivative approved and is not blocked.
+
+**Collection** — A named membership of assets: explicit list, metadata rule, union of
+other collections, or a mix. Not sellable; has no formats or price.
+
+**Product** — One collection (or an inline one) plus presentation: included derivative
+types, formats, reference size override, listing, price, publication state. The only
+thing that is built. Avoid: "pack", "bundle" (those are **tier** labels).
+
+**Tier** — A label on a product (`individual`, `mini_pack`, `standard_pack`,
+`collection`, `mega_bundle`) used for badges and categories. Not a mechanism.
+
+**Family** — A label grouping related products for shared branding and related-product
+references. Not a mechanism.
+
+**Build** — Producing a product's package, ZIP, previews, listing and exports from
+effective derivatives. Writes a **manifest**.
+
+**Manifest** — Tool-owned record of exactly which assets, derivative types and content
+hashes a build contained, plus reference size and tool version.
+
+**Needs rebuild** — A product whose last manifest no longer matches current effective
+derivatives.
+
+**Package** — The customer-facing directory structure (§14). **ZIP** is the package
+archived.
+
+**Preview** — A marketplace image rendered from an HTML template with brand config.
+Build output; no status.
+
+**Listing** — The authoritative marketing metadata for a product (§18). Drafted once by
+the tool, then user-owned.
+
+**Exporter** — A file-only projection of a listing into a marketplace's shape.
+
+**Publish / Publication snapshot** — A user-declared record that a build was uploaded
+somewhere: timestamp, manifest, free-text references. Freezes membership.
+
+**Frozen** — A published product whose membership no longer follows its collection
+rule automatically.
+
+**Proposed update** — A membership change a rule would make to a frozen product,
+awaiting accept/reject.
+
+**Attention report / Inbox** — The single list of everything needing a human:
+needs-review derivatives, stale overrides, blocked assets, missing derivatives,
+missing metadata, proposed updates, needs-rebuild products. Empty inbox = publishable
+catalog. The CLI and UI show the same one.
+
+## Layers (import direction)
+
+```
+domain  ← catalog  ← pipeline / validate  ← build  ← cli / ui
+```
+
+## Status lifecycle
+
+```
+generated ──► needs_review ──► approved
+                  │               │
+                  ▼               ▼ (source or output changes)
+              rejected        needs_review
+                  │
+                  ▼
+              regenerate ──► (regeneration) ──► generated
+```
+
+Unchanged output on regeneration keeps its status (§22.1).

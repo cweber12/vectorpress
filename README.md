@@ -1,0 +1,25 @@
+# vectorpress
+
+Turn master artwork into organized, reusable SVG and cut-file products and
+marketplace-ready packs. A local, single-user production tool.
+
+- Requirements: [`docs/requirements.md`](docs/requirements.md)
+- Plan, decisions and PRD roadmap: [`docs/PLAN.md`](docs/PLAN.md)
+- Domain vocabulary: [`CONTEXT.md`](CONTEXT.md)
+- Architecture decisions: [`docs/adr/`](docs/adr/)
+
+## Status
+
+Scaffold only. See the PRD roadmap in `docs/PLAN.md` for what comes next.
+
+## Development
+
+```
+uv sync
+uv run pre-commit install
+uv run vpress --version
+uv run pytest
+```
+
+The tool operates on a **catalog directory that lives outside this repo**. A tiny
+fixture catalog under `tests/fixtures/catalog/` exists for tests only.

@@ -1,0 +1,99 @@
+[project]
+name = "vectorpress"
+version = "0.1.0"
+description = "Turn master artwork into organized, reusable SVG/cut-file products and marketplace-ready packs."
+readme = "README.md"
+authors = [{ name = "Cole Weber", email = "cole.d.weber12@gmail.com" }]
+requires-python = ">=3.12"
+dependencies = [
+    "pydantic>=2.11",
+    "typer>=0.16",
+]
+
+[project.scripts]
+vpress = "vectorpress.cli.app:app"
+
+[dependency-groups]
+dev = [
+    "import-linter>=2.3",
+    "pre-commit>=4.2",
+    "pyright>=1.1.400",
+    "pytest>=8.4",
+    "ruff>=0.12",
+    "syrupy>=4.9",
+]
+
+[build-system]
+requires = ["uv_build>=0.12.5,<0.13.0"]
+build-backend = "uv_build"
+
+# ---------------------------------------------------------------------------
+# ruff
+# ---------------------------------------------------------------------------
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = [
+    "E", "W",   # pycodestyle
+    "F",        # pyflakes
+    "I",        # isort
+    "N",        # pep8-naming
+    "UP",       # pyupgrade
+    "B",        # bugbear
+    "SIM",      # simplify
+    "TID",      # tidy imports
+    "RUF",      # ruff-specific
+    "PTH",      # use pathlib
+    "T20",      # no stray print (CLI output goes through typer/rich)
+]
+ignore = ["E501"]  # formatter owns line length
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["T20"]
+"src/vectorpress/cli/**" = ["T20"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["vectorpress"]
+
+# ---------------------------------------------------------------------------
+# pyright
+# ---------------------------------------------------------------------------
+[tool.pyright]
+pythonVersion = "3.12"
+typeCheckingMode = "strict"
+include = ["src", "tests"]
+venvPath = "."
+venv = ".venv"
+
+# ---------------------------------------------------------------------------
+# pytest
+# ---------------------------------------------------------------------------
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra --strict-markers"
+markers = [
+    "integration: end-to-end tests against the fixture catalog",
+]
+
+# ---------------------------------------------------------------------------
+# import-linter — enforces the layering rule from docs/PLAN.md (D18):
+#   domain <- catalog <- pipeline/validate <- build <- cli/ui
+# Nothing imports upward.
+# ---------------------------------------------------------------------------
+[tool.importlinter]
+root_package = "vectorpress"
+
+[[tool.importlinter.contracts]]
+name = "Layered architecture"
+type = "layers"
+# When PRD 9 adds vectorpress.ui, change the top layer to "vectorpress.cli | vectorpress.ui".
+layers = [
+    "vectorpress.cli",
+    "vectorpress.build",
+    "vectorpress.pipeline | vectorpress.validate",
+    "vectorpress.catalog",
+    "vectorpress.domain",
+]
