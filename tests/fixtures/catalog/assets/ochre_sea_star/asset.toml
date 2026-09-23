@@ -1,0 +1,21 @@
+# Hand-authored asset metadata (ADR 0005). The asset ID is this folder's name.
+
+common_name = "Ochre sea star"
+display_name = "Ochre Sea Star"
+scientific_name = "Pisaster ochraceus"
+description = """
+A common Pacific coast sea star found clinging to rocks in the mid to low
+intertidal, ranging in color from orange to brown to deep purple.
+"""
+subject_category = "Echinoderm"
+tags = ["sea star", "tide pool", "rocky intertidal"]
+regions = ["California", "Oregon", "Washington", "Pacific Coast"]
+ecosystems = ["Tide pool", "Rocky intertidal"]
+taxonomic_group = "Echinoderm"
+product_use_categories = ["apparel", "stickers", "wall art"]
+notes = "Reference photos taken at low tide; five-armed color variant."
+
+rights_status = "original_artwork"
+licensing_notes = "Original illustration commissioned for this catalog; no external license required."
+
+accuracy_status = "approved"

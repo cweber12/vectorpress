@@ -1,0 +1,26 @@
+# Hand-authored asset metadata (ADR 0005). The asset ID is this folder's name.
+
+common_name = "Giant green anemone"
+display_name = "Giant Green Anemone"
+scientific_name = "Anthopleura xanthogrammica"
+description = """
+A large, brightly colored anemone found in tide pools and on subtidal rocks
+along the Pacific coast, its color coming from symbiotic algae.
+"""
+subject_category = "Cnidarian"
+tags = ["anemone", "tide pool"]
+regions = ["California", "Oregon", "Washington", "Alaska", "Pacific Coast"]
+ecosystems = ["Tide pool", "Rocky intertidal", "Subtidal"]
+taxonomic_group = "Cnidarian"
+product_use_categories = ["apparel", "wall art"]
+notes = "Tentacle count simplified for the flat-color derivative."
+
+rights_status = "public_domain_source"
+licensing_notes = "Source photo from a public-domain government archive."
+
+accuracy_status = "not_reviewed"
+
+# Source images are not parsed yet (next slice); passed through untouched.
+[[sources]]
+role = "silhouette"
+file = "sources/silhouette.png"

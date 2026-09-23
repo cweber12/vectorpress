@@ -29,7 +29,16 @@ catalog/
     └── <product_id>.toml
 ```
 
-Later slices add, per asset, `derived/` (generated derivatives + `_state.json`) and
-`overrides/` (hand-edited effective derivatives) — see ADR 0005 and ADR 0007.
+Later slices add, per asset, `sources/` (preserved source images), `derived/`
+(generated derivatives + `_state.json`) and `overrides/` (hand-edited effective
+derivatives) — see ADR 0003, ADR 0005 and ADR 0007.
+
+## Assets
+
+Three tide-pool subjects from §30, each with valid metadata:
+
+- `ochre_sea_star`
+- `purple_sea_urchin`
+- `giant_green_anemone`
 
 Populated by PRD 1.

@@ -79,3 +79,40 @@ def test_status_with_malformed_catalog_names_file_and_field(
     assert result.exit_code != 0
     assert str((tmp_path / "catalog.toml").resolve()) in result.output
     assert "reference_size_in" in result.output
+
+
+def test_status_reports_the_asset_count(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.chdir(FIXTURE_CATALOG_ROOT)
+
+    result = runner.invoke(app, ["status"])
+
+    assert result.exit_code == 0
+    assert "3" in result.stdout
+
+
+def test_assets_lists_the_fixture_assets(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.chdir(FIXTURE_CATALOG_ROOT)
+
+    result = runner.invoke(app, ["assets"])
+
+    assert result.exit_code == 0
+    for asset_id, display_name, rights, accuracy in [
+        ("ochre_sea_star", "Ochre Sea Star", "original_artwork", "approved"),
+        ("purple_sea_urchin", "Purple Sea Urchin", "rights_verified", "reviewed"),
+        ("giant_green_anemone", "Giant Green Anemone", "public_domain_source", "not_reviewed"),
+    ]:
+        assert asset_id in result.stdout
+        assert display_name in result.stdout
+        assert rights in result.stdout
+        assert accuracy in result.stdout
+
+
+def test_assets_are_sorted_by_id(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.chdir(FIXTURE_CATALOG_ROOT)
+
+    result = runner.invoke(app, ["assets"])
+
+    assert result.exit_code == 0
+    lines = [line for line in result.stdout.splitlines() if line.strip()]
+    ids = [line.split()[0] for line in lines]
+    assert ids == sorted(ids)
