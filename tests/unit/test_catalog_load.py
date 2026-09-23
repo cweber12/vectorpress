@@ -83,6 +83,10 @@ def test_load_catalog_on_the_clean_fixture_has_no_problems() -> None:
         "ochre_sea_star",
         "purple_sea_urchin",
     ]
+    assert [c.slug for c in catalog.collections] == [
+        "kelp_forest_ecosystem",
+        "pacific_coast_tide_pool",
+    ]
     assert catalog.brand is not None
     assert catalog.brand.name == "Tide Pool Studio"
     assert catalog.problems == []
@@ -139,6 +143,7 @@ def test_load_catalog_with_a_broken_catalog_toml_is_a_problem_not_a_raise(
 
     assert catalog.config is None
     assert catalog.assets == []
+    assert catalog.collections == []
     assert len(catalog.problems) == 1
     problem = catalog.problems[0]
     assert problem.path == Path("catalog.toml")
@@ -159,6 +164,32 @@ def test_load_catalog_aggregates_asset_problems_and_keeps_the_valid_assets(
     assert len(catalog.problems) == 1
     assert "ochre_sea_star" in str(catalog.problems[0].path)
     assert catalog.problems[0].field == "subject_category"
+
+
+def test_load_catalog_aggregates_collection_problems_alongside_asset_problems(
+    catalog_copy: Path,
+) -> None:
+    asset_path = catalog_copy / "assets" / "ochre_sea_star" / "asset.toml"
+    asset_path.write_text(
+        asset_path.read_text(encoding="utf-8").replace('subject_category = "Echinoderm"\n', ""),
+        encoding="utf-8",
+    )
+    collection_path = catalog_copy / "collections" / "pacific_coast_tide_pool.toml"
+    collection_path.write_text(
+        collection_path.read_text(encoding="utf-8").replace(
+            'marketplace_category = "Nature & Wildlife"\n', ""
+        ),
+        encoding="utf-8",
+    )
+
+    catalog = load_catalog(catalog_copy)
+
+    assert len(catalog.problems) == 2
+    paths = {problem.path for problem in catalog.problems}
+    assert Path("assets") / "ochre_sea_star" / "asset.toml" in paths
+    assert Path("collections") / "pacific_coast_tide_pool.toml" in paths
+    loaded_slugs = {c.slug for c in catalog.collections}
+    assert loaded_slugs == {"kelp_forest_ecosystem"}
 
 
 def test_load_catalog_root_is_the_catalog_root_passed_in() -> None:

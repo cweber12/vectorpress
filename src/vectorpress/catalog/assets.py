@@ -14,7 +14,7 @@ from pathlib import Path
 
 from pydantic import ValidationError
 
-from vectorpress.catalog.metadata_problem import MetadataProblem
+from vectorpress.catalog.metadata_problem import MetadataProblem, problems_from_validation_error
 from vectorpress.domain.asset import Asset, AssetId
 from vectorpress.domain.catalog_config import CatalogConfig
 
@@ -101,7 +101,7 @@ def _load_one(
     try:
         asset = Asset.model_validate({**data, "id": asset_id})
     except ValidationError as exc:
-        return None, _problems_from_validation_error(rel_path, exc)
+        return None, problems_from_validation_error(rel_path, exc)
 
     source_problems = _validate_sources(root, asset_dir, rel_path, asset, config)
     if source_problems:
@@ -173,12 +173,4 @@ def _validate_sources(
     if not asset.sources:
         problems.append(MetadataProblem(toml_rel_path, "sources", "asset has no source images"))
 
-    return problems
-
-
-def _problems_from_validation_error(path: Path, exc: ValidationError) -> list[MetadataProblem]:
-    problems: list[MetadataProblem] = []
-    for error in exc.errors():
-        field = ".".join(str(part) for part in error["loc"]) or None
-        problems.append(MetadataProblem(path, field, error["msg"]))
     return problems

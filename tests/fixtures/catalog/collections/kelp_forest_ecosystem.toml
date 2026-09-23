@@ -1,0 +1,16 @@
+# Hand-authored collection metadata (ADR 0005). The collection slug is this
+# file's stem. Rule-based membership: every asset whose ecosystems include
+# "Kelp forest" (ADR 0008). Resolving the rule against loaded assets is
+# PRD 5's job; this file only exercises the shape (issue #5).
+
+name = "Kelp Forest Ecosystem"
+description = """
+Every asset tagged to the kelp forest ecosystem, gathered automatically as
+new matching assets are added to the catalog.
+"""
+tags = ["kelp forest"]
+marketplace_category = "Nature & Wildlife"
+
+[membership.rule]
+field = "ecosystems"
+values = ["Kelp forest"]
