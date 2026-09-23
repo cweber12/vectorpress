@@ -9,6 +9,7 @@ from vectorpress.catalog.assets import (
     duplicate_slug_problems,  # pure helper, tested directly below
     find_asset,
     load_assets,
+    lookup_asset,
 )
 from vectorpress.catalog.load import load_catalog_config
 from vectorpress.domain.asset import AccuracyStatus, RightsStatus, Source
@@ -380,6 +381,97 @@ def test_duplicate_slug_problems_is_empty_for_distinct_asset_ids() -> None:
     )
 
     assert problems == []
+
+
+# --- distinguishing "unknown" from "found but failed to load" (issue #15) --------
+
+
+def test_lookup_asset_returns_the_asset_when_it_loaded() -> None:
+    config = load_catalog_config(FIXTURE_CATALOG_ROOT)
+    inventory = load_assets(FIXTURE_CATALOG_ROOT, config)
+
+    result = lookup_asset(inventory, config, "ochre_sea_star")
+
+    assert result.asset is not None
+    assert result.asset.id == "ochre_sea_star"
+    assert result.problems == []
+
+
+def test_lookup_asset_is_empty_for_a_genuinely_unknown_id() -> None:
+    config = load_catalog_config(FIXTURE_CATALOG_ROOT)
+    inventory = load_assets(FIXTURE_CATALOG_ROOT, config)
+
+    result = lookup_asset(inventory, config, "not_a_real_asset")
+
+    assert result.asset is None
+    assert result.problems == []
+
+
+def test_lookup_asset_reports_problems_for_a_toml_syntax_error(catalog_copy: Path) -> None:
+    path = _asset_toml(catalog_copy, "purple_sea_urchin")
+    path.write_text('common_name = "unterminated\n', encoding="utf-8")
+    config = load_catalog_config(catalog_copy)
+    inventory = load_assets(catalog_copy, config)
+
+    result = lookup_asset(inventory, config, "purple_sea_urchin")
+
+    assert result.asset is None
+    assert len(result.problems) == 1
+    assert "purple_sea_urchin" in str(result.problems[0].path)
+    assert "asset.toml" in str(result.problems[0].path)
+
+
+def test_lookup_asset_reports_problems_for_a_missing_required_field(catalog_copy: Path) -> None:
+    path = _asset_toml(catalog_copy, "ochre_sea_star")
+    text = path.read_text(encoding="utf-8").replace('subject_category = "Echinoderm"\n', "")
+    path.write_text(text, encoding="utf-8")
+    config = load_catalog_config(catalog_copy)
+    inventory = load_assets(catalog_copy, config)
+
+    result = lookup_asset(inventory, config, "ochre_sea_star")
+
+    assert result.asset is None
+    assert len(result.problems) == 1
+    assert result.problems[0].field == "subject_category"
+
+
+def test_lookup_asset_reports_problems_for_a_missing_declared_source_file(
+    catalog_copy: Path,
+) -> None:
+    asset_dir = catalog_copy / "assets" / "purple_sea_urchin"
+    (asset_dir / "sources" / "silhouette.png").unlink()  # leave nothing undeclared behind
+    path = asset_dir / "asset.toml"
+    text = path.read_text(encoding="utf-8").replace(
+        'file = "silhouette.png"', 'file = "missing.png"'
+    )
+    path.write_text(text, encoding="utf-8")
+    config = load_catalog_config(catalog_copy)
+    inventory = load_assets(catalog_copy, config)
+
+    result = lookup_asset(inventory, config, "purple_sea_urchin")
+
+    assert result.asset is None
+    assert len(result.problems) == 1
+    assert result.problems[0].field == "sources[0].file"
+    assert "missing.png" in result.problems[0].message
+
+
+def test_lookup_asset_does_not_leak_another_assets_problems(catalog_copy: Path) -> None:
+    """A problem tied to a different asset folder is not attributed to the
+    one being looked up (guards the folder-prefix match against, e.g.,
+    ``ochre_sea_star`` matching a problem path under
+    ``ochre_sea_star_backup/``).
+    """
+    path = _asset_toml(catalog_copy, "ochre_sea_star")
+    text = path.read_text(encoding="utf-8").replace('subject_category = "Echinoderm"\n', "")
+    path.write_text(text, encoding="utf-8")
+    config = load_catalog_config(catalog_copy)
+    inventory = load_assets(catalog_copy, config)
+
+    result = lookup_asset(inventory, config, "purple_sea_urchin")
+
+    assert result.asset is not None
+    assert result.problems == []
 
 
 def test_load_assets_excludes_duplicate_id_folders_from_assets(

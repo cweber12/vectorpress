@@ -53,6 +53,47 @@ def find_asset(inventory: AssetInventory, asset_id: AssetId) -> Asset | None:
     return next((asset for asset in inventory.assets if asset.id == asset_id), None)
 
 
+@dataclass(frozen=True)
+class AssetLookup:
+    """The result of resolving one asset ID against a loaded inventory.
+
+    Three outcomes, told apart here rather than in ``cli`` (ADR 0006):
+    the asset loaded (``asset`` set, ``problems`` empty); no folder with
+    that ID exists at all (both empty — genuinely unknown); or a folder
+    with that ID exists but its ``asset.toml`` failed to load (``asset``
+    is ``None``, ``problems`` non-empty; issue #15).
+    """
+
+    asset: Asset | None
+    problems: list[MetadataProblem]
+
+
+def lookup_asset(
+    inventory: AssetInventory, config: CatalogConfig, asset_id: AssetId
+) -> AssetLookup:
+    """Resolve one asset ID, distinguishing "no such folder" from "folder
+    exists but failed to load" (issue #15).
+
+    A problem is attributed to this asset's folder when its ``path``
+    (relative to the catalog root, per ``MetadataProblem``) falls under
+    ``<assets_dir>/<asset_id>/`` — the folder ``load_assets`` would have
+    read this asset from, whether the failure was a TOML syntax error, a
+    schema problem, a source problem, or a duplicate-ID collision. That is
+    enough to attribute correctly without touching the filesystem again.
+    """
+    asset = find_asset(inventory, asset_id)
+    if asset is not None:
+        return AssetLookup(asset=asset, problems=[])
+
+    folder = Path(config.assets_dir) / asset_id
+    problems = [
+        problem
+        for problem in inventory.problems
+        if problem.path == folder or folder in problem.path.parents
+    ]
+    return AssetLookup(asset=None, problems=problems)
+
+
 def load_assets(root: Path, config: CatalogConfig) -> AssetInventory:
     """Load and validate every ``asset.toml`` under the catalog's assets directory.
 
