@@ -332,6 +332,81 @@ def test_asset_with_unknown_id_exits_non_zero_and_names_the_id(
 
     assert result.exit_code != 0
     assert "not_a_real_asset" in result.output
+    assert "Unknown asset" in result.output
+    assert ".toml" not in result.output  # does not claim a file exists
+
+
+def test_asset_with_toml_syntax_error_names_the_file_and_the_problem(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Acceptance criterion 1 (issue #15): a malformed ``asset.toml`` (syntax
+    error) is reported by ``vpress asset <id>`` naming the file and the
+    problem, not ``Unknown asset``.
+    """
+    root = tmp_path / "catalog"
+    shutil.copytree(FIXTURE_CATALOG_ROOT, root)
+    urchin = root / "assets" / "purple_sea_urchin" / "asset.toml"
+    urchin.write_text('common_name = "unterminated\n', encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    result = runner.invoke(app, ["--catalog", str(root), "asset", "purple_sea_urchin"])
+
+    assert result.exit_code != 0
+    assert "Unknown asset" not in result.output
+    assert str(Path("assets") / "purple_sea_urchin" / "asset.toml") in result.output
+    assert "TOML syntax error" in result.output
+
+
+def test_asset_with_missing_required_field_lists_the_problem_with_file_and_field(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Acceptance criterion 2 (issue #15), schema-problem half: a missing
+    required field is reported with file and field, same rendering as
+    ``vpress status``.
+    """
+    root = tmp_path / "catalog"
+    shutil.copytree(FIXTURE_CATALOG_ROOT, root)
+    ochre = root / "assets" / "ochre_sea_star" / "asset.toml"
+    ochre.write_text(
+        ochre.read_text(encoding="utf-8").replace('subject_category = "Echinoderm"\n', ""),
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
+
+    result = runner.invoke(app, ["--catalog", str(root), "asset", "ochre_sea_star"])
+
+    assert result.exit_code != 0
+    assert "Unknown asset" not in result.output
+    assert str(Path("assets") / "ochre_sea_star" / "asset.toml") in result.output
+    assert "subject_category" in result.output
+
+
+def test_asset_with_missing_source_file_lists_the_problem_with_file_and_field(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Acceptance criterion 2 (issue #15), source-problem half: a declared
+    source file that is missing is reported with file and field.
+    """
+    root = tmp_path / "catalog"
+    shutil.copytree(FIXTURE_CATALOG_ROOT, root)
+    asset_dir = root / "assets" / "purple_sea_urchin"
+    (asset_dir / "sources" / "silhouette.png").unlink()  # leave nothing undeclared behind
+    urchin = asset_dir / "asset.toml"
+    urchin.write_text(
+        urchin.read_text(encoding="utf-8").replace(
+            'file = "silhouette.png"', 'file = "missing.png"'
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
+
+    result = runner.invoke(app, ["--catalog", str(root), "asset", "purple_sea_urchin"])
+
+    assert result.exit_code != 0
+    assert "Unknown asset" not in result.output
+    assert str(Path("assets") / "purple_sea_urchin" / "asset.toml") in result.output
+    assert "sources[0].file" in result.output
+    assert "missing.png" in result.output
 
 
 def test_collections_lists_both_fixture_collections_with_slug_name_and_form(

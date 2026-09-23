@@ -9,7 +9,7 @@ from pathlib import Path
 import typer
 
 from vectorpress import __version__
-from vectorpress.catalog.assets import find_asset, load_assets
+from vectorpress.catalog.assets import load_assets, lookup_asset
 from vectorpress.catalog.collections import load_collections
 from vectorpress.catalog.errors import CatalogConfigError, CatalogNotFoundError
 from vectorpress.catalog.load import load_catalog, load_catalog_config
@@ -148,15 +148,26 @@ def asset(
     ctx: typer.Context,
     asset_id: str = typer.Argument(help="The asset's ID (its folder name under assets/)."),
 ) -> None:
-    """Show one asset in full: metadata, statuses, and every source with its role."""
+    """Show one asset in full: metadata, statuses, and every source with its role.
+
+    An ID naming a folder whose ``asset.toml`` failed to load is not the
+    same as an ID naming no folder at all (issue #15): the former prints
+    that asset's problems (same rendering as ``vpress status``), the latter
+    prints "Unknown asset". ``catalog.assets.lookup_asset`` tells the two
+    apart; this only formats whichever it returns.
+    """
     root, config = _locate_and_load_config(ctx)
     inventory = load_assets(root, config)
 
-    found = find_asset(inventory, asset_id)
-    if found is None:
-        typer.echo(f"Unknown asset: {asset_id!r}", err=True)
+    result = lookup_asset(inventory, config, asset_id)
+    if result.asset is None:
+        if result.problems:
+            _echo_problems(result.problems)
+        else:
+            typer.echo(f"Unknown asset: {asset_id!r}", err=True)
         raise typer.Exit(code=1)
 
+    found = result.asset
     typer.echo(f"{found.id}\t{found.display_name}")
     typer.echo(f"Rights status: {found.rights_status.value}")
     typer.echo(f"Accuracy status: {found.accuracy_status.value}")
