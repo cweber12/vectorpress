@@ -58,6 +58,11 @@ ignore = ["E501"]  # formatter owns line length
 [tool.ruff.lint.isort]
 known-first-party = ["vectorpress"]
 
+[tool.ruff.lint.flake8-bugbear]
+# typer's option/argument pattern relies on calling these in defaults; the
+# returned object is a click Option/Argument spec, not shared mutable state.
+extend-immutable-calls = ["typer.Option", "typer.Argument"]
+
 # ---------------------------------------------------------------------------
 # pyright
 # ---------------------------------------------------------------------------
