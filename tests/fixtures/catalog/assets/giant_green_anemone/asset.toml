@@ -20,7 +20,7 @@ licensing_notes = "Source photo from a public-domain government archive."
 
 accuracy_status = "not_reviewed"
 
-# Source images are not parsed yet (next slice); passed through untouched.
+# Source images: file is relative to this asset's sources/ directory (ADR 0003).
 [[sources]]
 role = "silhouette"
-file = "sources/silhouette.png"
+file = "silhouette.png"

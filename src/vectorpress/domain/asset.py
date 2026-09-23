@@ -6,7 +6,6 @@ is the ``catalog`` layer's job.
 """
 
 from enum import StrEnum
-from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -35,6 +34,22 @@ class AccuracyStatus(StrEnum):
     ISSUE_FOUND = "issue_found"
 
 
+class Source(BaseModel):
+    """One preserved source image and its role (ADR 0003, CONTEXT.md).
+
+    ``file`` names a file relative to the asset's ``sources/`` directory,
+    never modified by the tool (§21). ``role`` is one of the built-in
+    roles or one a catalog adds via ``catalog.toml``'s ``extra_roles``;
+    checking that is the ``catalog`` layer's job, since this module has no
+    catalog awareness (ADR 0006) and is validated as a plain string here.
+    """
+
+    model_config = ConfigDict(strict=True, extra="forbid", frozen=True)
+
+    role: str
+    file: str
+
+
 class Asset(BaseModel):
     """One asset's hand-authored metadata (``asset.toml``).
 
@@ -44,8 +59,10 @@ class Asset(BaseModel):
     that an ``id`` key present in the file agrees with the folder before
     constructing this model.
 
-    Source images are not parsed yet: ``sources`` is passed through
-    untouched, one raw table per ``[[sources]]`` entry.
+    ``sources`` is one entry per ``[[sources]]`` table; validating each
+    source's role and file against the filesystem and the catalog's
+    accepted roles is the ``catalog`` layer's job (this module has no
+    catalog or filesystem awareness, per ADR 0006).
     """
 
     model_config = ConfigDict(strict=True, extra="forbid", frozen=True)
@@ -67,4 +84,4 @@ class Asset(BaseModel):
     rights_status: RightsStatus = Field(strict=False)
     licensing_notes: str = ""
     accuracy_status: AccuracyStatus = Field(strict=False)
-    sources: list[dict[str, Any]] = Field(default_factory=lambda: [])
+    sources: list[Source] = Field(default_factory=lambda: [])

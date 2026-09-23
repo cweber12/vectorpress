@@ -22,23 +22,24 @@ catalog/
 ├── assets/                # name configurable via catalog.toml's assets_dir
 │   └── <asset_id>/        # one folder per asset, named by asset ID
 │       ├── asset.toml      # hand-authored asset metadata
-│       └── sources/        # preserved source images, never modified (ADR 0002)
+│       └── sources/        # preserved source images, never modified (ADR 0003, ADR 0007)
 ├── collections/            # name configurable via catalog.toml's collections_dir
 │   └── <collection_id>.toml
 └── products/                # name configurable via catalog.toml's products_dir
     └── <product_id>.toml
 ```
 
-Later slices add, per asset, `sources/` (preserved source images), `derived/`
-(generated derivatives + `_state.json`) and `overrides/` (hand-edited effective
-derivatives) — see ADR 0003, ADR 0005 and ADR 0007.
+Later slices add, per asset, `derived/` (generated derivatives + `_state.json`) and
+`overrides/` (hand-edited effective derivatives) — see ADR 0005 and ADR 0007.
 
 ## Assets
 
-Three tide-pool subjects from §30, each with valid metadata:
+Three tide-pool subjects from §30, each with valid metadata and one or more source
+images tagged with a role (§4.1, ADR 0003):
 
-- `ochre_sea_star`
-- `purple_sea_urchin`
-- `giant_green_anemone`
+- `ochre_sea_star` — `silhouette` and `lineart` sources
+- `purple_sea_urchin` — a `silhouette` source
+- `giant_green_anemone` — a `silhouette` source
 
-Populated by PRD 1.
+Populated by PRD 1. Source PNGs are tiny, solid-color and regenerated with
+`uv run python tests/fixtures/catalog/generate_source_pngs.py`.

@@ -3,7 +3,7 @@
 import pytest
 from pydantic import ValidationError
 
-from vectorpress.domain.asset import AccuracyStatus, Asset, RightsStatus
+from vectorpress.domain.asset import AccuracyStatus, Asset, RightsStatus, Source
 
 VALID_DATA = {
     "id": "ochre_sea_star",
@@ -41,15 +41,25 @@ def test_scientific_name_is_optional() -> None:
     assert asset.scientific_name is None
 
 
-def test_sources_list_is_passed_through_untouched() -> None:
+def test_sources_parse_into_typed_source_entries() -> None:
     data = {
         **VALID_DATA,
-        "sources": [{"role": "silhouette", "file": "sources/silhouette.png"}],
+        "sources": [{"role": "silhouette", "file": "silhouette.png"}],
     }
 
     asset = Asset.model_validate(data)
 
-    assert asset.sources == [{"role": "silhouette", "file": "sources/silhouette.png"}]
+    assert asset.sources == [Source(role="silhouette", file="silhouette.png")]
+
+
+def test_source_rejects_an_unknown_key() -> None:
+    with pytest.raises(ValidationError):
+        Source.model_validate({"role": "silhouette", "file": "silhouette.png", "extra": True})
+
+
+def test_source_requires_role_and_file() -> None:
+    with pytest.raises(ValidationError):
+        Source.model_validate({"role": "silhouette"})
 
 
 def test_unknown_key_is_rejected() -> None:

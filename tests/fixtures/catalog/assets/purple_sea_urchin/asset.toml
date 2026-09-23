@@ -19,3 +19,8 @@ rights_status = "rights_verified"
 licensing_notes = "Reference photo licensed for commercial use; license on file."
 
 accuracy_status = "reviewed"
+
+# Source images: file is relative to this asset's sources/ directory (ADR 0003).
+[[sources]]
+role = "silhouette"
+file = "silhouette.png"
