@@ -19,3 +19,12 @@ rights_status = "original_artwork"
 licensing_notes = "Original illustration commissioned for this catalog; no external license required."
 
 accuracy_status = "approved"
+
+# Source images: file is relative to this asset's sources/ directory (ADR 0003).
+[[sources]]
+role = "silhouette"
+file = "silhouette.png"
+
+[[sources]]
+role = "lineart"
+file = "lineart.png"

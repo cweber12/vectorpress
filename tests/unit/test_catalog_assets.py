@@ -5,9 +5,9 @@ from pathlib import Path
 
 import pytest
 
-from vectorpress.catalog.assets import load_assets
+from vectorpress.catalog.assets import find_asset, load_assets
 from vectorpress.catalog.load import load_catalog_config
-from vectorpress.domain.asset import AccuracyStatus, RightsStatus
+from vectorpress.domain.asset import AccuracyStatus, RightsStatus, Source
 
 FIXTURE_CATALOG_ROOT = Path(__file__).parents[1] / "fixtures" / "catalog"
 
@@ -57,13 +57,22 @@ def test_loaded_asset_carries_rights_and_accuracy_status() -> None:
     assert ochre.accuracy_status is AccuracyStatus.APPROVED
 
 
-def test_sources_list_passes_through_untouched() -> None:
+def test_sources_parse_with_role_and_file() -> None:
     config = load_catalog_config(FIXTURE_CATALOG_ROOT)
 
     inventory = load_assets(FIXTURE_CATALOG_ROOT, config)
 
     anemone = next(a for a in inventory.assets if a.id == "giant_green_anemone")
-    assert anemone.sources == [{"role": "silhouette", "file": "sources/silhouette.png"}]
+    assert anemone.sources == [Source(role="silhouette", file="silhouette.png")]
+
+
+def test_asset_with_two_roles_loads_both_sources() -> None:
+    config = load_catalog_config(FIXTURE_CATALOG_ROOT)
+
+    inventory = load_assets(FIXTURE_CATALOG_ROOT, config)
+
+    ochre = next(a for a in inventory.assets if a.id == "ochre_sea_star")
+    assert {source.role for source in ochre.sources} == {"silhouette", "lineart"}
 
 
 def test_missing_required_field_is_a_problem_and_other_assets_still_load(
@@ -88,7 +97,13 @@ def test_missing_required_field_is_a_problem_and_other_assets_still_load(
 
 def test_unknown_key_is_a_problem_naming_file_and_field(catalog_copy: Path) -> None:
     path = _asset_toml(catalog_copy, "purple_sea_urchin")
-    path.write_text(path.read_text(encoding="utf-8") + "\nnot_a_field = true\n", encoding="utf-8")
+    # Inserted before any [[sources]] table: a bare key after one would be
+    # parsed as belonging to that table, not to the asset itself.
+    text = path.read_text(encoding="utf-8").replace(
+        'accuracy_status = "reviewed"',
+        'accuracy_status = "reviewed"\nnot_a_field = true',
+    )
+    path.write_text(text, encoding="utf-8")
     config = load_catalog_config(catalog_copy)
 
     inventory = load_assets(catalog_copy, config)
@@ -184,3 +199,137 @@ def test_committed_fixture_catalog_is_unmodified_by_mutating_tests() -> None:
 
     assert len(inventory.assets) == 3
     assert inventory.problems == []
+
+
+# --- source validation (issue #4) -------------------------------------------------
+
+
+def test_unknown_role_is_a_problem_naming_the_source(catalog_copy: Path) -> None:
+    path = _asset_toml(catalog_copy, "purple_sea_urchin")
+    text = path.read_text(encoding="utf-8").replace(
+        'role = "silhouette"', 'role = "not_a_real_role"'
+    )
+    path.write_text(text, encoding="utf-8")
+    config = load_catalog_config(catalog_copy)
+
+    inventory = load_assets(catalog_copy, config)
+
+    ids = {asset.id for asset in inventory.assets}
+    assert "purple_sea_urchin" not in ids
+    assert len(inventory.assets) == 2
+    assert len(inventory.problems) == 1
+    problem = inventory.problems[0]
+    assert problem.field == "sources[0].role"
+    assert "not_a_real_role" in problem.message
+    assert "silhouette.png" in problem.message
+
+
+def test_declared_missing_file_is_a_problem_naming_the_file(catalog_copy: Path) -> None:
+    asset_dir = catalog_copy / "assets" / "purple_sea_urchin"
+    (asset_dir / "sources" / "silhouette.png").unlink()  # leave nothing undeclared behind
+    path = asset_dir / "asset.toml"
+    text = path.read_text(encoding="utf-8").replace(
+        'file = "silhouette.png"', 'file = "missing.png"'
+    )
+    path.write_text(text, encoding="utf-8")
+    config = load_catalog_config(catalog_copy)
+
+    inventory = load_assets(catalog_copy, config)
+
+    ids = {asset.id for asset in inventory.assets}
+    assert "purple_sea_urchin" not in ids
+    assert len(inventory.assets) == 2
+    assert len(inventory.problems) == 1
+    problem = inventory.problems[0]
+    assert problem.field == "sources[0].file"
+    assert "missing.png" in problem.message
+
+
+def test_undeclared_file_in_sources_is_a_problem_naming_the_file(catalog_copy: Path) -> None:
+    sources_dir = catalog_copy / "assets" / "purple_sea_urchin" / "sources"
+    (sources_dir / "detailed.png").write_bytes(b"not a real png, contents unchecked")
+    config = load_catalog_config(catalog_copy)
+
+    inventory = load_assets(catalog_copy, config)
+
+    ids = {asset.id for asset in inventory.assets}
+    assert "purple_sea_urchin" not in ids
+    assert len(inventory.assets) == 2
+    assert len(inventory.problems) == 1
+    problem = inventory.problems[0]
+    assert "detailed.png" in str(problem.path)
+
+
+def test_duplicate_source_declaration_is_a_problem_naming_the_file(catalog_copy: Path) -> None:
+    path = _asset_toml(catalog_copy, "purple_sea_urchin")
+    text = path.read_text(encoding="utf-8")
+    text += '\n[[sources]]\nrole = "silhouette"\nfile = "silhouette.png"\n'
+    path.write_text(text, encoding="utf-8")
+    config = load_catalog_config(catalog_copy)
+
+    inventory = load_assets(catalog_copy, config)
+
+    ids = {asset.id for asset in inventory.assets}
+    assert "purple_sea_urchin" not in ids
+    assert len(inventory.assets) == 2
+    assert len(inventory.problems) == 1
+    problem = inventory.problems[0]
+    assert "silhouette.png" in problem.message
+
+
+def test_asset_with_no_sources_is_a_problem(catalog_copy: Path) -> None:
+    asset_dir = catalog_copy / "assets" / "purple_sea_urchin"
+    (asset_dir / "sources" / "silhouette.png").unlink()  # leave nothing undeclared behind
+    path = asset_dir / "asset.toml"
+    text = path.read_text(encoding="utf-8")
+    text = text[: text.index("# Source images:")]
+    path.write_text(text, encoding="utf-8")
+    config = load_catalog_config(catalog_copy)
+
+    inventory = load_assets(catalog_copy, config)
+
+    ids = {asset.id for asset in inventory.assets}
+    assert "purple_sea_urchin" not in ids
+    assert len(inventory.assets) == 2
+    assert len(inventory.problems) == 1
+    problem = inventory.problems[0]
+    assert problem.field == "sources"
+    assert "no source images" in problem.message
+
+
+def test_catalog_declared_extra_role_is_accepted(catalog_copy: Path) -> None:
+    catalog_toml = catalog_copy / "catalog.toml"
+    catalog_toml.write_text(
+        catalog_toml.read_text(encoding="utf-8") + '\nextra_roles = ["reference_photo"]\n',
+        encoding="utf-8",
+    )
+    asset_dir = catalog_copy / "assets" / "purple_sea_urchin"
+    (asset_dir / "sources" / "reference.png").write_bytes(b"stand-in bytes, unchecked")
+    path = asset_dir / "asset.toml"
+    text = path.read_text(encoding="utf-8")
+    text += '\n[[sources]]\nrole = "reference_photo"\nfile = "reference.png"\n'
+    path.write_text(text, encoding="utf-8")
+    config = load_catalog_config(catalog_copy)
+
+    inventory = load_assets(catalog_copy, config)
+
+    assert inventory.problems == []
+    urchin = next(a for a in inventory.assets if a.id == "purple_sea_urchin")
+    assert "reference_photo" in {source.role for source in urchin.sources}
+
+
+def test_find_asset_returns_the_matching_loaded_asset() -> None:
+    config = load_catalog_config(FIXTURE_CATALOG_ROOT)
+    inventory = load_assets(FIXTURE_CATALOG_ROOT, config)
+
+    found = find_asset(inventory, "ochre_sea_star")
+
+    assert found is not None
+    assert found.id == "ochre_sea_star"
+
+
+def test_find_asset_returns_none_for_an_unknown_id() -> None:
+    config = load_catalog_config(FIXTURE_CATALOG_ROOT)
+    inventory = load_assets(FIXTURE_CATALOG_ROOT, config)
+
+    assert find_asset(inventory, "not_a_real_asset") is None

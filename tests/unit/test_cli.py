@@ -116,3 +116,44 @@ def test_assets_are_sorted_by_id(monkeypatch: pytest.MonkeyPatch) -> None:
     lines = [line for line in result.stdout.splitlines() if line.strip()]
     ids = [line.split()[0] for line in lines]
     assert ids == sorted(ids)
+
+
+def test_assets_reports_a_source_count_per_asset(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.chdir(FIXTURE_CATALOG_ROOT)
+
+    result = runner.invoke(app, ["assets"])
+
+    assert result.exit_code == 0
+    lines = {line.split("\t")[0]: line for line in result.stdout.splitlines() if line.strip()}
+    assert lines["ochre_sea_star"].split("\t")[-1] == "2"
+    assert lines["purple_sea_urchin"].split("\t")[-1] == "1"
+    assert lines["giant_green_anemone"].split("\t")[-1] == "1"
+
+
+def test_asset_shows_id_display_name_statuses_and_sources(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.chdir(FIXTURE_CATALOG_ROOT)
+
+    result = runner.invoke(app, ["asset", "ochre_sea_star"])
+
+    assert result.exit_code == 0
+    assert "ochre_sea_star" in result.stdout
+    assert "Ochre Sea Star" in result.stdout
+    assert "original_artwork" in result.stdout
+    assert "approved" in result.stdout
+    assert "silhouette.png" in result.stdout
+    assert "silhouette" in result.stdout
+    assert "lineart.png" in result.stdout
+    assert "lineart" in result.stdout
+
+
+def test_asset_with_unknown_id_exits_non_zero_and_names_the_id(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.chdir(FIXTURE_CATALOG_ROOT)
+
+    result = runner.invoke(app, ["asset", "not_a_real_asset"])
+
+    assert result.exit_code != 0
+    assert "not_a_real_asset" in result.output

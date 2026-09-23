@@ -9,7 +9,7 @@ from pathlib import Path
 import typer
 
 from vectorpress import __version__
-from vectorpress.catalog.assets import load_assets
+from vectorpress.catalog.assets import find_asset, load_assets
 from vectorpress.catalog.errors import CatalogConfigError, CatalogNotFoundError
 from vectorpress.catalog.load import load_catalog_config
 from vectorpress.catalog.locate import locate_catalog_root
@@ -83,15 +83,38 @@ def status(ctx: typer.Context) -> None:
 
 @app.command()
 def assets(ctx: typer.Context) -> None:
-    """List every loaded asset: ID, display name, rights status, accuracy status."""
+    """List every loaded asset: ID, display name, statuses, and source count."""
     root, config = _locate_and_load_config(ctx)
     inventory = load_assets(root, config)
 
-    for asset in inventory.assets:
+    for loaded in inventory.assets:
         typer.echo(
-            f"{asset.id}\t{asset.display_name}\t"
-            f"{asset.rights_status.value}\t{asset.accuracy_status.value}"
+            f"{loaded.id}\t{loaded.display_name}\t"
+            f"{loaded.rights_status.value}\t{loaded.accuracy_status.value}\t"
+            f"{len(loaded.sources)}"
         )
 
     for problem in inventory.problems:
         typer.echo(str(problem), err=True)
+
+
+@app.command()
+def asset(
+    ctx: typer.Context,
+    asset_id: str = typer.Argument(help="The asset's ID (its folder name under assets/)."),
+) -> None:
+    """Show one asset in full: metadata, statuses, and every source with its role."""
+    root, config = _locate_and_load_config(ctx)
+    inventory = load_assets(root, config)
+
+    found = find_asset(inventory, asset_id)
+    if found is None:
+        typer.echo(f"Unknown asset: {asset_id!r}", err=True)
+        raise typer.Exit(code=1)
+
+    typer.echo(f"{found.id}\t{found.display_name}")
+    typer.echo(f"Rights status: {found.rights_status.value}")
+    typer.echo(f"Accuracy status: {found.accuracy_status.value}")
+    typer.echo("Sources:")
+    for source in found.sources:
+        typer.echo(f"  {source.file}\t{source.role}")
