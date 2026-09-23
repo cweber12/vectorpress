@@ -209,20 +209,27 @@ def test_load_catalog_problem_messages_never_carry_pydantics_value_error_prefix(
     can call "the field", and whatever the field, pydantic prefixes a raised
     exception's message with "Value error, " (or, for an ``assert``,
     "Assertion failed, "). Neither should ever reach a rendered
-    ``MetadataProblem``, across every hand-authored-file loader: this breaks
-    an asset, the brand, a collection and a product in the same load and
-    checks all four.
+    ``MetadataProblem``, across every hand-authored-file loader that shares
+    ``problems_from_validation_error``: this breaks an asset, the brand, a
+    collection and a product, each in a way that actually raises a pydantic
+    ``ValidationError`` out of that loader's ``model_validate`` call (not a
+    catalog-layer check like ``brand``'s mark-file-exists, which never goes
+    through ``problems_from_validation_error`` and so proves nothing here),
+    and confirms all four problems are present before checking every
+    message.
     """
     asset_path = catalog_copy / "assets" / "ochre_sea_star" / "asset.toml"
     asset_path.write_text(
         asset_path.read_text(encoding="utf-8").replace('subject_category = "Echinoderm"\n', ""),
         encoding="utf-8",
     )
+    # Brand: drop a required field so Brand.model_validate itself fails
+    # (as opposed to load_brand's separate, hand-built mark-file-exists
+    # check, which was never pydantic-wrapped and so never exercises
+    # problems_from_validation_error).
     brand_path = catalog_copy / "brand.toml"
     brand_path.write_text(
-        brand_path.read_text(encoding="utf-8").replace(
-            'mark_file = "mark.png"', 'mark_file = "does_not_exist.png"'
-        ),
+        brand_path.read_text(encoding="utf-8").replace('name = "Tide Pool Studio"\n', ""),
         encoding="utf-8",
     )
     # Collection: an emptied-out [membership] table (model-level check).
@@ -245,7 +252,16 @@ def test_load_catalog_problem_messages_never_carry_pydantics_value_error_prefix(
 
     catalog = load_catalog(catalog_copy)
 
+    # Pin exactly which file each problem came from, so a loader whose
+    # break silently failed to produce a problem (as brand's did before
+    # this test was fixed) cannot pass this test vacuously.
+    problems_by_path = {problem.path: problem for problem in catalog.problems}
     assert len(catalog.problems) == 4
+    assert Path("assets") / "ochre_sea_star" / "asset.toml" in problems_by_path
+    assert Path("brand.toml") in problems_by_path
+    assert Path("collections") / "kelp_forest_ecosystem.toml" in problems_by_path
+    assert Path("products") / "pacific_coast_tide_pool_standard_pack.toml" in problems_by_path
+    assert catalog.brand is None
     for problem in catalog.problems:
         assert not problem.message.startswith("Value error,"), problem
         assert not problem.message.startswith("Assertion failed,"), problem
