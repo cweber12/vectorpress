@@ -4,7 +4,8 @@ An asset is any folder under ``assets_dir`` that contains an ``asset.toml``
 (CONTEXT.md); the folder name is its asset ID. Each file is validated
 independently: one that fails becomes a ``MetadataProblem`` instead of
 raising, so the rest of the catalog still loads (§35). Validation also
-checks declared sources against the asset's ``sources/`` directory
+checks declared sources against the asset's ``sources/`` directory, and any
+``[derivatives.<type>]`` pin against those sources and the domain's recipes
 (§4.1, §21, ADR 0003).
 """
 
@@ -21,6 +22,7 @@ from vectorpress.catalog.metadata_problem import (
 )
 from vectorpress.domain.asset import Asset, AssetId
 from vectorpress.domain.catalog_config import CatalogConfig
+from vectorpress.domain.recipe import recipe_for
 
 ASSET_CONFIG_FILENAME = "asset.toml"
 SOURCES_DIRNAME = "sources"
@@ -33,7 +35,9 @@ class AssetInventory:
     ``assets`` excludes any folder whose ``asset.toml`` failed schema
     validation, or whose declared sources produced a problem (unknown
     role, missing or undeclared file, duplicate declaration, zero
-    sources), or whose folder name shares an asset ID with another folder
+    sources), or whose ``[derivatives.<type>]`` pin produced a problem
+    (undeclared file, unaccepted role, or a type with no recipe), or whose
+    folder name shares an asset ID with another folder
     (case-insensitively — Windows and macOS filesystems disagree with
     Linux on whether ``Sea_Otter/`` and ``sea_otter/`` can coexist, so
     this check normalises rather than comparing exact case, same as
@@ -172,9 +176,12 @@ def _load_one(
     except ValidationError as exc:
         return None, problems_from_validation_error(rel_path, exc)
 
-    source_problems = _validate_sources(root, asset_dir, rel_path, asset, config)
-    if source_problems:
-        return None, source_problems
+    problems = [
+        *_validate_sources(root, asset_dir, rel_path, asset, config),
+        *_validate_derivatives(rel_path, asset),
+    ]
+    if problems:
+        return None, problems
 
     return asset, []
 
@@ -241,5 +248,50 @@ def _validate_sources(
 
     if not asset.sources:
         problems.append(MetadataProblem(toml_rel_path, "sources", "asset has no source images"))
+
+    return problems
+
+
+def _validate_derivatives(toml_rel_path: Path, asset: Asset) -> list[MetadataProblem]:
+    """Check every ``[derivatives.<type>]`` pin against the asset's declared
+    sources and the domain's recipes (ADR 0003, issue #22).
+
+    A pin naming a file not declared under ``[[sources]]``, a file whose
+    role the type's recipe does not accept, or a type with no recipe at all
+    (not yet one of the three this PRD slice covers, or not a real
+    derivative type) each produce one problem naming ``asset.toml`` and the
+    offending field -- the same rule declared-source problems follow (the
+    asset does not load).
+    """
+    problems: list[MetadataProblem] = []
+    sources_by_file = {source.file: source for source in asset.sources}
+
+    for type_name, pin in asset.derivatives.items():
+        field = f"derivatives.{type_name}.source"
+
+        recipe = recipe_for(type_name)
+        if recipe is None:
+            problems.append(
+                MetadataProblem(toml_rel_path, field, f"{type_name!r} has no recipe to pin")
+            )
+            continue
+
+        source = sources_by_file.get(pin.source)
+        if source is None:
+            problems.append(
+                MetadataProblem(toml_rel_path, field, f"pinned source not declared: {pin.source!r}")
+            )
+            continue
+
+        if source.role not in recipe.accepted_roles:
+            accepted = ", ".join(recipe.accepted_roles)
+            problems.append(
+                MetadataProblem(
+                    toml_rel_path,
+                    field,
+                    f"pinned source {pin.source!r} has role {source.role!r}, "
+                    f"not accepted by {type_name} ({accepted})",
+                )
+            )
 
     return problems

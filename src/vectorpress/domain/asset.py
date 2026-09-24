@@ -50,6 +50,23 @@ class Source(BaseModel):
     file: str
 
 
+class DerivativePin(BaseModel):
+    """A ``[derivatives.<type>]`` table pinning one derivative type to a
+    specific source (ADR 0003, CONTEXT.md "Recipe").
+
+    ``source`` names a file the same way ``Source.file`` does: relative to
+    the asset's ``sources/`` directory. Checking that it names a declared
+    source whose role the type's recipe accepts, and that the type has a
+    recipe at all, is the ``catalog`` layer's job (this module has no recipe
+    or filesystem awareness, per ADR 0006); an asset with an invalid pin does
+    not load (same rule declared sources follow).
+    """
+
+    model_config = ConfigDict(strict=True, extra="forbid", frozen=True)
+
+    source: str
+
+
 class Asset(BaseModel):
     """One asset's hand-authored metadata (``asset.toml``).
 
@@ -63,6 +80,14 @@ class Asset(BaseModel):
     source's role and file against the filesystem and the catalog's
     accepted roles is the ``catalog`` layer's job (this module has no
     catalog or filesystem awareness, per ADR 0006).
+
+    ``derivatives`` maps a derivative type's name (a
+    :class:`~vectorpress.domain.derivative_type.DerivativeType` value, e.g.
+    ``"transparent_png"``) to a pinned source, one entry per
+    ``[derivatives.<type>]`` table. Kept a plain ``str`` key here rather than
+    ``DerivativeType`` for the same reason ``Source.role`` is a plain
+    ``str``: whether the key names a real derivative type with a recipe, and
+    whether the pin is valid, is the ``catalog`` layer's job.
     """
 
     model_config = ConfigDict(strict=True, extra="forbid", frozen=True)
@@ -85,3 +110,4 @@ class Asset(BaseModel):
     licensing_notes: str = ""
     accuracy_status: AccuracyStatus = Field(strict=False)
     sources: list[Source] = Field(default_factory=lambda: [])
+    derivatives: dict[str, DerivativePin] = Field(default_factory=dict)

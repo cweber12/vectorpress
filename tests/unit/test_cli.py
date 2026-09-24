@@ -194,6 +194,23 @@ def test_status_on_the_clean_fixture_states_there_are_no_problems(
     assert "Metadata problems: none" in result.stdout
 
 
+def test_status_reports_missing_and_impossible_derivative_counts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Acceptance criterion 2 (issue #22): each of the three fixture assets
+    contributes transparent_png and silhouette_svg as missing (their only
+    declared source is silhouette) and flatcolor_svg as impossible (none has
+    a flatcolor source); still exits 0 -- these are inventory counts, not
+    metadata problems."""
+    monkeypatch.chdir(FIXTURE_CATALOG_ROOT)
+
+    result = runner.invoke(app, ["status"])
+
+    assert result.exit_code == 0
+    assert "Missing derivatives: 6" in result.stdout
+    assert "Impossible derivatives: 3" in result.stdout
+
+
 def test_status_lists_a_missing_field_an_unknown_role_and_a_duplicate_id(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -321,6 +338,26 @@ def test_asset_shows_id_display_name_statuses_and_sources(
     assert "silhouette" in result.stdout
     assert "lineart.png" in result.stdout
     assert "lineart" in result.stdout
+
+
+def test_asset_lists_derivatives_missing_and_impossible(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Acceptance criterion 1 (issue #22): transparent_png and
+    silhouette_svg select the silhouette source as missing, flatcolor_svg is
+    impossible naming the accepted role, for each of the three fixture
+    assets (ochre_sea_star, purple_sea_urchin, giant_green_anemone)."""
+    monkeypatch.chdir(FIXTURE_CATALOG_ROOT)
+
+    for asset_id in ["ochre_sea_star", "purple_sea_urchin", "giant_green_anemone"]:
+        result = runner.invoke(app, ["asset", asset_id])
+
+        assert result.exit_code == 0
+        assert "Derivatives:" in result.stdout
+        assert "transparent_png\tmissing\tsilhouette.png (silhouette)" in result.stdout
+        assert "silhouette_svg\tmissing\tsilhouette.png (silhouette)" in result.stdout
+        assert "flatcolor_svg\timpossible\t" in result.stdout
+        assert "flatcolor" in result.stdout
 
 
 def test_asset_with_unknown_id_exits_non_zero_and_names_the_id(
