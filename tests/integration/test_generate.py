@@ -44,10 +44,9 @@ FIXTURE_OUTPUTS = [
 ]
 
 # (asset ID, expected customer-facing filename): §20's slugified display name
-# plus silhouette_svg's ``-silhouette.svg`` suffix (issue #24). ochre_sea_star
-# is the blob (one subpath), purple_sea_urchin the ring (a hole), and
-# giant_green_anemone the blob with a detached island (two disjoint
-# subpaths) -- see ``tests/fixtures/catalog/generate_source_pngs.py``.
+# plus silhouette_svg's ``-silhouette.svg`` suffix. All three are real,
+# hand-drawn silhouettes (tests/fixtures/catalog/README.md); holes and
+# detached islands are covered by tests/unit/test_pipeline_silhouette_svg.py.
 FIXTURE_SILHOUETTE_OUTPUTS = [
     ("ochre_sea_star", "ochre-sea-star-silhouette.svg"),
     ("purple_sea_urchin", "purple-sea-urchin-silhouette.svg"),

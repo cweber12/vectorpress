@@ -1,4 +1,4 @@
-"""Generate the fixture catalog's tiny source PNGs and its brand mark.
+"""Generate the fixture catalog's synthetic source PNGs.
 
 Committed alongside the PNGs it writes (issue #4, issue #3, issue #23) so
 they can be regenerated deterministically without a new dependency: stdlib
@@ -10,6 +10,11 @@ PNG. Run it from the repo root with:
 This script is a fixture author's tool; vectorpress itself never writes
 under an asset's ``sources/`` directory (ADR 0003, ADR 0007, §21), and
 never writes the brand mark either (ADR 0005: hand-authored, tool-read-only).
+
+Not every fixture image comes from here: ``ochre_sea_star``'s ``silhouette.png``
+and ``lineart.png``, ``purple_sea_urchin``'s and ``giant_green_anemone``'s
+``silhouette.png``, and the brand ``mark.png`` are real, hand-drawn artwork,
+downscaled to 300x300 and committed as-is. This script never writes them.
 
 Each ``silhouette.png`` is a real shape on a transparent background rather
 than a solid-color square (issue #23): the transparent PNG generator's crop
@@ -77,12 +82,6 @@ def _encode_png(size: int, pixels: list[list[Rgba]]) -> bytes:
     )
 
 
-def make_png(size: int, rgba: Rgba) -> bytes:
-    """A solid-color PNG (the brand mark and the lineart placeholder don't
-    need a shape)."""
-    return _encode_png(size, [[rgba] * size for _ in range(size)])
-
-
 def make_shaped_png(size: int, mask: Grid, rgba: Rgba) -> bytes:
     """A PNG from a boolean mask: ``rgba`` where ``mask`` is ``True``,
     fully transparent elsewhere."""
@@ -107,14 +106,6 @@ def _ring(size: int, *, cx: float, cy: float, outer: float, inner: float) -> Gri
             row.append(inner**2 <= d2 <= outer**2)
         grid.append(row)
     return grid
-
-
-def _blob_with_detached_island(size: int) -> Grid:
-    """A main blob plus a small, separate island with fully transparent
-    pixels between them -- the tight bounding box must span both."""
-    main = _solid_blob(size, cx=5.5, cy=5.5, radius=3.6)
-    island_cells = {(12, 2), (13, 2), (12, 3), (13, 3)}
-    return [[main[y][x] or (x, y) in island_cells for x in range(size)] for y in range(size)]
 
 
 def _flatcolor_rings_with_island(
@@ -149,44 +140,8 @@ def _flatcolor_rings_with_island(
     return pixels
 
 
-# (asset ID, filename under its sources/, role, mask factory, RGBA fill color).
-# ochre_sea_star gets two roles (silhouette + lineart) to exercise an
-# asset with several sources (issue #4 acceptance criteria); lineart stays a
-# plain placeholder square since transparent_png never selects it (the
-# silhouette role is preferred, issue #22).
-SHAPED_SOURCE_IMAGES: list[tuple[str, str, str, Grid, Rgba]] = [
-    (
-        "ochre_sea_star",
-        "silhouette.png",
-        "silhouette",
-        _solid_blob(SIZE, cx=7.5, cy=7.5, radius=5.5),
-        (196, 93, 38, 255),
-    ),
-    (
-        "purple_sea_urchin",
-        "silhouette.png",
-        "silhouette",
-        _ring(SIZE, cx=7.5, cy=7.5, outer=6.5, inner=3.0),
-        (91, 46, 130, 255),
-    ),
-    (
-        "giant_green_anemone",
-        "silhouette.png",
-        "silhouette",
-        _blob_with_detached_island(SIZE),
-        (58, 140, 92, 255),
-    ),
-]
-
-# (asset ID, filename, role, RGBA fill color): plain solid-color sources that
-# don't need a shape.
-SOLID_SOURCE_IMAGES: list[tuple[str, str, str, Rgba]] = [
-    ("ochre_sea_star", "lineart.png", "lineart", (20, 20, 20, 255)),
-]
-
 # (asset ID, filename, role, pre-colored pixel grid): sources with more than
-# one flat color, so a single mask + fill color (SHAPED_SOURCE_IMAGES' shape)
-# cannot express them. ochre_sea_star's flatcolor.png (issue #25) is the only
+# one flat color, so a single mask + fill color cannot express them. ochre_sea_star's flatcolor.png (issue #25) is the only
 # one so far; the other two fixture assets deliberately get no flatcolor
 # source, so flatcolor_svg stays impossible for them.
 MULTI_COLOR_SOURCE_IMAGES: list[tuple[str, str, str, list[list[Rgba]]]] = [
@@ -486,7 +441,7 @@ def _coralline_algae_silhouette_with_a_ragged_outline(size: int) -> Grid:
 
 # (asset ID, filename, role, canvas size, mask, RGBA fill color): every
 # source needing its own, larger canvas -- a distinct tuple shape from
-# SHAPED_SOURCE_IMAGES above (which hardcodes the shared 16x16 ``SIZE``).
+# the 16x16 ``SIZE`` the small synthetic sources above use.
 LARGE_CANVAS_SOURCE_IMAGES: list[tuple[str, str, str, int, Grid, Rgba]] = [
     (
         "owl_limpet",
@@ -546,26 +501,8 @@ LARGE_CANVAS_SOURCE_IMAGES: list[tuple[str, str, str, int, Grid, Rgba]] = [
     ),
 ]
 
-# (filename under the catalog root, RGBA fill color). The placeholder brand
-# mark that tests/fixtures/catalog/brand.toml's mark_file points at (issue #3).
-MARK_IMAGE = ("mark.png", (28, 74, 122, 255))
-
 
 def main() -> None:
-    for asset_id, filename, _role, mask, rgba in SHAPED_SOURCE_IMAGES:
-        out_dir = FIXTURE_ASSETS_DIR / asset_id / "sources"
-        out_dir.mkdir(parents=True, exist_ok=True)
-        out_path = out_dir / filename
-        out_path.write_bytes(make_shaped_png(SIZE, mask, rgba))
-        print(f"wrote {out_path}")
-
-    for asset_id, filename, _role, rgba in SOLID_SOURCE_IMAGES:
-        out_dir = FIXTURE_ASSETS_DIR / asset_id / "sources"
-        out_dir.mkdir(parents=True, exist_ok=True)
-        out_path = out_dir / filename
-        out_path.write_bytes(make_png(SIZE, rgba))
-        print(f"wrote {out_path}")
-
     for asset_id, filename, _role, pixels in MULTI_COLOR_SOURCE_IMAGES:
         out_dir = FIXTURE_ASSETS_DIR / asset_id / "sources"
         out_dir.mkdir(parents=True, exist_ok=True)
@@ -586,11 +523,6 @@ def main() -> None:
         out_path = out_dir / filename
         out_path.write_bytes(make_shaped_png(size, mask, rgba))
         print(f"wrote {out_path}")
-
-    mark_filename, mark_rgba = MARK_IMAGE
-    mark_path = FIXTURE_CATALOG_ROOT / mark_filename
-    mark_path.write_bytes(make_png(SIZE, mark_rgba))
-    print(f"wrote {mark_path}")
 
 
 if __name__ == "__main__":

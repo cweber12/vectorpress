@@ -84,18 +84,14 @@ from vectorpress.validate._svg_geometry import (
 #: produce at either the catalog default or ``kelp_forest_mini_pack``'s own
 #: smaller reference-size override (their own perimeters top out around
 #: 0.52in at the catalog default, smaller still at the override), and
-#: comfortably below a genuine second piece's own perimeter (``giant_green_
-#: anemone``'s and ``owl_limpet``'s own detached islands, each upward of
-#: 1.5in at the catalog default).
+#: comfortably below a genuine second piece's own perimeter (``owl_limpet``'s
+#: detached island, upward of 1.5in at the catalog default).
 #:
-#: ``excessive_complexity_max_nodes_per_in`` (review fix round 1, PR #46):
-#: ``11.0`` sits above the densest *judged* (perimeter at or above
-#: ``excessive_complexity_min_perimeter_in``) piece any pre-existing fixture
-#: asset produces at either reference size -- ``giant_green_anemone``'s own
-#: detached island, ~9.56 nodes/in at ``kelp_forest_mini_pack``'s 1in
-#: override, the highest observed -- with room to spare, while
-#: ``coralline_algae``'s own finely rippled outline (issue #40) clears it
-#: with a comfortable margin too (~13.4 nodes/in at the catalog default).
+#: ``excessive_complexity_max_nodes_per_in``: ``11.0`` sits above every
+#: real-art fixture outline at the catalog default, while
+#: ``coralline_algae``'s finely rippled outline clears it (~13.4 nodes/in).
+#: Density rises as the same outline shrinks, so at a 1in product size the
+#: real-art sea star and anemone read ~13.7 nodes/in and are flagged too.
 #:
 #: ``stray_object_off_canvas_tolerance_in`` (issue #41 review fix round 1,
 #: controller ruling) -- :mod:`vectorpress.validate.stray_object`'s own
