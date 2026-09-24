@@ -14,6 +14,9 @@ at a **catalog** directory that lives outside this repo.
 - **Roadmap** — `docs/PLAN.md` Part 3 and `docs/prds/`. A PRD says *what*; expanding it
   into tracer-bullet issues (`/to-issues`) happens only when it is next, against the
   code as it exists then.
+- **Running a PRD** — `/run-prd docs/prds/NN-name.md`. A controller agent works the PRD's
+  open issues in blocked-by order: fresh implementer per issue, reviewed PR, squash-merge,
+  with the issue thread as ledger. It merges on its own; it stops for ADR conflicts.
 - **Requirements** — `docs/requirements.md`, cited by § number in PRDs, ADRs and issues.
 
 ## Guardrails
