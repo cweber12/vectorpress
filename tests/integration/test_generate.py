@@ -10,6 +10,7 @@ import shutil
 from pathlib import Path
 
 import pytest
+from PIL import Image
 from syrupy.assertion import SnapshotAssertion
 from syrupy.extensions.image import PNGImageSnapshotExtension
 from typer.testing import CliRunner
@@ -268,3 +269,44 @@ def test_vpress_status_missing_count_drops_after_generation(
     # move from missing to current (issue #24); flatcolor_svg stays
     # impossible for all three (counted separately, not as missing).
     assert "Missing derivatives: 0" in after.stdout
+
+
+@pytest.mark.integration
+def test_generate_all_reports_failed_for_a_fully_transparent_silhouette_and_continues(
+    monkeypatch: pytest.MonkeyPatch, temp_catalog_root: Path
+) -> None:
+    """Issue #24 review fix round 1, controller ruling: a silhouette source
+    with no ink at all leaves ``silhouette_svg`` with nothing to trace, so
+    its generator raises. ``generate --all`` catches that per derivative,
+    reports it ``failed`` with a reason, writes nothing for it, still
+    generates every other derivative for every asset (including
+    ``transparent_png`` for the same asset, and everything for the other
+    two), and exits non-zero overall."""
+    silhouette_path = temp_catalog_root / "assets" / "ochre_sea_star" / "sources" / "silhouette.png"
+    Image.new("RGBA", (16, 16), (0, 0, 0, 0)).save(silhouette_path, format="PNG")
+    monkeypatch.chdir(temp_catalog_root)
+
+    result = runner.invoke(app, ["generate", "--all"])
+
+    assert result.exit_code == 1, result.output
+    assert "ochre_sea_star\tsilhouette_svg\tfailed\t" in result.stdout
+    failed_line = next(
+        line
+        for line in result.stdout.splitlines()
+        if line.startswith("ochre_sea_star\t") and "\tfailed\t" in line
+    )
+    assert failed_line.split("\t", 3)[3]  # a non-empty reason
+
+    derived_dir = temp_catalog_root / "assets" / "ochre_sea_star" / DERIVED_DIRNAME
+    assert not derived_dir.exists() or not any(derived_dir.glob("*silhouette*"))
+
+    # the same asset's other derivative still generated.
+    assert "ochre_sea_star\ttransparent_png\tgenerated\tochre-sea-star-color.png" in result.stdout
+    output_path = derived_dir / "ochre-sea-star-color.png"
+    assert output_path.is_file()
+
+    # the other two assets, untouched by the broken source, generated everything.
+    for asset_id, filename in FIXTURE_SILHOUETTE_OUTPUTS:
+        if asset_id == "ochre_sea_star":
+            continue
+        assert f"{asset_id}\tsilhouette_svg\tgenerated\t{filename}" in result.stdout

@@ -108,24 +108,41 @@ def count_derivative_states(
 
 
 class GenerationOutcome(StrEnum):
-    """One derivative's outcome from a ``vpress generate`` run (issue #23)."""
+    """One derivative's outcome from a ``vpress generate`` run (issue #23,
+    issue #24 review fix round 1)."""
 
     GENERATED = "generated"
     CURRENT = "current"
     IMPOSSIBLE = "impossible"
     NO_GENERATOR = "no generator"
+    FAILED = "failed"
 
 
 @dataclass(frozen=True)
 class GenerationResult:
     """One reported line of a ``vpress generate`` run: which asset, which
-    derivative type, what happened, and the filename (generated/current) or
-    reason (impossible) -- empty for ``no generator``."""
+    derivative type, what happened, and the filename (generated/current),
+    reason (impossible/failed) -- empty for ``no generator``."""
 
     asset_id: str
     derivative_type: DerivativeType
     outcome: GenerationOutcome
     detail: str
+
+
+class GeneratorError(Exception):
+    """A generator raised while producing one derivative (issue #24 review
+    fix round 1: e.g. a fully transparent silhouette source, or one made
+    only of specks below ``speckle_size``, leaves ``silhouette_svg`` with no
+    geometry to render).
+
+    Deliberately wraps only a failure from the generator call itself, never
+    from reading the source or writing the output: this is CONTEXT.md's
+    "a derivative that exists" case gone wrong at generation time, not the
+    "no acceptable source" case (``impossible``) -- §35's broader failure
+    handling (undecodable sources, cleanup) is a later slice's job, not
+    widened here.
+    """
 
 
 def _generate_one(asset: Asset, recipe: Recipe, source: Source, asset_dir_path: Path) -> str:
@@ -135,13 +152,20 @@ def _generate_one(asset: Asset, recipe: Recipe, source: Source, asset_dir_path: 
     ``catalog.provenance.read_source_bytes`` is the only source read; the
     generator itself takes those bytes and never touches the filesystem
     (ADR 0006).
+
+    Raises :class:`GeneratorError` if the generator itself raises --
+    caught by :func:`generate_asset` so one failing derivative does not stop
+    generation for the rest of the asset or catalog.
     """
     assert recipe.generator is not None
     generator = get_generator(recipe.generator)
     assert generator is not None, f"recipe names an unregistered generator: {recipe.generator!r}"
 
     source_bytes = read_source_bytes(asset_dir_path, source.file)
-    output = generator(source_bytes, recipe.parameters)
+    try:
+        output = generator(source_bytes, recipe.parameters)
+    except Exception as exc:
+        raise GeneratorError(str(exc)) from exc
     filename = derivative_filename(asset.display_name, recipe.derivative_type)
 
     provenance = Provenance(
@@ -166,6 +190,13 @@ def generate_asset(asset: Asset, asset_dir_path: Path) -> list[GenerationResult]
     Current derivatives are skipped without any write (§36); a type with no
     recipe-selectable source is reported ``impossible``; a recipe-bearing
     type with no generator yet is reported ``no generator`` and skipped.
+
+    A generator that raises (issue #24 review fix round 1) is reported
+    ``failed`` with the exception's message, nothing is written for that
+    derivative, and the loop continues with the next derivative type --
+    one failing derivative never stops the rest of this asset, and (since
+    ``cli.app.generate`` calls this per asset) never stops the rest of
+    ``--all`` either.
     """
     results: list[GenerationResult] = []
     for status in asset_derivative_statuses(asset, asset_dir_path):
@@ -182,8 +213,12 @@ def generate_asset(asset: Asset, asset_dir_path: Path) -> list[GenerationResult]
             detail = ""
         else:
             assert status.source is not None  # MISSING always carries a selected source
-            outcome = GenerationOutcome.GENERATED
-            detail = _generate_one(asset, recipe, status.source, asset_dir_path)
+            try:
+                detail = _generate_one(asset, recipe, status.source, asset_dir_path)
+                outcome = GenerationOutcome.GENERATED
+            except GeneratorError as exc:
+                outcome = GenerationOutcome.FAILED
+                detail = str(exc)
 
         results.append(
             GenerationResult(
