@@ -70,7 +70,10 @@ reasons). Not "status" — status is about review of a derivative that exists,
 derivative state is about whether one can and does exist.
 
 **Findings** — Structured cut-file quality problems (§9) with locations. A cut file
-resolves to **pass** or **needs review** from its findings.
+resolves to **pass** or **needs review** from its findings. Tool-owned JSON state
+beside the effective derivative under `derived/` (ADR 0005, ADR 0007) — never inside
+the SVG, never in hand-authored TOML. Not **Status**: a findings result is a
+mechanical roll-up from validation, not a human review decision.
 
 **Reference size** — The physical size (e.g. 3 in on the longest side) at which
 cut-file thresholds are evaluated. Catalog default; product override; recorded with

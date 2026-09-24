@@ -1,0 +1,85 @@
+# serializer version: 1
+# name: test_findings_json_is_locked_by_snapshot[giant_green_anemone-giant-green-anemone-cut.svg]
+  dict({
+    'content_hash': 'c58ffd518711eb2289911355f1f94015a13da48765fa24b2a2fc17025a7c554d',
+    'findings': list([
+      dict({
+        'classification': 'needs_review',
+        'kind': 'disconnected_fragments',
+        'location': dict({
+          'max_x': 14.0,
+          'max_y': 4.0,
+          'min_x': 12.0,
+          'min_y': 2.0,
+        }),
+        'measured_value': None,
+        'message': "disconnected fragment: path element 0, subpath 1 is separate from the design's largest piece",
+        'path_reference': dict({
+          'element_index': 0,
+          'id': None,
+          'subpath_index': 1,
+        }),
+        'threshold': None,
+      }),
+    ]),
+    'reference_size_in': 3.0,
+    'result': 'needs_review',
+    'thresholds': dict({
+    }),
+    'validated_file': 'giant-green-anemone-cut.svg',
+  })
+# ---
+# name: test_findings_json_is_locked_by_snapshot[ochre_sea_star-ochre-sea-star-cut.svg]
+  dict({
+    'content_hash': '3fd17cbdb63411e1d243b0aadb2b6fe858240b902185bb4d1daec6c74357ec73',
+    'findings': list([
+    ]),
+    'reference_size_in': 3.0,
+    'result': 'pass',
+    'thresholds': dict({
+    }),
+    'validated_file': 'ochre-sea-star-cut.svg',
+  })
+# ---
+# name: test_findings_json_is_locked_by_snapshot[owl_limpet-owl-limpet-cut.svg]
+  dict({
+    'content_hash': '924c2319b1c4eb0b36fe3476d1e9ea4aa3e595f267840c41251cd06762e47973',
+    'findings': list([
+      dict({
+        'classification': 'needs_review',
+        'kind': 'disconnected_fragments',
+        'location': dict({
+          'max_x': 93.2,
+          'max_y': 57.353,
+          'min_x': 75.8667,
+          'min_y': 39.678,
+        }),
+        'measured_value': None,
+        'message': "disconnected fragment: path element 0, subpath 1 is separate from the design's largest piece",
+        'path_reference': dict({
+          'element_index': 0,
+          'id': None,
+          'subpath_index': 1,
+        }),
+        'threshold': None,
+      }),
+    ]),
+    'reference_size_in': 3.0,
+    'result': 'needs_review',
+    'thresholds': dict({
+    }),
+    'validated_file': 'owl-limpet-cut.svg',
+  })
+# ---
+# name: test_findings_json_is_locked_by_snapshot[purple_sea_urchin-purple-sea-urchin-cut.svg]
+  dict({
+    'content_hash': '6f7cb86dd77c218f8047d5222f8238cf3a09fa6e9c468bb3d874eeb0e882c73e',
+    'findings': list([
+    ]),
+    'reference_size_in': 3.0,
+    'result': 'pass',
+    'thresholds': dict({
+    }),
+    'validated_file': 'purple-sea-urchin-cut.svg',
+  })
+# ---

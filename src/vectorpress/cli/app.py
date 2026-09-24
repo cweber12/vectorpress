@@ -13,18 +13,25 @@ from vectorpress.catalog.assets import asset_dir, failed_asset_ids, load_assets,
 from vectorpress.catalog.collections import load_collections
 from vectorpress.catalog.derivatives import DerivativeStateCounts
 from vectorpress.catalog.errors import CatalogConfigError, CatalogNotFoundError
+from vectorpress.catalog.findings import FindingsCurrencyState, findings_currency
 from vectorpress.catalog.load import load_catalog, load_catalog_config
 from vectorpress.catalog.locate import locate_catalog_root
 from vectorpress.catalog.metadata_problem import MetadataProblem
 from vectorpress.catalog.products import load_products
+from vectorpress.catalog.provenance import DERIVED_DIRNAME, read_derivative_bytes
 from vectorpress.domain.catalog_config import CatalogConfig
 from vectorpress.domain.derivative_state import DerivativeState
+from vectorpress.domain.derivative_type import DerivativeType
+from vectorpress.domain.finding import ValidationOutcome
 from vectorpress.pipeline.generate import (
+    DerivativeStatus,
     GenerationOutcome,
     asset_derivative_statuses,
     count_derivative_states,
     generate_asset,
 )
+from vectorpress.validate.cut_file import THRESHOLDS
+from vectorpress.validate.validate_asset import AssetValidationOutcome, validate_asset_cut_file
 
 app = typer.Typer(
     name="vpress",
@@ -161,6 +168,39 @@ def assets(ctx: typer.Context) -> None:
         )
 
 
+def _findings_display(
+    status: DerivativeStatus, root: Path, config: CatalogConfig, asset_id: str
+) -> str:
+    """The findings column ``vpress asset``'s ``cut_svg`` line adds (issue
+    #37): ``pass`` / ``needs review`` when a current findings report exists,
+    ``findings stale`` when one exists but no longer matches the file's
+    content hash, reference size or thresholds, or ``not validated`` when
+    there is no cut file to check yet (``impossible``/``missing``) or
+    ``vpress validate`` has simply never run for it."""
+    if status.state not in (DerivativeState.CURRENT, DerivativeState.STALE):
+        return "not validated"
+
+    assert status.output_filename is not None  # CURRENT/STALE always carry a filename
+    derived_dir = asset_dir(root, config, asset_id) / DERIVED_DIRNAME
+    svg_bytes = read_derivative_bytes(derived_dir, status.output_filename)
+    if svg_bytes is None:
+        return "not validated"
+
+    currency = findings_currency(
+        derived_dir,
+        status.output_filename,
+        svg_bytes,
+        config.reference_size_in,
+        THRESHOLDS,
+    )
+    if currency.state is FindingsCurrencyState.NOT_VALIDATED:
+        return "not validated"
+    if currency.state is FindingsCurrencyState.STALE:
+        return "findings stale"
+    assert currency.result is not None  # set exactly when state is CURRENT
+    return "pass" if currency.result is ValidationOutcome.PASS else "needs review"
+
+
 @app.command()
 def asset(
     ctx: typer.Context,
@@ -199,21 +239,24 @@ def asset(
     typer.echo("Derivatives:")
     for status in asset_derivative_statuses(found, asset_dir(root, config, found.id), config):
         if status.state is DerivativeState.IMPOSSIBLE:
-            typer.echo(f"  {status.derivative_type.value}\t{status.state.value}\t{status.reason}")
+            line = f"  {status.derivative_type.value}\t{status.state.value}\t{status.reason}"
         elif status.state is DerivativeState.CURRENT:
-            typer.echo(
+            line = (
                 f"  {status.derivative_type.value}\t{status.state.value}\t{status.output_filename}"
             )
         elif status.state is DerivativeState.STALE:
-            typer.echo(
-                f"  {status.derivative_type.value}\tstale ({status.reason})\t{status.output_filename}"
-            )
+            line = f"  {status.derivative_type.value}\tstale ({status.reason})\t{status.output_filename}"
         else:
             assert status.source is not None  # MISSING always carries a selected source
-            typer.echo(
+            line = (
                 f"  {status.derivative_type.value}\t{status.state.value}\t"
                 f"{status.source.file} ({status.source.role})"
             )
+        # cut_svg's line alone also carries its findings result (issue #37):
+        # no other derivative type is validated yet.
+        if status.derivative_type is DerivativeType.CUT_SVG:
+            line += f"\t{_findings_display(status, root, config, found.id)}"
+        typer.echo(line)
 
 
 @app.command()
@@ -321,6 +364,104 @@ def generate(
 
     if failure_count:
         typer.echo(f"generate: {failure_count} derivative(s) failed", err=True)
+        raise typer.Exit(code=1)
+
+
+@app.command()
+def validate(
+    ctx: typer.Context,
+    asset_id: str | None = typer.Argument(
+        None, help="The asset's ID (its folder name under assets/)."
+    ),
+    all_assets: bool = typer.Option(
+        False,
+        "--all",
+        help="Validate every loaded asset's cut file.",
+    ),
+) -> None:
+    """Validate one asset's ``cut_svg``, or every loaded asset's with
+    ``--all``, against every landed §9 detector (§9, §9.1, §9.2, ADR 0007,
+    issue #37), writing a findings report beside the file (through
+    ``catalog.findings``) and printing pass / needs review with each
+    finding's kind and location.
+
+    Exactly one of ``asset_id`` or ``--all`` selects which assets are
+    checked; providing both, or neither, is a usage error. An asset whose
+    cut file is ``missing`` or ``impossible`` is reported as such and not
+    validated (there is no file to check yet); an asset that failed to load
+    is skipped and named (§35), the same as ``vpress generate --all``.
+    ``vpress generate`` itself never calls this -- a findings report only
+    ever exists because ``validate`` was run.
+
+    A validation failure (an unparseable SVG -- most plausibly a hand-edited
+    override, since a generated cut file always parses) is reported on
+    stderr naming the asset, file and cause, and the run still tries every
+    other asset before exiting 1. A needs-review result is not a failure:
+    the command exits 0 as long as every asset it attempted to validate
+    parsed successfully.
+    """
+    selectors = [asset_id is not None, all_assets]
+    if sum(selectors) != 1:
+        raise typer.BadParameter(
+            "Provide exactly one of: an asset ID, --all.",
+            param_hint="asset_id / --all",
+        )
+
+    root, config = _locate_and_load_config(ctx)
+    inventory = load_assets(root, config)
+
+    if all_assets:
+        for failed_id in failed_asset_ids(inventory, config):
+            typer.echo(f"{failed_id}\tskipped: failed to load")
+        targets = inventory.assets
+    else:
+        assert asset_id is not None  # usage-error branch above covers the None case
+        result = lookup_asset(inventory, config, asset_id)
+        if result.asset is None:
+            if result.problems:
+                _echo_problems(result.problems)
+            else:
+                typer.echo(f"Unknown asset: {asset_id!r}", err=True)
+            raise typer.Exit(code=1)
+        targets = [result.asset]
+
+    failure_count = 0
+    for target in targets:
+        # The whole read-validate-persist cycle lives in the ``validate``
+        # layer (issue #37 fix round 1): this command only decides *which*
+        # assets to check and formats the result -- it never opens a
+        # catalog file itself (ADR 0006, CLAUDE.md's "cli stays thin").
+        outcome = validate_asset_cut_file(root, config, target, config.reference_size_in)
+
+        if outcome.outcome is AssetValidationOutcome.IMPOSSIBLE:
+            typer.echo(f"{target.id}\tcut_svg\timpossible\t{outcome.reason}")
+            continue
+        if outcome.outcome is AssetValidationOutcome.MISSING:
+            typer.echo(f"{target.id}\tcut_svg\tmissing")
+            continue
+        if outcome.outcome is AssetValidationOutcome.FAILED:
+            failure_count += 1
+            typer.echo(
+                f"validate: {target.id} cut_svg failed ({outcome.filename}): {outcome.reason}",
+                err=True,
+            )
+            continue
+
+        assert outcome.validation is not None  # set exactly when outcome is VALIDATED
+        result_text = (
+            "pass" if outcome.validation.outcome is ValidationOutcome.PASS else "needs review"
+        )
+        typer.echo(f"{target.id}\tcut_svg\t{outcome.filename}\t{result_text}")
+        for finding in outcome.validation.findings:
+            location = finding.location
+            typer.echo(
+                f"  {finding.kind.value}\t"
+                f"({location.min_x},{location.min_y})-({location.max_x},{location.max_y})\t"
+                f"{finding.message}"
+            )
+
+    if failure_count:
+        typer.echo(f"validate: {failure_count} asset(s) failed", err=True)
         raise typer.Exit(code=1)
 
 

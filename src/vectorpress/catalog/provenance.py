@@ -100,6 +100,19 @@ def read_source_bytes(asset_dir: Path, source_file: str) -> bytes:
     return (asset_dir / SOURCES_DIRNAME / source_file).read_bytes()
 
 
+def read_derivative_bytes(derived_dir: Path, output_filename: str) -> bytes | None:
+    """One derivative's own output bytes, or ``None`` if the file does not
+    exist (issue #37 fix round 1). The only place
+    :mod:`vectorpress.validate` reads an effective derivative's bytes from,
+    so ADR 0006's "catalog... the only layer touching catalog files" holds
+    for validation the same way it already does for generation -- mirrors
+    :func:`read_source_bytes`'s own role for a *source* file."""
+    path = derived_dir / output_filename
+    if not path.is_file():
+        return None
+    return path.read_bytes()
+
+
 #: The three ways a derivative can be stale (ADR 0004, CONTEXT.md "Stale",
 #: issue #26), each a distinct, user-facing reason string. Checked in this
 #: order by :func:`derivative_currency`; ``vpress asset`` shows the reason as
