@@ -1,6 +1,6 @@
 # PRD 2 — Derivative Generation and Provenance
 
-Status: not started
+Status: complete
 Depends on: see `docs/PLAN.md` Part 3 dependency graph
 
 **Goal.** Approved-quality derivatives are produced from source images, and every
