@@ -67,6 +67,12 @@ RECIPES: dict[DerivativeType, Recipe] = {
             "curve_tolerance": 0.2,
             "speckle_size": 2,
             "max_colors": 16,
+            # A palette candidate must be at least this share of every ink
+            # pixel to count as a genuinely flat color (review fix round 1,
+            # issue #25): keeps a real anti-aliased edge blend -- a thin
+            # seam, however many distinct shades it breaks into -- from
+            # winning its own palette slot and so its own sliver <path>.
+            "min_color_share": 0.01,
         },
     ),
 }

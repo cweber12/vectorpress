@@ -13,8 +13,10 @@ import re
 from io import BytesIO
 
 import pytest
-from PIL import Image
+from PIL import Image, ImageDraw
 
+from vectorpress.domain.derivative_type import DerivativeType
+from vectorpress.domain.recipe import RECIPES
 from vectorpress.pipeline.flatcolor_svg import generate
 
 Rgba = tuple[int, int, int, int]
@@ -68,6 +70,29 @@ def _nested_squares_bytes(size: int = SIZE) -> bytes:
 def _solid_square_bytes(size: int = SIZE, color: Rgba = RED) -> bytes:
     grid = [[color for _ in range(size)] for _ in range(size)]
     return _source_bytes(grid)
+
+
+def _lanczos_downsampled_two_color_bytes(scale: int = 4, small_size: int = 200) -> bytes:
+    """A genuinely anti-aliased two-color image (review fix round 1, issue
+    #25), not a hand-crafted uniform blend seam: a hard-edged red/green
+    split drawn at ``scale`` times ``small_size``, then downsampled with
+    Pillow's LANCZOS filter -- the way a real illustration reaches this
+    generator. LANCZOS's ringing spreads the boundary across several output
+    pixels, each its own slightly different blend shade (verified: at
+    ``scale=4, small_size=200`` this yields 8 distinct opaque colors -- the
+    2 true ones plus 6 blend shades -- none of the blend shades over 0.5%
+    of the image's ink pixels, comfortably under the recipe's default 1%
+    ``min_color_share``), unlike the single uniform blend color the
+    hand-made test above uses."""
+    large_size = small_size * scale
+    big = Image.new("RGBA", (large_size, large_size), RED)
+    draw = ImageDraw.Draw(big)
+    mid = large_size // 2
+    draw.rectangle([mid, 0, large_size, large_size], fill=GREEN)
+    small = big.resize((small_size, small_size), Image.Resampling.LANCZOS)
+    buffer = BytesIO()
+    small.save(buffer, format="PNG")
+    return buffer.getvalue()
 
 
 def _concentric_disks_bytes(size: int = SIZE) -> bytes:
@@ -332,11 +357,19 @@ def test_max_colors_caps_the_number_of_fills() -> None:
 
 
 def test_a_blended_edge_pixel_folds_into_the_nearest_palette_color() -> None:
-    """A pixel colored exactly halfway between two real palette colors
-    (the "anti-aliased edge" case the issue names) must not become a third,
-    tiny region of its own: it is folded into whichever of the two palette
-    colors it is nearest (a tie is broken toward the more frequent, thus
-    first, palette color -- deterministic, §36)."""
+    """Isolates the nearest-palette-color *folding* mechanism on its own,
+    independent of ``min_color_share`` (tested separately below): a pixel
+    colored exactly halfway between two real palette colors must not become
+    a third, tiny region of its own -- it is folded into whichever of the
+    two palette colors it is nearest (a tie is broken toward the more
+    frequent, thus first, palette color -- deterministic, §36). ``max_colors``
+    is capped here only to force this single uniform blend color out of the
+    palette regardless of its share, so this test exercises folding in
+    isolation; ``test_a_genuinely_anti_aliased_boundary_folds_to_only_the_
+    true_flat_colors_at_production_defaults`` below covers the real case --
+    many distinct, individually low-share blend shades excluded by
+    ``min_color_share`` at the recipe's own default parameters, no
+    ``max_colors`` override needed."""
     grid = [[TRANSPARENT for _ in range(SIZE)] for _ in range(SIZE)]
     for y in range(2, 14):
         for x in range(2, 7):
@@ -355,16 +388,53 @@ def test_a_blended_edge_pixel_folds_into_the_nearest_palette_color() -> None:
         grid[y][8] = blend
     source_bytes = _source_bytes(grid)
 
-    # Capped to the two real colors: with room for a third (the default),
-    # the blend's own 24 pixels are numerous enough to become a legitimate
-    # third palette entry in its own right -- realistic anti-aliasing
-    # instead spreads its blend across many distinct in-between shades, each
-    # individually rare, so a modest cap is what makes folding kick in.
+    # Capped to the two real colors: this uniform blend is a full 24-pixel
+    # column (16.7% of the ink), well above any reasonable min_color_share,
+    # so max_colors is what forces it out here -- see the docstring above.
     result = generate(source_bytes, {"max_colors": 2})
 
     paths = _paths(result.output_bytes)
     fills = {fill for fill, _d in paths}
     assert fills == {"#dc1414", "#14a014"}  # only the two real colors, never the blend
+
+
+def test_a_genuinely_anti_aliased_boundary_folds_at_production_defaults() -> None:
+    """Review fix round 1, issue #25: a real anti-aliased image (LANCZOS
+    downsampling, not a hand-made uniform blend), run through ``generate``
+    with the *recipe's own production parameters*
+    (``RECIPES[FLATCOLOR_SVG].parameters``) -- no ``max_colors`` override
+    engineered to force folding, unlike the test above. Confirmed this would
+    have failed before ``min_color_share`` existed: with it forced to ``0``
+    (no share filtering, the old behaviour), the same source's 6 distinct
+    blend shades all survive as their own fills alongside the 2 real
+    colors, since 8 is under ``max_colors``' default of 16."""
+    source_bytes = _lanczos_downsampled_two_color_bytes()
+
+    result = generate(source_bytes, dict(RECIPES[DerivativeType.FLATCOLOR_SVG].parameters))
+
+    fills = {fill for fill, _d in _paths(result.output_bytes)}
+    assert fills == {"#dc1414", "#14a014"}
+
+
+def test_min_color_share_controls_which_colors_count_as_genuinely_flat() -> None:
+    """A small but real 4-pixel green region among 96 red pixels (4% share)
+    survives a permissive threshold as its own fill, and is folded away --
+    like a stray blend shade -- once the threshold is raised above its
+    share."""
+    grid = [[TRANSPARENT for _ in range(SIZE)] for _ in range(SIZE)]
+    for y in range(2, 14):
+        for x in range(2, 10):
+            grid[y][x] = RED
+    for y in (6, 7):
+        for x in (11, 12):
+            grid[y][x] = GREEN
+    source_bytes = _source_bytes(grid)
+
+    permissive = generate(source_bytes, {"min_color_share": 0.01})
+    assert {fill for fill, _d in _paths(permissive.output_bytes)} == {"#dc1414", "#14a014"}
+
+    strict = generate(source_bytes, {"min_color_share": 0.5})
+    assert {fill for fill, _d in _paths(strict.output_bytes)} == {"#dc1414"}  # green folded in
 
 
 def test_alpha_threshold_controls_which_pixels_count_as_opaque() -> None:
@@ -427,6 +497,31 @@ def test_defaults_are_used_when_parameters_is_empty() -> None:
     result = generate(_two_squares_bytes(), {})
 
     assert _paths(result.output_bytes)
+
+
+def test_a_large_image_with_few_colors_quantizes_quickly_and_correctly() -> None:
+    """Review fix round 1, issue #25: quantization must scale with the
+    number of *distinct* ink colors, not the number of ink pixels. A
+    per-pixel ``(N, P)`` distance array would be ~384 MB just for this
+    image's 1,000,000 ink pixels at the recipe's default 16-color cap (and
+    ~6 GB for a realistic 4000x4000 source) -- this stays fast because the
+    distance array this module actually builds is sized to the 3 *distinct*
+    colors here, not the pixel count."""
+    import numpy as np
+
+    size = 1000
+    array = np.zeros((size, size, 4), dtype=np.uint8)
+    array[:, : size // 3, :] = (*RED[:3], 255)
+    array[:, size // 3 : 2 * size // 3, :] = (*GREEN[:3], 255)
+    array[:, 2 * size // 3 :, :] = (*BLUE[:3], 255)
+    buffer = BytesIO()
+    Image.fromarray(array, mode="RGBA").save(buffer, format="PNG")
+    source_bytes = buffer.getvalue()
+
+    result = generate(source_bytes, {})
+
+    fills = {fill for fill, _d in _paths(result.output_bytes)}
+    assert fills == {"#dc1414", "#14a014", "#1414dc"}
 
 
 def test_raises_for_a_fully_transparent_source() -> None:
