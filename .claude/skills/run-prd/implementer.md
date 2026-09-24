@@ -26,6 +26,11 @@ from earlier merged issues that the issue body cannot know; "none" if none>
   and explained in the PR.
 - Every acceptance criterion accounted for: a test, or a sentence in your report
   saying why a test is impossible.
+- Comments and docstrings say what the code does and why, briefly. They never
+  narrate history: no "issue #N", no "review fix round", no "before this issue".
+  Git and the issue thread already hold that. Cite a § or an ADR only where it
+  explains a rule. A CLI command's docstring is its `--help` text: keep it
+  user-facing, and put maintainer notes after a `\f` line.
 - Before opening the PR: `uv run ruff format`, `uv run ruff check`, `uv run pyright`,
   `uv run lint-imports`, `uv run pytest` all green.
 - Conventional commits. Push the branch and open a PR with `gh pr create` using the
