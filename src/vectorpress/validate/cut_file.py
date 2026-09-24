@@ -96,6 +96,28 @@ from vectorpress.validate._svg_geometry import (
 #: override, the highest observed -- with room to spare, while
 #: ``coralline_algae``'s own finely rippled outline (issue #40) clears it
 #: with a comfortable margin too (~13.4 nodes/in at the catalog default).
+#:
+#: ``stray_object_off_canvas_tolerance_in`` (issue #41 review fix round 1,
+#: controller ruling) -- :mod:`vectorpress.validate.stray_object`'s own
+#: off-canvas check applies this tolerance to a ``<path>`` element only
+#: (every other element tag keeps an exact, tolerance-free check): this
+#: module's own curve-flattening can disagree with the document's own
+#: written ``viewBox`` by a fraction of a user unit of pure rounding noise
+#: (§36's :data:`~vectorpress.domain.numeric_format.DECIMAL_PLACES`
+#: absorbs everything past the fourth decimal place everywhere *else* this
+#: tool writes a number, but the ``viewBox`` text and a freshly
+#: re-flattened path bbox are two *independent* roundings of numbers that
+#: were never exactly equal to begin with). Measured directly (not
+#: assumed) against every ``<path>`` in every fixture asset's own
+#: generated cut file, at both the catalog default (3in) and
+#: ``kelp_forest_mini_pack``'s own override (1in): the single largest
+#: discrepancy anywhere is ``bat_star``'s own, ``0.0001`` user units
+#: (~1.15e-6in at the catalog's 3in default) -- everything else is exactly
+#: ``0.0``. ``0.01in`` sits four orders of magnitude above that measured
+#: noise floor -- a comfortable margin for a different platform's own
+#: last-bit curve-sampling difference -- while staying far below anything
+#: a genuinely stray, off-canvas ``<path>`` (this issue's own hand-authored
+#: trip fixture places one tens of user units away) would ever measure.
 THRESHOLDS: dict[str, float] = {
     "accidental_dot_max_dimension_in": 0.2,
     "tiny_isolated_shape_min_area_in2": 0.02,
@@ -104,6 +126,7 @@ THRESHOLDS: dict[str, float] = {
     "excessive_complexity_max_nodes_per_in": 11.0,
     "excessive_complexity_min_perimeter_in": 0.75,
     "excessive_complexity_max_node_count": 300.0,
+    "stray_object_off_canvas_tolerance_in": 0.01,
 }
 
 
@@ -215,7 +238,9 @@ def validate_cut_file(svg_bytes: bytes, reference_size_in: float) -> ValidationR
 
     open_path_findings = open_path.detect(subpaths)
     raster_content_findings = raster_content.detect(elements)
-    stray_object_findings = stray_object.detect(view_box, elements)
+    stray_object_findings = stray_object.detect(
+        view_box, elements, scale, THRESHOLDS["stray_object_off_canvas_tolerance_in"]
+    )
     duplicate_geometry_findings = duplicate_geometry.detect(subpaths)
     overlap_findings = overlap.detect(subpaths)
 

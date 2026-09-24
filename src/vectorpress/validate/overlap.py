@@ -66,6 +66,12 @@ def detect(subpaths: list[Subpath]) -> list[Finding]:
     of subpaths whose boundaries cross without one nesting inside the
     other (§9), located at the crossing point(s)' own bounding box.
 
+    A subpath under three points -- a bare open line segment, say -- is
+    never a candidate here (issue #41 review fix round 1): a two-point
+    "ring" has exactly one edge, which can never cross itself, and
+    :func:`~vectorpress.validate._svg_geometry.parse_subpaths` itself keeps
+    one only for :mod:`vectorpress.validate.open_path`'s own sake.
+
     Findings are returned in a fixed, deterministic order -- self-
     intersections first (by path reference), then pairwise overlaps (by
     the first, then the second, subpath's own path reference; ``subpaths``
@@ -76,6 +82,8 @@ def detect(subpaths: list[Subpath]) -> list[Finding]:
     matching every other detector in this package (issue #37's own
     ordering rule).
     """
+    subpaths = [subpath for subpath in subpaths if len(subpath.points) >= 3]
+
     self_findings: list[Finding] = []
     for subpath in subpaths:
         hits = find_self_intersections(subpath.points)

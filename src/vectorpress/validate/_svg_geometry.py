@@ -509,21 +509,42 @@ _NON_RENDERING_CONTAINER_TAGS = frozenset(
 )
 
 
+def parse_style_declarations(attrib: Mapping[str, str]) -> dict[str, str]:
+    """``style``'s own ``property: value`` declarations, parsed once
+    (issue #41 review fix round 1) -- shared by :func:`_element_has_fill`
+    and :mod:`vectorpress.validate.stray_object`'s own ``_is_invisible``,
+    both of which need to check a ``style`` declaration with the same
+    "a style declaration wins over the plain attribute" precedence SVG
+    itself gives it, rather than each re-parsing ``style`` on its own."""
+    style = attrib.get("style", "")
+    declarations: dict[str, str] = {}
+    for declaration in style.split(";"):
+        name, _sep, value = declaration.partition(":")
+        name = name.strip().lower()
+        if name:
+            declarations[name] = value.strip()
+    return declarations
+
+
+def effective_attribute(attrib: Mapping[str, str], name: str) -> str | None:
+    """``attrib``'s own effective value for presentation attribute
+    ``name`` (issue #41 review fix round 1): a ``style`` declaration wins
+    over the plain attribute (SVG's own precedence), falling back to the
+    plain attribute, then ``None`` when neither is set."""
+    declarations = parse_style_declarations(attrib)
+    if name in declarations:
+        return declarations[name]
+    return attrib.get(name)
+
+
 def _element_has_fill(attrib: Mapping[str, str]) -> bool:
     """Whether a ``<path>`` element's own attributes paint a fill at all
     (§9's "a path with no fill, where a closed filled path is expected") --
     SVG's own default (no ``fill`` attribute, no ``style`` override) is a
     *filled* black shape, so only an explicit ``none`` (the ``fill``
     attribute, or a ``fill`` declaration inside ``style``) counts as "no
-    fill". A ``style`` declaration wins over the plain attribute, the same
-    precedence SVG itself gives it."""
-    style = attrib.get("style", "")
-    style_fill: str | None = None
-    for declaration in style.split(";"):
-        name, _sep, value = declaration.partition(":")
-        if name.strip() == "fill":
-            style_fill = value.strip()
-    effective = style_fill if style_fill is not None else attrib.get("fill")
+    fill"."""
+    effective = effective_attribute(attrib, "fill")
     return effective is None or effective.strip().lower() != "none"
 
 
@@ -566,6 +587,19 @@ def parse_subpaths(svg_bytes: bytes) -> list[Subpath]:
     authored (issue #41) -- unlike :func:`parse_cut_file`, this never
     groups a subpath into a piece or a hole.
 
+    Only a truly empty subpath (a bare ``Move`` with nothing after it, no
+    points at all -- ``len(points) < 2``) is dropped here (issue #41
+    review fix round 1): a two-point subpath, a bare open line segment
+    such as ``<path d="M0,0 L50,50"/>``, is kept -- it is exactly §9's
+    simplest "a subpath that is not closed" case, and dropping it here
+    would hide it from :mod:`vectorpress.validate.open_path` entirely, the
+    one detector that needs to see it. :mod:`vectorpress.validate.
+    duplicate_geometry` and :mod:`vectorpress.validate.overlap` -- the
+    other two consumers of this function's own output -- filter a
+    fewer-than-three-point subpath back out themselves (their own modules'
+    docstrings): neither "the same geometry" nor "a self-intersecting
+    ring" means anything for a shape with no real interior.
+
     Raises :class:`ValueError` the same way :func:`parse_cut_file` does,
     for unparseable XML or path data (§35)."""
     root = ET.fromstring(svg_bytes)
@@ -578,8 +612,8 @@ def parse_subpaths(svg_bytes: bytes) -> list[Subpath]:
         has_fill = _element_has_fill(element.attrib)
         for subpath_index, subpath in enumerate(se.Path(d).as_subpaths()):
             points = _flatten_subpath(subpath)
-            if len(points) < 3:
-                continue  # not a real polygon: an empty or degenerate subpath
+            if len(points) < 2:
+                continue  # truly empty: a bare Move with nothing after it
             subpaths.append(
                 Subpath(
                     element_index=element_index,

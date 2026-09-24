@@ -928,20 +928,40 @@ def _all_files(root: Path) -> set[Path]:
     return {path.relative_to(root) for path in root.rglob("*") if path.is_file()}
 
 
+@pytest.fixture
+def temp_findings_dir(tmp_path: Path) -> Path:
+    """A throwaway copy of ``tests/fixtures/findings/`` (issue #41 review
+    fix round 1): a ``--file`` "writes nothing" test must check the trip
+    SVG's own directory, not only the catalog root -- a findings report
+    written *beside the validated file itself* (exactly what catalog
+    validation does, so the likeliest possible regression) would slip past
+    a check that only snapshots ``temp_catalog_root``. Validating straight
+    out of the committed ``tests/fixtures/findings/`` directory would also
+    risk writing into the real repo checkout if such a regression ever
+    happened -- this copy is never that directory."""
+    dest = tmp_path / "findings"
+    shutil.copytree(FINDINGS_FIXTURES_DIR, dest)
+    return dest
+
+
 @pytest.mark.integration
 @pytest.mark.parametrize("name,expected_kind", TRIP_SVG_KINDS)
 def test_validate_file_reports_exactly_the_trip_svgs_own_kind(
     monkeypatch: pytest.MonkeyPatch,
     temp_catalog_root: Path,
+    temp_findings_dir: Path,
     name: str,
     expected_kind: FindingKind,
 ) -> None:
     """Issue #41's own acceptance criterion: ``vpress validate --file
     <trip svg> --reference-size 3`` reports exactly that kind with a
-    location and ``needs review``, and writes nothing anywhere."""
+    location and ``needs review``, and writes nothing anywhere -- neither
+    in the catalog nor beside the trip SVG itself (issue #41 review fix
+    round 1)."""
     monkeypatch.chdir(temp_catalog_root)
-    svg_path = FINDINGS_FIXTURES_DIR / f"{name}.svg"
-    before = _all_files(temp_catalog_root)
+    svg_path = temp_findings_dir / f"{name}.svg"
+    before_catalog = _all_files(temp_catalog_root)
+    before_findings_dir = _all_files(temp_findings_dir)
 
     result = runner.invoke(app, ["validate", "--file", str(svg_path), "--reference-size", "3"])
 
@@ -951,33 +971,36 @@ def test_validate_file_reports_exactly_the_trip_svgs_own_kind(
     assert len(finding_lines) == 1
     assert finding_lines[0].startswith(f"  {expected_kind.value}\t")
     assert re.search(r"\(-?[\d.]+,-?[\d.]+\)-\(-?[\d.]+,-?[\d.]+\)|\(no bbox\)", finding_lines[0])
-    assert _all_files(temp_catalog_root) == before  # writes nothing anywhere
+    assert _all_files(temp_catalog_root) == before_catalog  # writes nothing in the catalog
+    assert _all_files(temp_findings_dir) == before_findings_dir  # nor beside the trip SVG
 
 
 @pytest.mark.integration
 def test_validate_file_on_the_clean_svg_passes(
-    monkeypatch: pytest.MonkeyPatch, temp_catalog_root: Path
+    monkeypatch: pytest.MonkeyPatch, temp_catalog_root: Path, temp_findings_dir: Path
 ) -> None:
     monkeypatch.chdir(temp_catalog_root)
-    svg_path = FINDINGS_FIXTURES_DIR / "clean.svg"
-    before = _all_files(temp_catalog_root)
+    svg_path = temp_findings_dir / "clean.svg"
+    before_catalog = _all_files(temp_catalog_root)
+    before_findings_dir = _all_files(temp_findings_dir)
 
     result = runner.invoke(app, ["validate", "--file", str(svg_path), "--reference-size", "3"])
 
     assert result.exit_code == 0, result.output
     assert "\tpass" in result.stdout
     assert "needs review" not in result.stdout
-    assert _all_files(temp_catalog_root) == before
+    assert _all_files(temp_catalog_root) == before_catalog
+    assert _all_files(temp_findings_dir) == before_findings_dir
 
 
 @pytest.mark.integration
 def test_validate_file_defaults_the_reference_size_from_the_catalog(
-    monkeypatch: pytest.MonkeyPatch, temp_catalog_root: Path
+    monkeypatch: pytest.MonkeyPatch, temp_catalog_root: Path, temp_findings_dir: Path
 ) -> None:
     """Inside a catalog, ``--file`` falls back to the catalog default
     reference size (3.0in here) when ``--reference-size`` is not given."""
     monkeypatch.chdir(temp_catalog_root)
-    svg_path = FINDINGS_FIXTURES_DIR / "open_path.svg"
+    svg_path = temp_findings_dir / "open_path.svg"
 
     result = runner.invoke(app, ["validate", "--file", str(svg_path)])
 
@@ -1000,10 +1023,10 @@ def test_validate_file_outside_any_catalog_requires_reference_size(
 
 @pytest.mark.integration
 def test_validate_file_outside_any_catalog_works_when_reference_size_is_given(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, temp_findings_dir: Path
 ) -> None:
     monkeypatch.chdir(tmp_path)
-    svg_path = FINDINGS_FIXTURES_DIR / "clean.svg"
+    svg_path = temp_findings_dir / "clean.svg"
 
     result = runner.invoke(app, ["validate", "--file", str(svg_path), "--reference-size", "3"])
 

@@ -108,3 +108,29 @@ def test_explicit_fill_black_yields_no_finding() -> None:
 
     kinds = {finding.kind for finding in result.findings}
     assert FindingKind.OPEN_PATH not in kinds
+
+
+# --- a bare open line segment (fewer than 3 points) still reaches open_path ----------------
+
+
+def test_a_bare_two_point_line_segment_yields_an_open_path_finding() -> None:
+    """Issue #41 review fix round 1: a subpath with only two points -- an
+    open line segment, not even a polygon -- is §9's simplest possible
+    "not closed" case. Before this fix, ``_svg_geometry.parse_subpaths``
+    silently dropped any subpath under three points, so a document
+    containing nothing but a stray open segment like this reported
+    ``pass`` -- no detector ever saw it (it is far too small a shape to
+    become a piece or a hole either, so no other kind picks it up)."""
+    svg = _svg(b'<path d="M20,50 L60,80"/>')
+
+    result = validate_cut_file(svg, REFERENCE_SIZE_IN)
+
+    assert result.outcome is ValidationOutcome.NEEDS_REVIEW
+    assert len(result.findings) == 1  # nothing else in this document to find
+    finding = result.findings[0]
+    assert finding.kind is FindingKind.OPEN_PATH
+    assert finding.location is not None
+    assert finding.location.min_x == pytest.approx(20.0)
+    assert finding.location.min_y == pytest.approx(50.0)
+    assert finding.location.max_x == pytest.approx(60.0)
+    assert finding.location.max_y == pytest.approx(80.0)

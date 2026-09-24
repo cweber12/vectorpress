@@ -86,9 +86,22 @@ def temp_catalog_root(tmp_path: Path) -> Path:
     return root
 
 
+@pytest.fixture
+def temp_findings_dir(tmp_path: Path) -> Path:
+    """A throwaway copy of ``tests/fixtures/findings/`` (issue #41 review
+    fix round 1, mirroring ``tests/integration/test_validate.py``'s own
+    fixture of the same name): every ``--file`` call below validates a
+    copy, never the committed fixture directly, so a regression that wrote
+    a findings report beside the validated file (exactly what catalog
+    validation does) could never land in the real repo checkout."""
+    dest = tmp_path / "findings"
+    shutil.copytree(FINDINGS_FIXTURES_DIR, dest)
+    return dest
+
+
 @pytest.mark.integration
 @pytest.mark.skipif(shutil.which("uv") is None, reason="uv is not on PATH")
-def test_prd_03_acceptance_walkthrough(temp_catalog_root: Path) -> None:
+def test_prd_03_acceptance_walkthrough(temp_catalog_root: Path, temp_findings_dir: Path) -> None:
     # 1. generate --all
     generate_result = _run_vpress(["generate", "--all"], cwd=temp_catalog_root)
     assert generate_result.returncode == 1, generate_result.stdout + generate_result.stderr
@@ -101,10 +114,11 @@ def test_prd_03_acceptance_walkthrough(temp_catalog_root: Path) -> None:
         validate_all_result.stdout + validate_all_result.stderr
     )
 
-    # 3. validate --file on each trip SVG
+    # 3. validate --file on each trip SVG (a throwaway copy, never the
+    # committed fixture -- temp_findings_dir's own docstring)
     file_outputs: list[str] = []
     for name in TRIP_SVGS:
-        svg_path = FINDINGS_FIXTURES_DIR / f"{name}.svg"
+        svg_path = temp_findings_dir / f"{name}.svg"
         file_result = _run_vpress(
             ["validate", "--file", str(svg_path), "--reference-size", "3"],
             cwd=temp_catalog_root,
@@ -113,7 +127,7 @@ def test_prd_03_acceptance_walkthrough(temp_catalog_root: Path) -> None:
         file_outputs.append(file_result.stdout)
 
     clean_result = _run_vpress(
-        ["validate", "--file", str(FINDINGS_FIXTURES_DIR / "clean.svg"), "--reference-size", "3"],
+        ["validate", "--file", str(temp_findings_dir / "clean.svg"), "--reference-size", "3"],
         cwd=temp_catalog_root,
     )
     assert clean_result.returncode == 0, clean_result.stdout + clean_result.stderr

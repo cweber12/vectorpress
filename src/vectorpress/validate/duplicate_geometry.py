@@ -68,6 +68,12 @@ def detect(subpaths: list[Subpath]) -> list[Finding]:
     rounding tolerance (§9), located at the shared bounding box (identical
     geometry means an identical bbox too).
 
+    A subpath under three points -- a bare open line segment, say -- is
+    never a candidate here (issue #41 review fix round 1): "the same
+    geometry" means nothing for a shape with no real interior, and
+    :func:`~vectorpress.validate._svg_geometry.parse_subpaths` itself keeps
+    one only for :mod:`vectorpress.validate.open_path`'s own sake.
+
     ``subpaths`` is already in document order (:func:`~vectorpress.
     validate._svg_geometry.parse_subpaths`), so iterating pairs with the
     first index always less than the second already yields findings in a
@@ -75,6 +81,7 @@ def detect(subpaths: list[Subpath]) -> list[Finding]:
     subpath's own path reference, then the second's -- with no further
     sort needed (issue #37's own ordering rule).
     """
+    subpaths = [subpath for subpath in subpaths if len(subpath.points) >= 3]
     signatures = [_signature(subpath) for subpath in subpaths]
 
     findings: list[Finding] = []

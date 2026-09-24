@@ -126,3 +126,18 @@ def test_two_identical_stacked_shapes_are_duplicate_not_overlap() -> None:
     kinds = {finding.kind for finding in result.findings}
     assert FindingKind.OVERLAP not in kinds
     assert FindingKind.DUPLICATE_GEOMETRY in kinds
+
+
+def test_two_crossing_bare_line_segments_are_not_an_overlap() -> None:
+    """Near miss (issue #41 review fix round 1): two open, two-point
+    subpaths whose own segments genuinely cross are never tested here --
+    a subpath under three points has no real interior, so neither
+    self-intersection nor a pairwise ring crossing means anything for it;
+    :mod:`vectorpress.validate.open_path` is the one detector a bare line
+    segment reaches."""
+    svg = _HEAD + b'<path d="M0,0 L40,40 M0,40 L40,0"/>' + _TAIL
+
+    result = validate_cut_file(svg, REFERENCE_SIZE_IN)
+
+    kinds = {finding.kind for finding in result.findings}
+    assert FindingKind.OVERLAP not in kinds

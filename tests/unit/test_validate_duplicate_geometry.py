@@ -97,3 +97,17 @@ def test_duplicate_found_regardless_of_starting_vertex_or_winding_direction() ->
 
     kinds = {finding.kind for finding in result.findings}
     assert FindingKind.DUPLICATE_GEOMETRY in kinds
+
+
+def test_two_identical_bare_line_segments_are_not_a_duplicate() -> None:
+    """Near miss (issue #41 review fix round 1): two open, two-point
+    subpaths with identical coordinates are never compared here -- a
+    subpath under three points has no real interior for "the same
+    geometry" to mean anything about; :mod:`vectorpress.validate.
+    open_path` is the one detector a bare line segment reaches."""
+    svg = _HEAD + b'<path d="M120,10 L150,40 M120,10 L150,40"/>' + _TAIL
+
+    result = validate_cut_file(svg, REFERENCE_SIZE_IN)
+
+    kinds = {finding.kind for finding in result.findings}
+    assert FindingKind.DUPLICATE_GEOMETRY not in kinds
