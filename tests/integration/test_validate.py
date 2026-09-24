@@ -23,6 +23,12 @@ review at ``kelp_forest_mini_pack``'s smaller reference-size override --
 see ``test_turban_snail_passes_at_the_catalog_default_and_needs_review_at_the_product_override``
 below, the extra acceptance criterion reassigned to this issue by
 controller ruling).
+
+Issue #40 adds two more subjects, each carrying exactly one shape-based
+finding kind: ``nudibranch`` (two lobes joined by a neck narrower than the
+narrow-feature width threshold) and ``coralline_algae`` (a finely rippled
+outline with far more curve nodes per inch of perimeter than the
+excessive-complexity density threshold allows).
 """
 
 import json
@@ -60,6 +66,8 @@ FIXTURE_CUT_FILES = [
     ("bat_star", "bat-star-cut.svg"),
     ("keyhole_limpet", "keyhole-limpet-cut.svg"),
     ("turban_snail", "turban-snail-cut.svg"),
+    ("nudibranch", "nudibranch-cut.svg"),
+    ("coralline_algae", "coralline-algae-cut.svg"),
 ]
 
 # Subjects whose cut file is a single physical piece -- pass, no findings.
@@ -80,6 +88,15 @@ FIXTURE_AREA_FINDING_ASSETS = [
     ("gumboot_chiton", "accidental_dot"),
     ("bat_star", "tiny_isolated_shape"),
     ("keyhole_limpet", "small_hole"),
+]
+
+# (asset ID, expected FindingKind value) -- issue #40's two shape-finding
+# fixtures, each tripping exactly the kind it is named for at the catalog
+# default reference size (3.0in). Checked by
+# ``test_shape_finding_fixtures_need_review_with_their_intended_kind`` below.
+FIXTURE_SHAPE_FINDING_ASSETS = [
+    ("nudibranch", "narrow_feature"),
+    ("coralline_algae", "excessive_complexity"),
 ]
 
 
@@ -211,6 +228,46 @@ def test_area_finding_fixtures_need_review_with_their_intended_kind(
     assert result.exit_code == 0, result.output
     lines = result.stdout.splitlines()
     for asset_id, expected_kind in FIXTURE_AREA_FINDING_ASSETS:
+        _, filename = next(f for f in FIXTURE_CUT_FILES if f[0] == asset_id)
+        assert f"{asset_id}\tcut_svg\t{filename}\tneeds review" in result.stdout
+
+        header_index = next(i for i, line in enumerate(lines) if line.startswith(f"{asset_id}\t"))
+        finding_line = lines[header_index + 1].strip()
+        assert finding_line.startswith(expected_kind), finding_line
+        # a location: an "(x,y)-(x,y)" bbox, the same shape every other
+        # detector's finding already carries (issue #37).
+        assert re.search(r"\(-?[\d.]+,-?[\d.]+\)-\(-?[\d.]+,-?[\d.]+\)", finding_line)
+        # exactly one finding line -- no other kind mixed in for this asset.
+        next_header_index = next(
+            (
+                i
+                for i in range(header_index + 1, len(lines))
+                if "\t" in lines[i] and not lines[i].startswith(" ")
+            ),
+            len(lines),
+        )
+        assert next_header_index == header_index + 2
+
+
+@pytest.mark.integration
+def test_shape_finding_fixtures_need_review_with_their_intended_kind(
+    monkeypatch: pytest.MonkeyPatch, temp_catalog_root: Path
+) -> None:
+    """Issue #40 acceptance criterion 1: on a temp fixture copy, ``vpress
+    generate --all`` then ``vpress validate --all`` shows each new subject
+    (``nudibranch``, ``coralline_algae``) as ``needs review``, with its
+    intended finding kind and a location -- and with no other finding kind
+    mixed in, since each fixture was built to trip exactly one
+    (``tests/fixtures/catalog/README.md``)."""
+    monkeypatch.chdir(temp_catalog_root)
+    generate_result = runner.invoke(app, ["generate", "--all"])
+    assert generate_result.exit_code == 1, generate_result.output  # acorn_barnacle still fails
+
+    result = runner.invoke(app, ["validate", "--all"])
+
+    assert result.exit_code == 0, result.output
+    lines = result.stdout.splitlines()
+    for asset_id, expected_kind in FIXTURE_SHAPE_FINDING_ASSETS:
         _, filename = next(f for f in FIXTURE_CUT_FILES if f[0] == asset_id)
         assert f"{asset_id}\tcut_svg\t{filename}\tneeds review" in result.stdout
 

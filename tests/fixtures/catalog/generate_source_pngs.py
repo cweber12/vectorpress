@@ -33,10 +33,18 @@ of these gets its own larger canvas, the same reasoning as ``owl_limpet``'s
 below: a feature a handful of pixels across needs real room to place
 precisely relative to both ``cut_svg``'s cleanup thresholds and
 ``validate.cut_file``'s own validation thresholds.
+
+Two more subjects (issue #40, §9, §9.1) each carry exactly one shape-based
+finding kind: ``nudibranch`` (two round lobes joined by a neck narrower than
+the narrow-feature width threshold) and ``coralline_algae`` (a disk with a
+finely rippled outline, far more curve nodes per inch of perimeter than the
+excessive-complexity density threshold allows). Both share the same
+300x300 canvas the four issue #39 subjects above use.
 """
 
 from __future__ import annotations
 
+import math
 import struct
 import zlib
 from pathlib import Path
@@ -386,6 +394,80 @@ def _turban_snail_silhouette_with_a_borderline_hole(size: int) -> Grid:
     )
 
 
+# --- nudibranch, coralline_algae: issue #40's shape-finding fixtures ------
+#
+# Both share the same 300x300 canvas the four issue #39 fixtures use, for
+# the same reason: a feature a few pixels across needs real room, relative
+# to both cut_svg's cleanup thresholds and validate.cut_file's own
+# validation thresholds, at the catalog's default 3in reference size.
+# Geometry was tuned empirically against the real cut_svg.generate +
+# validate.cut_file.validate_cut_file pipeline (not hand-derived), the same
+# reasoning issue #39's own fixtures document -- a morphological opening's
+# effect on a shape's surviving extent, and how many curve segments potrace
+# fits to an outline, are not simple, predictable arithmetic.
+SHAPE_FINDING_FIXTURE_SIZE = 300
+
+
+def _nudibranch_silhouette_with_a_narrow_neck(size: int) -> Grid:
+    """Two round lobes -- a nudibranch's own head and tail, issue #40's own
+    example -- joined by a single straight neck: 7px tall, wide enough to
+    survive ``cut_svg``'s own morphological-opening cleanup (about 0.06in at
+    this fixture's own scale) yet narrower than ``validate.cut_file``'s own
+    narrow-feature width threshold (0.1in) -- about 0.09in measured once
+    traced. Its cut file's findings report holds exactly one finding:
+    ``narrow_feature``, located at the neck, nothing else."""
+    lobe_radius = 50.0
+    gap = 50.0
+    neck_height = 7.0
+    cy = size / 2
+    left_cx = size / 2 - gap / 2 - lobe_radius
+    right_cx = size / 2 + gap / 2 + lobe_radius
+    left_lobe = _solid_blob(size, cx=left_cx, cy=cy, radius=lobe_radius)
+    right_lobe = _solid_blob(size, cx=right_cx, cy=cy, radius=lobe_radius)
+    neck_x0 = left_cx + lobe_radius
+    neck_x1 = right_cx - lobe_radius
+    neck_y0 = cy - neck_height / 2
+    neck_y1 = cy + neck_height / 2
+    grid: Grid = []
+    for y in range(size):
+        row: list[bool] = []
+        for x in range(size):
+            ink = left_lobe[y][x] or right_lobe[y][x]
+            if neck_x0 <= x <= neck_x1 and neck_y0 <= y <= neck_y1:
+                ink = True
+            row.append(ink)
+        grid.append(row)
+    return grid
+
+
+def _coralline_algae_silhouette_with_a_ragged_outline(size: int) -> Grid:
+    """A disk whose own radius wobbles sinusoidally around its full
+    perimeter -- coralline algae's own finely crusted, irregular edge,
+    issue #40's own example -- 22 ripples, each one requiring potrace to fit
+    its own curve segments no matter how coarse ``cut_svg``'s own
+    ``curve_tolerance`` is, so this shape's own node count (and so its nodes
+    per inch of perimeter, §9.1) is far higher than a plain disk this size
+    needs. The ripples are spaced and sized to leave every local width well
+    above the narrow-feature threshold, so this shape's cut file trips
+    exactly one finding: ``excessive_complexity``, nothing else."""
+    base_radius = 130.0
+    amplitude = 6.0
+    ripples = 22
+    center = size / 2
+    grid: Grid = []
+    for y in range(size):
+        row: list[bool] = []
+        for x in range(size):
+            dx = x - center
+            dy = y - center
+            distance = (dx * dx + dy * dy) ** 0.5
+            angle = math.atan2(dy, dx)
+            wobble = amplitude * math.sin(ripples * angle)
+            row.append(distance <= base_radius + wobble)
+        grid.append(row)
+    return grid
+
+
 # (asset ID, filename, role, canvas size, mask, RGBA fill color): every
 # source needing its own, larger canvas -- a distinct tuple shape from
 # SHAPED_SOURCE_IMAGES above (which hardcodes the shared 16x16 ``SIZE``).
@@ -429,6 +511,22 @@ LARGE_CANVAS_SOURCE_IMAGES: list[tuple[str, str, str, int, Grid, Rgba]] = [
         AREA_FINDING_FIXTURE_SIZE,
         _turban_snail_silhouette_with_a_borderline_hole(AREA_FINDING_FIXTURE_SIZE),
         (90, 110, 70, 255),
+    ),
+    (
+        "nudibranch",
+        "silhouette.png",
+        "silhouette",
+        SHAPE_FINDING_FIXTURE_SIZE,
+        _nudibranch_silhouette_with_a_narrow_neck(SHAPE_FINDING_FIXTURE_SIZE),
+        (200, 100, 150, 255),
+    ),
+    (
+        "coralline_algae",
+        "silhouette.png",
+        "silhouette",
+        SHAPE_FINDING_FIXTURE_SIZE,
+        _coralline_algae_silhouette_with_a_ragged_outline(SHAPE_FINDING_FIXTURE_SIZE),
+        (200, 80, 90, 255),
     ),
 ]
 

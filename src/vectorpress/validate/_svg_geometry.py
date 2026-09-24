@@ -128,6 +128,21 @@ def svg_viewbox_longest_side(svg_bytes: bytes) -> float:
     raise ValueError("SVG has neither a viewBox nor width/height to establish a scale from")
 
 
+def _node_count(subpath: se.Subpath) -> int:
+    """The number of anchor points a human editor would see on ``subpath``
+    (issue #40, §9's "excessive geometric complexity"): every ``Move``,
+    ``Line``, curve or ``Arc`` segment contributes one node at its own end
+    point -- a ``Move`` plus ``n`` further segments describes ``n + 1``
+    distinct anchors -- while ``Close`` (a zero-length return to the
+    subpath's start, never a new anchor of its own) is not counted. This is
+    the *authored* node count -- ``svgelements``' own segment list, exactly
+    as potrace's curve fitting (or a hand-authored override) wrote it --
+    never :func:`_flatten_subpath`'s fixed-step curve sampling, which would
+    report the same, constant :data:`_CURVE_STEPS`-per-curve count for
+    every path regardless of how few or many curves it actually has."""
+    return sum(1 for segment in subpath if not isinstance(segment, se.Close))
+
+
 def _flatten_subpath(subpath: se.Subpath) -> list[Point]:
     """One subpath's geometry as a flat polygon ring: every corner vertex
     directly, every curved segment sampled at :data:`_CURVE_STEPS` fixed
@@ -238,13 +253,29 @@ class Piece:
     than a hole), identified by where it sits in the document (issue #37's
     "path reference"), its own bounding box, and its net area (its own
     shell, minus any holes directly inside it) -- used to rank "the largest"
-    piece among several."""
+    piece among several.
+
+    ``node_count``, ``outer_ring`` and ``hole_rings`` (issue #40) are this
+    piece's own authored geometry, needed by :mod:`vectorpress.validate.
+    excessive_complexity` (node density against physical perimeter) and
+    :mod:`vectorpress.validate.narrow_feature` (rasterizing this piece --
+    its own shell minus its own immediate holes, the same even-odd shape
+    the SVG itself renders -- to measure a local width). ``outer_ring`` is
+    this piece's own flattened boundary (:func:`_flatten_subpath`);
+    ``hole_rings`` are its immediate holes' flattened boundaries only (a
+    hole nested inside one of *those* holes would itself be a further
+    piece, not one of this piece's own ``hole_rings`` -- out of scope for
+    both consumers, the same "well-nested, simple" scope this module's own
+    docstring already draws)."""
 
     element_index: int
     subpath_index: int
     element_id: str | None
     bbox: BoundingBox
     area: float
+    node_count: int
+    outer_ring: tuple[Point, ...]
+    hole_rings: tuple[tuple[Point, ...], ...]
 
     @property
     def largest_dimension(self) -> float:
@@ -327,7 +358,7 @@ def parse_cut_file(svg_bytes: bytes, reference_size_in: float) -> ParsedCutFile:
     root = ET.fromstring(svg_bytes)
     path_elements = [element for element in root.iter() if _local_name(element.tag) == "path"]
 
-    subpaths: list[tuple[int, int, str | None, list[Point]]] = []
+    subpaths: list[tuple[int, int, str | None, list[Point], int]] = []
     for element_index, element in enumerate(path_elements):
         d = element.attrib.get("d", "")
         element_id = element.attrib.get("id")
@@ -335,7 +366,9 @@ def parse_cut_file(svg_bytes: bytes, reference_size_in: float) -> ParsedCutFile:
             points = _flatten_subpath(subpath)
             if len(points) < 3:
                 continue  # not a real polygon: an empty or degenerate subpath
-            subpaths.append((element_index, subpath_index, element_id, points))
+            subpaths.append(
+                (element_index, subpath_index, element_id, points, _node_count(subpath))
+            )
 
     polygons = [record[3] for record in subpaths]
     areas = [_polygon_area(polygon) for polygon in polygons]
@@ -377,7 +410,7 @@ def parse_cut_file(svg_bytes: bytes, reference_size_in: float) -> ParsedCutFile:
 
     pieces: list[Piece] = []
     holes: list[Hole] = []
-    for i, (element_index, subpath_index, element_id, points) in enumerate(subpaths):
+    for i, (element_index, subpath_index, element_id, points, node_count) in enumerate(subpaths):
         if depths[i] % 2 != 0:
             # A hole, not a piece of its own -- subtracted from its parent's
             # area below, and recorded in its own right (issue #39) as a
@@ -392,9 +425,10 @@ def parse_cut_file(svg_bytes: bytes, reference_size_in: float) -> ParsedCutFile:
                 )
             )
             continue
-        hole_area = sum(
-            areas[j] for j in range(len(polygons)) if depths[j] == depths[i] + 1 and parents[j] == i
-        )
+        own_hole_indices = [
+            j for j in range(len(polygons)) if depths[j] == depths[i] + 1 and parents[j] == i
+        ]
+        hole_area = sum(areas[j] for j in own_hole_indices)
         pieces.append(
             Piece(
                 element_index=element_index,
@@ -402,6 +436,9 @@ def parse_cut_file(svg_bytes: bytes, reference_size_in: float) -> ParsedCutFile:
                 element_id=element_id,
                 bbox=_polygon_bbox(points),
                 area=areas[i] - hole_area,
+                node_count=node_count,
+                outer_ring=tuple(points),
+                hole_rings=tuple(tuple(polygons[j]) for j in own_hole_indices),
             )
         )
 

@@ -264,12 +264,18 @@ def test_dot_sized_piece_above_threshold_is_never_reported_as_a_dot() -> None:
 
 
 def test_sliver_below_threshold_yields_exactly_one_tiny_isolated_shape_finding() -> None:
+    """This sliver is 3 units tall -- under both the tiny-shape area
+    threshold (200 sq units) and, independently, the narrow-feature width
+    threshold (10 units, issue #40): narrow_feature is not one of the three
+    mutually-exclusive piece-classification kinds (:class:`FindingKind`'s
+    own "one kind per shape" note names only accidental_dot,
+    tiny_isolated_shape and disconnected_fragments), so it fires alongside
+    tiny_isolated_shape rather than competing with it -- see
+    ``test_sliver_below_threshold_is_also_a_narrow_feature`` below."""
     result = validate_cut_file(_SLIVER_BELOW_THRESHOLD, REFERENCE_SIZE_IN)
 
     assert result.outcome is ValidationOutcome.NEEDS_REVIEW
-    assert len(result.findings) == 1
-    finding = result.findings[0]
-    assert finding.kind is FindingKind.TINY_ISOLATED_SHAPE
+    finding = next(f for f in result.findings if f.kind is FindingKind.TINY_ISOLATED_SHAPE)
     assert finding.location.min_x == pytest.approx(200.0)
     assert finding.location.min_y == pytest.approx(0.0)
     assert finding.location.max_x == pytest.approx(250.0)
@@ -278,17 +284,31 @@ def test_sliver_below_threshold_yields_exactly_one_tiny_isolated_shape_finding()
     assert finding.threshold == pytest.approx(0.02)
 
 
+def test_sliver_below_threshold_is_also_a_narrow_feature() -> None:
+    """Issue #40: narrow_feature and tiny_isolated_shape are independent
+    axes over the same piece -- this sliver is both small in area and
+    narrow in width, so it carries exactly one finding of each kind, never
+    a conflict between them."""
+    result = validate_cut_file(_SLIVER_BELOW_THRESHOLD, REFERENCE_SIZE_IN)
+
+    kinds = {finding.kind for finding in result.findings}
+    assert kinds == {FindingKind.TINY_ISOLATED_SHAPE, FindingKind.NARROW_FEATURE}
+
+
 def test_sliver_sized_piece_above_threshold_is_never_reported_as_tiny() -> None:
     """Issue #39's "the same shapes above threshold yield none": no
     TINY_ISOLATED_SHAPE (nor ACCIDENTAL_DOT) finding -- reported as a
     disconnected fragment instead, the same reasoning as the dot case
-    above."""
+    above. This sliver is still only 5 units tall, under the narrow-feature
+    width threshold (10 units), so it also carries a NARROW_FEATURE finding
+    (issue #40: an independent axis, not part of the three-way piece
+    classification the first two assertions describe)."""
     result = validate_cut_file(_SLIVER_SIZED_PIECE_ABOVE_THRESHOLD, REFERENCE_SIZE_IN)
 
     kinds = {finding.kind for finding in result.findings}
     assert FindingKind.TINY_ISOLATED_SHAPE not in kinds
     assert FindingKind.ACCIDENTAL_DOT not in kinds
-    assert kinds == {FindingKind.DISCONNECTED_FRAGMENTS}
+    assert kinds == {FindingKind.DISCONNECTED_FRAGMENTS, FindingKind.NARROW_FEATURE}
 
 
 def test_pinhole_below_threshold_yields_exactly_one_small_hole_finding() -> None:
@@ -319,13 +339,18 @@ def test_hole_above_threshold_yields_no_findings_at_all() -> None:
 def test_mutual_exclusion_across_dot_tiny_shape_and_disconnected_fragment() -> None:
     """Issue #39's "one kind per shape": one document carrying a dot, a
     sliver, a genuine extra piece and a small hole all at once reports
-    exactly one finding of each of the four kinds, each located at its own
+    exactly one finding of each of those four kinds, each located at its own
     piece, and no piece's own path reference (element, subpath) appears
-    under more than one kind."""
+    under more than one of the three mutually-exclusive piece-classification
+    kinds. The sliver (subpath 3, 50x3) is also narrower than the
+    narrow-feature width threshold (issue #40) -- an independent axis, not
+    part of that three-way exclusion -- so it carries a fifth finding,
+    NARROW_FEATURE, on the very same piece as its own TINY_ISOLATED_SHAPE
+    finding."""
     result = validate_cut_file(_ONE_OF_EACH_KIND, REFERENCE_SIZE_IN)
 
     assert result.outcome is ValidationOutcome.NEEDS_REVIEW
-    assert len(result.findings) == 4
+    assert len(result.findings) == 5
 
     by_kind = {finding.kind: finding for finding in result.findings}
     assert by_kind.keys() == {
@@ -333,16 +358,25 @@ def test_mutual_exclusion_across_dot_tiny_shape_and_disconnected_fragment() -> N
         FindingKind.TINY_ISOLATED_SHAPE,
         FindingKind.DISCONNECTED_FRAGMENTS,
         FindingKind.SMALL_HOLE,
+        FindingKind.NARROW_FEATURE,
     }
     assert by_kind[FindingKind.ACCIDENTAL_DOT].path_reference.subpath_index == 2
     assert by_kind[FindingKind.TINY_ISOLATED_SHAPE].path_reference.subpath_index == 3
     assert by_kind[FindingKind.DISCONNECTED_FRAGMENTS].path_reference.subpath_index == 4
     assert by_kind[FindingKind.SMALL_HOLE].path_reference.subpath_index == 1
+    assert by_kind[FindingKind.NARROW_FEATURE].path_reference.subpath_index == 3
 
-    # No piece (element, subpath) pair is claimed by more than one finding.
+    # No piece (element, subpath) pair is claimed by more than one of the
+    # three mutually-exclusive piece-classification kinds.
+    exclusive_kinds = {
+        FindingKind.ACCIDENTAL_DOT,
+        FindingKind.TINY_ISOLATED_SHAPE,
+        FindingKind.DISCONNECTED_FRAGMENTS,
+    }
     claimed = [
         (finding.path_reference.element_index, finding.path_reference.subpath_index)
         for finding in result.findings
+        if finding.kind in exclusive_kinds
     ]
     assert len(claimed) == len(set(claimed))
 
@@ -354,14 +388,124 @@ def test_every_cut_svg_cleanup_threshold_is_strictly_below_its_validation_counte
     """ADR 0007: cleanup removes what is plainly noise before tracing even
     happens; validation flags what is borderline for a human to decide.
     A later tweak to either set must keep cleanup strictly smaller than the
-    validation threshold it sits under, or a shape/hole cleanup would have
-    kept could never even reach validation to be flagged."""
+    validation threshold it sits under, or a shape/hole/feature cleanup
+    would have kept could never even reach validation to be flagged (issue
+    #40 extends this to the cut_svg opening width against the
+    narrow-feature minimum width)."""
     cleanup_parameters = RECIPES[DerivativeType.CUT_SVG].parameters
 
     island_min_area_in2 = cleanup_parameters["island_min_area_in2"]
     hole_min_area_in2 = cleanup_parameters["hole_min_area_in2"]
+    opening_width_in = cleanup_parameters["opening_width_in"]
     assert isinstance(island_min_area_in2, float)
     assert isinstance(hole_min_area_in2, float)
+    assert isinstance(opening_width_in, float)
 
     assert island_min_area_in2 < THRESHOLDS["tiny_isolated_shape_min_area_in2"]
     assert hole_min_area_in2 < THRESHOLDS["small_hole_min_area_in2"]
+    assert opening_width_in < THRESHOLDS["narrow_feature_min_width_in"]
+
+
+# --- narrow feature: a dumbbell with a below/above-threshold neck (issue #40) -------------
+#
+# Both dumbbells share one viewBox ("0 0 300 100") and REFERENCE_SIZE_IN
+# (3.0in), the same 100-user-units-per-inch scale every test above uses:
+# narrow_feature_min_width_in (0.1in) is 10 user units. Two 30x30 lobes (at
+# the left and right edges) are joined by a single horizontal neck, centered
+# vertically -- only the neck's own height (its width, in the narrow-feature
+# sense) differs between the two shapes.
+
+_DUMBBELL_NARROW_NECK = (
+    b'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 100" width="300" height="100">'
+    b'<path d="M0,35 L30,35 L30,47.5 L70,47.5 L70,35 L100,35 L100,65 L70,65 L70,52.5 '
+    b'L30,52.5 L30,65 L0,65 Z"/></svg>'
+)  # neck height 5 units (0.05in): below the 10-unit (0.1in) threshold.
+
+_DUMBBELL_WIDE_NECK = (
+    b'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 100" width="300" height="100">'
+    b'<path d="M0,35 L30,35 L30,40 L70,40 L70,35 L100,35 L100,65 L70,65 L70,60 '
+    b'L30,60 L30,65 L0,65 Z"/></svg>'
+)  # neck height 25 units (0.25in): comfortably above the 10-unit threshold.
+
+
+def test_dumbbell_with_a_narrow_neck_yields_one_narrow_feature_finding_at_the_neck() -> None:
+    result = validate_cut_file(_DUMBBELL_NARROW_NECK, REFERENCE_SIZE_IN)
+
+    assert result.outcome is ValidationOutcome.NEEDS_REVIEW
+    assert len(result.findings) == 1
+    finding = result.findings[0]
+    assert finding.kind is FindingKind.NARROW_FEATURE
+    assert finding.path_reference.element_index == 0
+    assert finding.path_reference.subpath_index == 0
+    # Located around the neck (x between the two lobes, y around its own
+    # 47.5-52.5 span) -- not the lobes themselves, and not the shape's own
+    # sharp corners (filtered as opening artifacts, this module's own
+    # ``_raster._MIN_ELONGATION``).
+    assert finding.location.min_x == pytest.approx(30.625)
+    assert finding.location.max_x == pytest.approx(69.375)
+    assert finding.location.min_y == pytest.approx(47.5)
+    assert finding.location.max_y == pytest.approx(52.5)
+    assert finding.measured_value == pytest.approx(0.05)
+    assert finding.threshold == pytest.approx(0.1)
+
+
+def test_dumbbell_with_a_wide_neck_yields_no_narrow_feature_finding() -> None:
+    """The same dumbbell, only the neck widened above the threshold (issue
+    #40's own acceptance criterion): no NARROW_FEATURE finding -- and
+    nothing else either, since this shape trips no other §9 kind."""
+    result = validate_cut_file(_DUMBBELL_WIDE_NECK, REFERENCE_SIZE_IN)
+
+    assert result.outcome is ValidationOutcome.PASS
+    assert result.findings == ()
+
+
+# --- excessive geometric complexity: node density and the absolute cap (issue #40) --------
+
+
+def test_a_path_with_far_too_many_nodes_for_its_size_yields_one_excessive_complexity() -> None:
+    """A jagged sawtooth outline along one edge of a small square: 40 tiny
+    (0.05-unit amplitude) zigzag segments -- far more nodes than a nearly
+    straight edge this short needs, well above
+    ``excessive_complexity_max_nodes_per_in`` (issue #40's own "nodes per
+    inch of perimeter"). The amplitude is deliberately tiny (unlike
+    ``narrow_feature``'s own dumbbell fixture above) so this shape trips
+    only excessive_complexity, not narrow_feature too."""
+    teeth = 40
+    amplitude = 0.05
+    points = ["M0,0"]
+    for i in range(teeth):
+        x = 20 * i / teeth
+        y = amplitude if i % 2 == 0 else -amplitude
+        points.append(f"L{x:.4f},{y:.4f}")
+    points.append("L20,0 L20,20 L0,20 Z")
+    jagged_d = " ".join(points)
+    jagged_svg = (
+        b'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 100" width="300" height="100">'
+        b'<path d="' + jagged_d.encode() + b'"/></svg>'
+    )
+
+    result = validate_cut_file(jagged_svg, REFERENCE_SIZE_IN)
+
+    assert result.outcome is ValidationOutcome.NEEDS_REVIEW
+    assert len(result.findings) == 1
+    finding = result.findings[0]
+    assert finding.kind is FindingKind.EXCESSIVE_COMPLEXITY
+    assert finding.path_reference.element_index == 0
+    assert finding.path_reference.subpath_index == 0
+    assert finding.measured_value is not None
+    assert finding.threshold is not None
+    assert finding.measured_value > finding.threshold
+
+
+def test_a_simple_path_of_the_same_size_yields_no_excessive_complexity_finding() -> None:
+    """A plain 20x20 square -- same physical size as the jagged shape above,
+    four nodes instead of dozens -- trips no complexity finding."""
+    simple_svg = (
+        b'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 100" width="300" height="100">'
+        b'<path d="M0,0 L20,0 L20,20 L0,20 Z"/></svg>'
+    )
+
+    result = validate_cut_file(simple_svg, REFERENCE_SIZE_IN)
+
+    kinds = {finding.kind for finding in result.findings}
+    assert FindingKind.EXCESSIVE_COMPLEXITY not in kinds

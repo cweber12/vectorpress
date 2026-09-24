@@ -1,0 +1,41 @@
+# Hand-authored asset metadata (ADR 0005). The asset ID is this folder's name.
+#
+# The narrow_feature fixture (issue #40, §9): its silhouette.png (see
+# tests/fixtures/catalog/generate_source_pngs.py) is a large, purpose-built
+# source carrying two round lobes -- a head and a tail -- joined by a single
+# straight neck, 7px tall on this asset's own 300x300 canvas: wide enough to
+# survive cut_svg's own morphological-opening cleanup (about 0.06in at this
+# fixture's own scale) yet narrower than validate.cut_file's own
+# narrow-feature width threshold (0.1in) -- about 0.09in measured once
+# traced. Its cut file's findings report holds exactly one finding:
+# narrow_feature, located at the neck, nothing else.
+#
+# ecosystems deliberately match no rule-based fixture collection: neither
+# "Kelp forest" (kelp_forest_ecosystem's rule) nor pacific_coast_tide_pool
+# (an explicit, hand-picked asset list this asset was never added to).
+
+common_name = "Nudibranch"
+display_name = "Nudibranch"
+scientific_name = "Nudibranchia"
+description = """
+A soft-bodied, shell-less sea slug found grazing on sponges and hydroids in
+tide pools and subtidal rocky reefs along the Pacific coast, often brightly
+colored.
+"""
+subject_category = "Mollusk"
+tags = ["nudibranch", "sea slug", "tide pool", "rocky intertidal"]
+regions = ["California", "Oregon", "Washington", "Pacific Coast"]
+ecosystems = ["Low intertidal", "Subtidal"]
+taxonomic_group = "Mollusk"
+product_use_categories = ["apparel", "stickers", "wall art"]
+notes = "Silhouette source purpose-built to trip the narrow_feature finding kind (issue #40): two lobes joined by a neck narrower than the minimum feature width."
+
+rights_status = "original_artwork"
+licensing_notes = "Original illustration commissioned for this catalog; no external license required."
+
+accuracy_status = "not_reviewed"
+
+# Source images: file is relative to this asset's sources/ directory (ADR 0003).
+[[sources]]
+role = "silhouette"
+file = "silhouette.png"

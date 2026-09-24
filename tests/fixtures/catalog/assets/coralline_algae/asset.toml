@@ -1,0 +1,42 @@
+# Hand-authored asset metadata (ADR 0005). The asset ID is this folder's name.
+#
+# The excessive_complexity fixture (issue #40, §9): its silhouette.png (see
+# tests/fixtures/catalog/generate_source_pngs.py) is a large, purpose-built
+# source carrying a disk whose own radius wobbles sinusoidally around its
+# full perimeter -- 22 ripples on this asset's own 300x300 canvas, each one
+# requiring potrace to fit its own curve segments no matter how coarse
+# cut_svg's own curve_tolerance is, so this shape's own node count (46) is
+# far above validate.cut_file's own excessive-complexity node-count cap
+# (30), while every local width stays well above the narrow-feature
+# threshold. Its cut file's findings report holds exactly one finding:
+# excessive_complexity, nothing else.
+#
+# ecosystems deliberately match no rule-based fixture collection: neither
+# "Kelp forest" (kelp_forest_ecosystem's rule) nor pacific_coast_tide_pool
+# (an explicit, hand-picked asset list this asset was never added to).
+
+common_name = "Coralline algae"
+display_name = "Coralline Algae"
+scientific_name = "Corallinales"
+description = """
+A calcified, pink-to-purple encrusting algae found coating rocks and tide
+pool walls along the Pacific coast, with a finely textured, irregular
+surface.
+"""
+subject_category = "Algae"
+tags = ["algae", "tide pool", "rocky intertidal"]
+regions = ["California", "Oregon", "Washington", "Pacific Coast"]
+ecosystems = ["Low intertidal", "Subtidal"]
+taxonomic_group = "Algae"
+product_use_categories = ["apparel", "stickers", "wall art"]
+notes = "Silhouette source purpose-built to trip the excessive_complexity finding kind (issue #40): a finely rippled outline with far more curve nodes per inch of perimeter than the density threshold allows."
+
+rights_status = "original_artwork"
+licensing_notes = "Original illustration commissioned for this catalog; no external license required."
+
+accuracy_status = "not_reviewed"
+
+# Source images: file is relative to this asset's sources/ directory (ADR 0003).
+[[sources]]
+role = "silhouette"
+file = "silhouette.png"

@@ -57,8 +57,9 @@ FIXTURE_SILHOUETTE_OUTPUTS = [
 # (asset ID, expected customer-facing filename): §20's slugified display name
 # plus cut_svg's ``-cut.svg`` suffix (issue #36). Every fixture asset with a
 # decodable silhouette source -- the three FIXTURE_SILHOUETTE_OUTPUTS assets,
-# owl_limpet (the cut_svg cleanup fixture), and gumboot_chiton/bat_star/
-# keyhole_limpet/turban_snail (issue #39's area-finding fixtures) -- so its
+# owl_limpet (the cut_svg cleanup fixture), gumboot_chiton/bat_star/
+# keyhole_limpet/turban_snail (issue #39's area-finding fixtures), and
+# nudibranch/coralline_algae (issue #40's shape-finding fixtures) -- so its
 # cut SVG is snapshotted too (the issue's "snapshot the cut SVG text for
 # every fixture asset that has a decodable silhouette source"); acorn_barnacle's
 # does not decode, so it is excluded here the same way it is from every other
@@ -72,6 +73,8 @@ FIXTURE_CUT_SVG_OUTPUTS = [
     ("bat_star", "bat-star-cut.svg"),
     ("keyhole_limpet", "keyhole-limpet-cut.svg"),
     ("turban_snail", "turban-snail-cut.svg"),
+    ("nudibranch", "nudibranch-cut.svg"),
+    ("coralline_algae", "coralline-algae-cut.svg"),
 ]
 
 # (asset ID, expected customer-facing filename): §20's slugified display name
@@ -587,32 +590,33 @@ def test_vpress_status_missing_count_drops_after_generation(
     # 3*3 + 4 = 13. acorn_barnacle (issue #27) has only a silhouette source:
     # 3 more missing (transparent_png, silhouette_svg, cut_svg), 1 more
     # impossible (flatcolor_svg) -- 16 missing, 4 impossible so far.
-    # gumboot_chiton, bat_star, keyhole_limpet and turban_snail (issue #39's
-    # area-finding fixtures) each have only a silhouette source too, the
-    # same shape as purple_sea_urchin/giant_green_anemone/owl_limpet: 4 more
-    # lots of 3 missing + 1 impossible -- 16 + 12 = 28 missing, 4 + 4 = 8
+    # gumboot_chiton, bat_star, keyhole_limpet, turban_snail (issue #39's
+    # area-finding fixtures), nudibranch and coralline_algae (issue #40's
+    # shape-finding fixtures) each have only a silhouette source too, the
+    # same shape as purple_sea_urchin/giant_green_anemone/owl_limpet: 6 more
+    # lots of 3 missing + 1 impossible -- 16 + 18 = 34 missing, 4 + 6 = 10
     # impossible overall.
-    assert "Missing derivatives: 28" in before.stdout
-    assert "Impossible derivatives: 8" in before.stdout
+    assert "Missing derivatives: 34" in before.stdout
+    assert "Impossible derivatives: 10" in before.stdout
 
     generate_result = runner.invoke(app, ["generate", "--all"])
     # non-zero: acorn_barnacle's truncated source fails three derivatives
     # (issue #27, widened by issue #36) -- the assertions below cover only
-    # the other eight assets.
+    # the other ten assets.
     assert generate_result.exit_code == 1, generate_result.output
 
     after = runner.invoke(app, ["status"])
 
     assert after.exit_code == 0, after.output
     # Every recipe-bearing type for every asset with an acceptable,
-    # decodable source (issue #24, issue #25, issue #36, issue #39) moves
-    # from missing to current; flatcolor_svg stays impossible for the
-    # assets with no flatcolor source (counted separately, not as missing,
-    # so the impossible count stays 8). acorn_barnacle's three derivatives
-    # never generate (its source never decodes), so they stay missing --
-    # generation failure never counts as "current".
+    # decodable source (issue #24, issue #25, issue #36, issue #39, issue
+    # #40) moves from missing to current; flatcolor_svg stays impossible for
+    # the assets with no flatcolor source (counted separately, not as
+    # missing, so the impossible count stays 10). acorn_barnacle's three
+    # derivatives never generate (its source never decodes), so they stay
+    # missing -- generation failure never counts as "current".
     assert "Missing derivatives: 3" in after.stdout
-    assert "Impossible derivatives: 8" in after.stdout
+    assert "Impossible derivatives: 10" in after.stdout
 
 
 @pytest.mark.integration
@@ -797,13 +801,14 @@ def test_recipe_parameter_change_marks_every_derivative_of_that_type_stale(
     marks every derivative of that type stale, across every asset -- here,
     ``silhouette_svg``'s ``curve_tolerance``, which every one of the three
     original fixture assets has a derivative of (``owl_limpet`` -- issue
-    #36 -- and ``gumboot_chiton``/``bat_star``/``keyhole_limpet``/
-    ``turban_snail`` -- issue #39's area-finding fixtures -- also each
-    generate a ``silhouette_svg`` and go stale the same way, so all five
-    count towards the global total below even though none of them is in
-    ``FIXTURE_SILHOUETTE_OUTPUTS``). ``transparent_png``, ``cut_svg`` and
-    ``flatcolor_svg`` are untouched (a different recipe, a different
-    identity hash each)."""
+    #36 --, ``gumboot_chiton``/``bat_star``/``keyhole_limpet``/
+    ``turban_snail`` -- issue #39's area-finding fixtures -- and
+    ``nudibranch``/``coralline_algae`` -- issue #40's shape-finding
+    fixtures -- also each generate a ``silhouette_svg`` and go stale the
+    same way, so all seven count towards the global total below even though
+    none of them is in ``FIXTURE_SILHOUETTE_OUTPUTS``). ``transparent_png``,
+    ``cut_svg`` and ``flatcolor_svg`` are untouched (a different recipe, a
+    different identity hash each)."""
     monkeypatch.chdir(temp_catalog_root)
     first = runner.invoke(app, ["generate", "--all"])
     assert first.exit_code == 1, first.output
@@ -829,7 +834,7 @@ def test_recipe_parameter_change_marks_every_derivative_of_that_type_stale(
 
     status_result = runner.invoke(app, ["status"])
     assert status_result.exit_code == 0, status_result.output
-    assert "Stale derivatives: 8" in status_result.stdout
+    assert "Stale derivatives: 10" in status_result.stdout
 
 
 @pytest.mark.integration
@@ -971,9 +976,10 @@ def test_changing_reference_size_in_marks_every_cut_svg_stale_and_nothing_else(
     status_result = runner.invoke(app, ["status"])
     assert status_result.exit_code == 0, status_result.output
     # every asset in FIXTURE_CUT_SVG_OUTPUTS -- the four original cut_svg
-    # subjects plus issue #39's four area-finding fixtures -- contributes
-    # one stale cut_svg (asserted individually above), eight overall.
-    assert "Stale derivatives: 8" in status_result.stdout
+    # subjects, issue #39's four area-finding fixtures and issue #40's two
+    # shape-finding fixtures -- contributes one stale cut_svg (asserted
+    # individually above), ten overall.
+    assert "Stale derivatives: 10" in status_result.stdout
 
 
 @pytest.mark.integration
