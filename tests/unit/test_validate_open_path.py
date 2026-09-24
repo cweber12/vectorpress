@@ -1,5 +1,5 @@
 """validate.open_path: the open-path findings-report tracer (§9, §9.1,
-ADR 0006, ADR 0007, issue #41).
+ADR 0006, ADR 0007).
 
 Every SVG here is hand-written, never produced by :mod:`vectorpress.
 pipeline.cut_svg` -- ``validate_cut_file`` is a pure function of bytes plus
@@ -54,7 +54,7 @@ def test_closed_subpath_with_explicit_z_yields_no_open_path_finding() -> None:
 
 def test_subpath_closed_by_repeating_the_start_point_without_z_yields_no_finding() -> None:
     """Near miss: no ``Z``, but the last point is the same as the first --
-    still closed (issue #41's own tolerance-based closure check)."""
+    still closed (closure is tolerance-based)."""
     svg = _svg(b'<path d="M10,10 L90,10 L90,90 L10,90 L10,10"/>')
 
     result = validate_cut_file(svg, REFERENCE_SIZE_IN)
@@ -114,13 +114,12 @@ def test_explicit_fill_black_yields_no_finding() -> None:
 
 
 def test_a_bare_two_point_line_segment_yields_an_open_path_finding() -> None:
-    """Issue #41 review fix round 1: a subpath with only two points -- an
-    open line segment, not even a polygon -- is §9's simplest possible
-    "not closed" case. Before this fix, ``_svg_geometry.parse_subpaths``
-    silently dropped any subpath under three points, so a document
-    containing nothing but a stray open segment like this reported
-    ``pass`` -- no detector ever saw it (it is far too small a shape to
-    become a piece or a hole either, so no other kind picks it up)."""
+    """A subpath with only two points -- an open line segment, not even a
+    polygon -- is §9's simplest possible "not closed" case, so
+    ``_subpaths.parse_subpaths`` must keep it: otherwise a document
+    containing nothing but a stray open segment like this would report
+    ``pass`` -- it is far too small a shape to become a piece or a hole
+    either, so no other kind picks it up."""
     svg = _svg(b'<path d="M20,50 L60,80"/>')
 
     result = validate_cut_file(svg, REFERENCE_SIZE_IN)

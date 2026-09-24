@@ -1,15 +1,15 @@
-"""The ``open_path`` detector (§9, ADR 0007, issue #41).
+"""The ``open_path`` detector (§9, ADR 0007).
 
 A closed, filled path is what the §8 builder always produces (deterministic
 geometric cleanup from the silhouette role) -- a subpath missing its own
 closing ``Z`` (and not otherwise ending back on its own start point), or a
 ``<path>`` element with no fill at all, can only ever appear in a
 hand-edited override (ADR 0007's "the override workflow is the expected
-path"): this issue's own proof that validation still runs on any SVG
-derivative, not only a generated one (§9's own scope bullet 5).
+path"), so validation must still run on any SVG derivative, not only a
+generated one (§9's own scope bullet 5).
 
-Runs over *every* subpath in the document (:mod:`vectorpress.validate.
-_svg_geometry.parse_subpaths`), independent of the piece/hole containment
+Runs over *every* subpath in the document (:func:`vectorpress.validate.
+_subpaths.parse_subpaths`), independent of the piece/hole containment
 grouping :mod:`vectorpress.validate.cut_file`'s other detectors use -- a
 subpath that fails to close, or whose own element paints no fill, cannot be
 reliably classified as a piece or a hole to begin with, so this never
@@ -27,7 +27,7 @@ from vectorpress.domain.finding import (
     FindingKind,
     PathReference,
 )
-from vectorpress.validate._svg_geometry import Subpath
+from vectorpress.validate._subpaths import Subpath
 
 _KIND = FindingKind.OPEN_PATH
 _CLASSIFICATION = CLASSIFICATION[_KIND]
@@ -40,7 +40,7 @@ def detect(subpaths: list[Subpath]) -> list[Finding]:
 
     Findings are returned in a fixed, deterministic order -- by path
     reference (element index, then subpath index) -- matching every other
-    detector in this package (issue #37's own ordering rule).
+    detector in this package.
     """
     findings: list[Finding] = []
     for subpath in subpaths:

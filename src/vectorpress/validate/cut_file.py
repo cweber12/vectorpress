@@ -1,5 +1,5 @@
 """``vectorpress.validate.cut_file``: the cut-file findings-report entry
-point (§9, §9.1, ADR 0006, ADR 0007, issue #37).
+point (§9, §9.1, ADR 0006, ADR 0007).
 
 A pure function from an effective derivative's own SVG bytes plus a
 reference size to a :class:`~vectorpress.domain.finding.ValidationResult`
@@ -26,19 +26,18 @@ from vectorpress.validate import (
     stray_object,
     tiny_isolated_shape,
 )
-from vectorpress.validate._svg_geometry import (
-    Piece,
-    parse_cut_file,
-    parse_document_elements,
-    parse_subpaths,
-)
+from vectorpress.validate._document_elements import parse_document_elements
+from vectorpress.validate._pieces import Piece, parse_cut_file
+from vectorpress.validate._subpaths import parse_subpaths
+from vectorpress.validate._svg_document import parse_svg_document
 
-#: Every physical-unit threshold this issue's detectors use, keyed by name,
-#: recorded verbatim with every findings report (issue #37's "the thresholds
-#: used"). :func:`vectorpress.validate.disconnected_fragments.detect` has no
-#: size threshold of its own -- "more than one piece" is a count, not a
-#: measurement against a physical size -- so it contributes no entry here;
-#: later issues add the rest of §9's list.
+#: Every physical-unit threshold the §9 detectors use, keyed by name,
+#: recorded verbatim with every findings report. :func:`vectorpress.
+#: validate.disconnected_fragments.detect` has no size threshold of its own
+#: -- "more than one piece" is a count, not a measurement against a physical
+#: size -- so it contributes no entry here, nor do the detectors whose
+#: findings are structural (open path, raster content, duplicate geometry,
+#: overlap).
 #:
 #: Each area threshold here is strictly larger than the matching
 #: :mod:`vectorpress.pipeline.cut_svg` cleanup threshold it sits above
@@ -66,15 +65,14 @@ from vectorpress.validate._svg_geometry import (
 #: of surviving cleanup at all -- no shape could ever trip this detector.
 #:
 #: ``excessive_complexity_max_nodes_per_in``, ``excessive_complexity_
-#: min_perimeter_in`` and ``excessive_complexity_max_node_count`` (issue
-#: #40) have no cleanup counterpart -- ``cut_svg``'s own cleanup never
+#: min_perimeter_in`` and ``excessive_complexity_max_node_count`` have no
+#: cleanup counterpart -- ``cut_svg``'s own cleanup never
 #: simplifies node count directly (``curve_tolerance`` governs potrace's own
 #: curve fitting, not a physical threshold this table could sit strictly
 #: above the same way an area or width can) -- see :mod:`vectorpress.
 #: validate.excessive_complexity` for how the three combine.
 #:
-#: ``excessive_complexity_min_perimeter_in`` (review fix round 1, PR #46):
-#: below this perimeter, "nodes per inch" is not judged at all -- a plain
+#: ``excessive_complexity_min_perimeter_in``: below this perimeter, "nodes per inch" is not judged at all -- a plain
 #: 4-6 node dot or sliver a few hundredths of an inch across otherwise reads
 #: as tens of nodes per inch purely from being tiny, nothing to do with
 #: genuine complexity (exactly what :mod:`vectorpress.validate.
@@ -93,11 +91,11 @@ from vectorpress.validate._svg_geometry import (
 #: Density rises as the same outline shrinks, so at a 1in product size the
 #: real-art sea star and anemone read ~13.7 nodes/in and are flagged too.
 #:
-#: ``stray_object_off_canvas_tolerance_in`` (issue #41 review fix round 1,
-#: controller ruling) -- :mod:`vectorpress.validate.stray_object`'s own
-#: off-canvas check applies this tolerance to a ``<path>`` element only
+#: ``stray_object_off_canvas_tolerance_in``: :mod:`vectorpress.validate.
+#: stray_object`'s own off-canvas check applies this tolerance to a
+#: ``<path>`` element only
 #: (every other element tag keeps an exact, tolerance-free check): this
-#: module's own curve-flattening can disagree with the document's own
+#: package's own curve-flattening can disagree with the document's own
 #: written ``viewBox`` by a fraction of a user unit of pure rounding noise
 #: (§36's :data:`~vectorpress.domain.numeric_format.DECIMAL_PLACES`
 #: absorbs everything past the fourth decimal place everywhere *else* this
@@ -112,7 +110,7 @@ from vectorpress.validate._svg_geometry import (
 #: ``0.0``. ``0.01in`` sits four orders of magnitude above that measured
 #: noise floor -- a comfortable margin for a different platform's own
 #: last-bit curve-sampling difference -- while staying far below anything
-#: a genuinely stray, off-canvas ``<path>`` (this issue's own hand-authored
+#: a genuinely stray, off-canvas ``<path>`` (the hand-authored stray-object
 #: trip fixture places one tens of user units away) would ever measure.
 THRESHOLDS: dict[str, float] = {
     "accidental_dot_max_dimension_in": 0.2,
@@ -128,15 +126,15 @@ THRESHOLDS: dict[str, float] = {
 
 def _claimed(findings: list[Finding]) -> set[tuple[int, int | None]]:
     """The ``(element_index, subpath_index)`` of every piece a detector's
-    findings already claimed (issue #39): how :func:`validate_cut_file`
+    findings already claimed: how :func:`validate_cut_file`
     keeps dot, tiny-shape and disconnected-fragment classification mutually
     exclusive without each detector needing to know about the others --
     a piece is simply never offered to the next detector once one finding
     already names it. ``findings`` here is always :mod:`vectorpress.
     validate.accidental_dot`/:mod:`vectorpress.validate.tiny_isolated_shape`
     output, whose own ``subpath_index`` is always a concrete piece index,
-    never ``None`` (issue #41's element-only reference is only ever built
-    by the five detectors that never call this) -- the wider ``int | None``
+    never ``None`` (an element-only reference is only ever built by the
+    element- and subpath-level detectors, which never call this) -- the wider ``int | None``
     element type is only to match :class:`~vectorpress.domain.finding.
     PathReference`'s own declared field type."""
     return {
@@ -150,57 +148,52 @@ def _unclaimed(pieces: list[Piece], claimed: set[tuple[int, int | None]]) -> lis
 
 
 def validate_cut_file(svg_bytes: bytes, reference_size_in: float) -> ValidationResult:
-    """Validate one cut file's bytes against every landed §9 detector, at
-    ``reference_size_in`` physical inches (§9.1) -- issue #37 lands
-    :func:`vectorpress.validate.disconnected_fragments.detect`; issue #39
-    adds :mod:`vectorpress.validate.accidental_dot`, :mod:`vectorpress.
-    validate.tiny_isolated_shape` and :mod:`vectorpress.validate.small_hole`;
-    issue #40 adds :mod:`vectorpress.validate.narrow_feature` and
-    :mod:`vectorpress.validate.excessive_complexity`; issue #41 adds the
-    remaining five §9 kinds -- :mod:`vectorpress.validate.open_path`,
-    :mod:`vectorpress.validate.raster_content`, :mod:`vectorpress.validate.
-    stray_object`, :mod:`vectorpress.validate.duplicate_geometry` and
-    :mod:`vectorpress.validate.overlap` -- completing §9's list; each
-    detector contributes its own findings to the same result.
+    """Validate one cut file's bytes against every §9 detector, at
+    ``reference_size_in`` physical inches (§9.1); each detector contributes
+    its own findings to the same result.
+
+    The bytes are parsed once (:func:`~vectorpress.validate._svg_document.
+    parse_svg_document`), and three views are derived from that one parse:
+    pieces and holes grouped by containment parity (:func:`~vectorpress.
+    validate._pieces.parse_cut_file`), every subpath as authored
+    (:func:`~vectorpress.validate._subpaths.parse_subpaths`), and every
+    element as it sits in the document (:func:`~vectorpress.validate.
+    _document_elements.parse_document_elements`).
 
     A piece is checked against :mod:`accidental_dot` first, then
     :mod:`tiny_isolated_shape`, then :mod:`disconnected_fragments` -- each
     detector only ever sees the pieces the one before it left unclaimed
     (:func:`_unclaimed`), so a piece is reported as exactly one of the
-    three, never more than one (issue #39's "one kind per shape", documented
-    on :class:`~vectorpress.domain.finding.FindingKind`). Holes are an
+    three, never more than one ("one kind per shape", documented on
+    :class:`~vectorpress.domain.finding.FindingKind`). Holes are an
     independent axis (:mod:`vectorpress.validate.small_hole`): a hole is
     never also a piece, so it never competes with any of the three.
 
-    Every other detector -- narrow feature and excessive complexity (issue
-    #40), and all five of issue #41's own kinds -- is a further independent
-    axis, never part of that three-way exclusion and never claiming or
-    excluding a piece for anyone else: a piece's (or a document's) own
-    geometry can be narrow, disproportionately complex, unclosed, stray,
-    duplicated or overlapping *on top of* whatever else it was already
-    reported as. Issue #41's own five run over the document's raw subpaths
-    and elements (:func:`~vectorpress.validate._svg_geometry.
-    parse_subpaths`, :func:`~vectorpress.validate._svg_geometry.
-    parse_document_elements`), never the piece/hole containment-parity
-    grouping :func:`~vectorpress.validate._svg_geometry.parse_cut_file`
-    computes for the six kinds above -- a malformed subpath (unclosed,
-    self-intersecting) cannot be reliably classified into that grouping to
-    begin with, and :mod:`vectorpress.validate.overlap` in particular must
-    not rely on it (that module's own docstring). The §8 builder only ever
-    emits closed, filled, non-overlapping, non-duplicated paths with no
-    raster content and no stray elements, so none of these five kinds is
-    ever tripped by a generated cut file (locked by ``tests/integration/
-    test_validate.py``'s own "every generated fixture cut file yields none
-    of these five kinds" test) -- only a hand-edited override can trip them
-    (§9's own scope bullet 5: "validation runs on any SVG derivative, not
-    only generated ones").
+    Every other detector -- narrow feature, excessive complexity, open
+    path, raster content, stray object, duplicate geometry and overlap -- is
+    a further independent axis, never part of that three-way exclusion and
+    never claiming or excluding a piece for anyone else: a piece's (or a
+    document's) own geometry can be narrow, disproportionately complex,
+    unclosed, stray, duplicated or overlapping *on top of* whatever else it
+    was already reported as. The last five run over the raw subpath and
+    element views, never the piece/hole grouping -- a malformed subpath
+    (unclosed, self-intersecting) cannot be reliably classified into that
+    grouping to begin with, and :mod:`vectorpress.validate.overlap` in
+    particular must not rely on it (that module's own docstring). The §8
+    builder only ever emits closed, filled, non-overlapping, non-duplicated
+    paths with no raster content and no stray elements, so none of these
+    five kinds is ever tripped by a generated cut file (locked by
+    ``tests/integration/test_validate.py``) -- only a hand-edited override
+    can trip them (§9's own scope bullet 5: "validation runs on any SVG
+    derivative, not only generated ones").
 
-    Raises :class:`ValueError` (propagated from :func:`vectorpress.validate.
-    _svg_geometry.parse_cut_file`) for an SVG with no ``viewBox`` and no
-    ``width``/``height`` to establish a scale from, or that otherwise fails
-    to parse -- a validation failure (§35), never reported as passing.
+    Raises :class:`ValueError` for an SVG with no ``viewBox`` and no
+    ``width``/``height`` to establish a scale from, or with unparseable path
+    data, and :class:`xml.etree.ElementTree.ParseError` for malformed XML --
+    a validation failure (§35), never reported as passing.
     """
-    parsed = parse_cut_file(svg_bytes, reference_size_in)
+    document = parse_svg_document(svg_bytes)
+    parsed = parse_cut_file(document, reference_size_in)
     scale = parsed.scale_user_units_per_inch
 
     dot_findings = accidental_dot.detect(
@@ -229,8 +222,8 @@ def validate_cut_file(svg_bytes: bytes, reference_size_in: float) -> ValidationR
         THRESHOLDS["excessive_complexity_max_node_count"],
     )
 
-    subpaths = parse_subpaths(svg_bytes)
-    view_box, elements = parse_document_elements(svg_bytes)
+    subpaths = parse_subpaths(document)
+    view_box, elements = parse_document_elements(document)
 
     open_path_findings = open_path.detect(subpaths)
     raster_content_findings = raster_content.detect(elements)

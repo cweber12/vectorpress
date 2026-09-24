@@ -1,4 +1,4 @@
-"""The ``narrow_feature`` detector (§9, §9.1, ADR 0007, issue #40).
+"""The ``narrow_feature`` detector (§9, §9.1, ADR 0007).
 
 A part of a piece's own geometry narrower than the physical minimum feature
 width (§9.1) -- a thin tentacle, a neck joining two lobes, a fragile bridge
@@ -17,8 +17,8 @@ disconnected_fragments`, this detector is not one of the three
 piece-*classification* kinds :class:`~vectorpress.domain.finding.FindingKind`
 documents as mutually exclusive -- a narrow neck is a property of one
 piece's own geometry, not a judgment about the piece as a whole, so this
-runs over *every* piece the document has, largest included (the fixture
-this issue adds trips it on the document's own main body).
+runs over *every* piece the document has, largest included (a design's
+own main body can trip it).
 
 One piece can carry more than one narrow region (two separate thin necks,
 say) -- one finding per connected region the opening erased, not one per
@@ -33,8 +33,8 @@ from vectorpress.domain.finding import (
     PathReference,
 )
 from vectorpress.domain.numeric_format import round_number
+from vectorpress.validate._pieces import Piece
 from vectorpress.validate._raster import narrow_regions, pixel_size_for_min_width, rasterize_piece
-from vectorpress.validate._svg_geometry import Piece
 
 _KIND = FindingKind.NARROW_FEATURE
 _CLASSIFICATION = CLASSIFICATION[_KIND]
@@ -44,8 +44,8 @@ def _sort_key(finding: Finding) -> tuple[int, int | None, float, float]:
     """This module's own finding order (element, subpath, then the narrow
     region's own top-left corner) -- a small named function rather than an
     inline lambda so it can assert ``location`` is set, which it always is
-    for every finding this module's own :func:`detect` builds (issue #41
-    widened :class:`~vectorpress.domain.finding.Finding.location` to
+    for every finding this module's own :func:`detect` builds
+    (:class:`~vectorpress.domain.finding.Finding.location` is
     ``BoundingBox | None`` for kinds with no geometry; this one always has
     some)."""
     assert finding.location is not None
@@ -67,8 +67,7 @@ def detect(
     Findings are returned in a fixed, deterministic order -- by path
     reference (element index, then subpath index), then by the narrow
     region's own top-left corner for the (rare) case of more than one in a
-    single piece -- matching every other detector in this package (issue
-    #37's own ordering rule).
+    single piece -- matching every other detector in this package.
     """
     min_width_user_units = min_width_in * scale_user_units_per_inch
     pixel_size = pixel_size_for_min_width(min_width_user_units)

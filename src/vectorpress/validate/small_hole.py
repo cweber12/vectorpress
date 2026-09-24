@@ -1,6 +1,6 @@
-"""The ``small_hole`` detector (§9, §9.1, ADR 0007, issue #39).
+"""The ``small_hole`` detector (§9, §9.1, ADR 0007).
 
-A hole (an interior ring, :class:`~vectorpress.validate._svg_geometry.Hole`)
+A hole (an interior ring, :class:`~vectorpress.validate._pieces.Hole`)
 whose own area is below the physical minimum hole area (§9.1) reads as
 manufacturing noise -- too small to punch or cut cleanly, or an artifact of
 tracing -- rather than a deliberately kept opening.
@@ -21,7 +21,7 @@ from vectorpress.domain.finding import (
     PathReference,
 )
 from vectorpress.domain.numeric_format import round_number
-from vectorpress.validate._svg_geometry import Hole
+from vectorpress.validate._pieces import Hole
 
 _KIND = FindingKind.SMALL_HOLE
 _CLASSIFICATION = CLASSIFICATION[_KIND]
@@ -36,7 +36,7 @@ def detect(
 
     Findings are returned in a fixed, deterministic order -- by path
     reference (element index, then subpath index) -- matching every other
-    detector in this package (issue #37's own ordering rule).
+    detector in this package.
     """
     min_area_user_units2 = min_area_in2 * scale_user_units_per_inch**2
     tiny_holes = [hole for hole in holes if hole.area < min_area_user_units2]

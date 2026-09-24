@@ -1,4 +1,4 @@
-"""The ``stray_object`` detector (§9, ADR 0007, issue #41).
+"""The ``stray_object`` detector (§9, ADR 0007).
 
 Four independent problems collapse into one finding kind (§9's own single
 "stray object" bullet): an element wholly or partly outside the document's
@@ -8,35 +8,34 @@ or a non-artwork drawing element such as a stray ``<text>`` -- all four
 read as document clutter a hand edit left behind, never something the §8
 builder's own tracer emits.
 
-Runs only over a *rendered* :mod:`vectorpress.validate._svg_geometry.
-DocumentElement` (:attr:`~vectorpress.validate._svg_geometry.
+Runs only over a *rendered* :class:`vectorpress.validate._document_elements.
+DocumentElement` (:attr:`~vectorpress.validate._document_elements.
 DocumentElement.rendered`): an element nested inside a non-rendering
 container (``<defs>``, a ``<pattern>``'s own tile, …) is never itself
 drawn, so being off-canvas or "invisible" there is exactly how a
 legitimate definition looks, not a mistake -- contrast :mod:`vectorpress.
 validate.raster_content`, which does not apply this same filter.
 
-**A ``<path>`` gets every one of the four checks too** (issue #41 review
-fix round 1, controller ruling): a hand-edited override is overwhelmingly
-likely to consist almost entirely of ``<path>`` elements (Inkscape, for
-one, writes almost nothing else), so a leftover off-canvas or hidden
-``<path>`` is exactly the kind of stray object this detector exists to
-catch -- excluding the tag outright, as an earlier round of this issue
-did, would silently pass a hand-edited override carrying one. The
-invisibility checks apply to a ``<path>`` exactly as they do to any other
-element (display/visibility/opacity/fill+stroke are boolean, not
-measurements, so there is no noise to absorb). The off-canvas check alone
-needs a tolerance for a ``<path>`` specifically: this module's own
-curve-flattening (:mod:`vectorpress.validate._svg_geometry`'s fixed-step
-sampling, §36) can disagree with the document's own written ``viewBox``
-by a fraction of a user unit of pure floating-point rounding noise, at the
-last digit :data:`~vectorpress.domain.numeric_format.DECIMAL_PLACES`
-keeps -- confirmed empirically against every fixture cut file this
-catalog generates: the single largest such discrepancy is
-``bat_star``'s own, about ``0.0001`` user units (roughly ``1e-6`` in at
-the catalog's own 3in reference size) -- see :data:`~vectorpress.validate.
-cut_file.THRESHOLDS`'s own ``stray_object_off_canvas_tolerance_in`` entry
-for the chosen margin above that. Every other element tag keeps the exact,
+**A ``<path>`` gets every one of the four checks too**: a hand-edited
+override is overwhelmingly likely to consist almost entirely of ``<path>``
+elements (Inkscape, for one, writes almost nothing else), so a leftover
+off-canvas or hidden ``<path>`` is exactly the kind of stray object this
+detector exists to catch -- excluding the tag outright would silently pass
+a hand-edited override carrying one. The invisibility checks apply to a
+``<path>`` exactly as they do to any other element (display/visibility/
+opacity/fill+stroke are boolean, not measurements, so there is no noise to
+absorb). The off-canvas check alone needs a tolerance for a ``<path>``
+specifically: this module's own curve-flattening (:func:`vectorpress.
+validate._svg_document.flatten_subpath`'s fixed-step sampling, §36) can
+disagree with the document's own written ``viewBox`` by a fraction of a
+user unit of pure floating-point rounding noise, at the last digit
+:data:`~vectorpress.domain.numeric_format.DECIMAL_PLACES` keeps --
+confirmed empirically against every fixture cut file this catalog
+generates: the single largest such discrepancy is ``bat_star``'s own,
+about ``0.0001`` user units (roughly ``1e-6`` in at the catalog's own 3in
+reference size) -- see :data:`~vectorpress.validate.cut_file.THRESHOLDS`'s
+own ``stray_object_off_canvas_tolerance_in`` entry for the chosen margin
+above that. Every other element tag keeps the exact,
 tolerance-free check: a stray ``<rect>`` or ``<image>`` a human placed off
 canvas is never a curve-fitting artifact, so any overshoot at all is
 already a real one.
@@ -55,7 +54,8 @@ from vectorpress.domain.finding import (
     FindingKind,
     PathReference,
 )
-from vectorpress.validate._svg_geometry import DocumentElement, effective_attribute
+from vectorpress.validate._document_elements import DocumentElement
+from vectorpress.validate._svg_document import effective_attribute
 
 _KIND = FindingKind.STRAY_OBJECT
 _CLASSIFICATION = CLASSIFICATION[_KIND]
@@ -63,10 +63,10 @@ _CLASSIFICATION = CLASSIFICATION[_KIND]
 #: Tags this detector never itself judges a stray object -- structural or
 #: definition-only elements SVG (and this tool's own writer) uses
 #: routinely, which have no meaningful "off canvas" or "invisible" reading
-#: of their own. ``path`` is deliberately **not** in this set (issue #41
-#: review fix round 1, see this module's own docstring) -- a rendered
-#: descendant of one of these containers is still filtered separately, by
-#: :attr:`~vectorpress.validate._svg_geometry.DocumentElement.rendered`.
+#: of their own. ``path`` is deliberately **not** in this set (see this
+#: module's own docstring) -- a rendered descendant of one of these
+#: containers is still filtered separately, by :attr:`~vectorpress.
+#: validate._document_elements.DocumentElement.rendered`.
 _IGNORED_TAGS = frozenset(
     {
         "defs",
@@ -105,9 +105,9 @@ def _is_invisible(element: DocumentElement) -> bool:
     """Whether ``element`` paints nothing at all (§9's "no fill and no
     stroke, opacity/fill-opacity 0, display:none, visibility:hidden") --
     every property is read through :func:`~vectorpress.validate.
-    _svg_geometry.effective_attribute` (issue #41 review fix round 1), so a
-    ``style="display:none"`` declaration is caught exactly the same way
-    the plain ``display="none"`` attribute is, not just the latter."""
+    _svg_document.effective_attribute`, so a ``style="display:none"``
+    declaration is caught exactly the same way the plain ``display="none"``
+    attribute is, not just the latter."""
     attrib = element.attrib
     display = effective_attribute(attrib, "display")
     if display is not None and display.strip().lower() == "none":
@@ -153,8 +153,7 @@ def detect(
     applied only to a ``<path>`` element (this module's own docstring).
 
     Findings are returned in a fixed, deterministic order -- by (document)
-    element index -- matching every other detector in this package (issue
-    #37's own ordering rule).
+    element index -- matching every other detector in this package.
     """
     path_tolerance_user_units = path_off_canvas_tolerance_in * scale_user_units_per_inch
 

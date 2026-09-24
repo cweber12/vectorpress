@@ -1,4 +1,4 @@
-"""The ``disconnected_fragments`` detector (§9, ADR 0007, issue #37).
+"""The ``disconnected_fragments`` detector (§9, ADR 0007).
 
 A cut file's design is more than one separate physical piece: potrace's own
 island-removal cleanup (:mod:`vectorpress.pipeline.cut_svg`) already drops
@@ -11,8 +11,8 @@ matter).
 Called by :mod:`vectorpress.validate.cut_file` on whatever pieces
 :mod:`vectorpress.validate.accidental_dot` and :mod:`vectorpress.validate.
 tiny_isolated_shape` did *not* already claim, so a piece small enough to be
-either of those is never also reported here (issue #39's "one kind per
-shape" -- documented and tested on :class:`~vectorpress.domain.finding.
+either of those is never also reported here (one kind per shape --
+documented and tested on :class:`~vectorpress.domain.finding.
 FindingKind`).
 """
 
@@ -22,7 +22,7 @@ from vectorpress.domain.finding import (
     FindingKind,
     PathReference,
 )
-from vectorpress.validate._svg_geometry import Piece, non_largest_pieces
+from vectorpress.validate._pieces import Piece, non_largest_pieces
 
 _KIND = FindingKind.DISCONNECTED_FRAGMENTS
 _CLASSIFICATION = CLASSIFICATION[_KIND]
@@ -30,15 +30,15 @@ _CLASSIFICATION = CLASSIFICATION[_KIND]
 
 def detect(pieces: list[Piece]) -> list[Finding]:
     """One finding per piece beyond the largest (by area), located at that
-    piece's own bounding box (issue #37). A document with zero or one piece
-    has nothing disconnected from anything else, so it yields no findings.
+    piece's own bounding box. A document with zero or one piece has nothing
+    disconnected from anything else, so it yields no findings.
 
     Findings are returned in a fixed, deterministic order -- by the
     document's own path reference (element index, then subpath index) --
-    independent of area, so the findings JSON this issue's persistence
-    writes is byte-identical across a run and across platforms regardless of
-    how :func:`vectorpress.validate._svg_geometry.parse_cut_file` happened to
-    order equal-area pieces.
+    independent of area, so the persisted findings JSON is byte-identical
+    across a run and across platforms regardless of how
+    :func:`vectorpress.validate._pieces.parse_cut_file` happened to order
+    equal-area pieces.
     """
     fragments = non_largest_pieces(pieces)
 

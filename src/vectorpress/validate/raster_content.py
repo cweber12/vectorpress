@@ -1,4 +1,4 @@
-"""The ``raster_content`` detector (§9, ADR 0007, issue #41).
+"""The ``raster_content`` detector (§9, ADR 0007).
 
 A vector deliverable must never rely on embedded raster content (§8): a
 ``<image>`` element, a ``data:`` URI anywhere in the document, or a
@@ -6,14 +6,14 @@ A vector deliverable must never rely on embedded raster content (§8): a
 only ever appear in a hand-edited override -- the §8 builder's own tracer
 never emits any of these.
 
-Runs over every :mod:`vectorpress.validate._svg_geometry.DocumentElement`
+Runs over every :class:`vectorpress.validate._document_elements.DocumentElement`
 in the document, including one inside a non-rendering container such as
 ``<defs>`` (unlike :mod:`vectorpress.validate.stray_object`): a raster
 image hidden inside a ``<pattern>`` definition is still shipped inside the
 file, and still a real problem, even though the pattern element itself is
 never drawn on its own. An element nested inside a ``<pattern>``/
 ``<foreignObject>`` that already gets its own finding below is skipped
-(:attr:`~vectorpress.validate._svg_geometry.DocumentElement.
+(:attr:`~vectorpress.validate._document_elements.DocumentElement.
 inside_raster_container`) -- one finding for the container, not one for
 the container and a second for each raster descendant inside it.
 """
@@ -24,7 +24,7 @@ from vectorpress.domain.finding import (
     FindingKind,
     PathReference,
 )
-from vectorpress.validate._svg_geometry import DocumentElement
+from vectorpress.validate._document_elements import DocumentElement
 
 _KIND = FindingKind.RASTER_CONTENT
 _CLASSIFICATION = CLASSIFICATION[_KIND]
@@ -35,24 +35,22 @@ def detect(elements: list[DocumentElement]) -> list[Finding]:
     ``data:`` URI in one of its own attributes, or -- for a ``<pattern>``/
     ``<foreignObject>`` -- has either somewhere in its own subtree (§9),
     located at that element's own bounding box when this module can
-    compute one (:mod:`vectorpress.validate._svg_geometry`'s
-    :data:`~vectorpress.validate._svg_geometry._BBOX_TAGS`), by element
+    compute one (:data:`~vectorpress.validate._document_elements.
+    BBOX_TAGS`), by element
     reference alone otherwise (a ``<pattern>``/``<foreignObject>`` has no
     simple geometry of its own).
 
     Findings are returned in a fixed, deterministic order -- by (document)
-    element index -- matching every other detector in this package (issue
-    #37's own ordering rule, extended here to a document-order element
-    index rather than a ``<path>``-only one, since these findings are
-    never about a ``<path>``'s own subpath).
+    element index -- matching every other detector in this package, but by
+    a document-order element index rather than a ``<path>``-only one, since
+    these findings are never about a ``<path>``'s own subpath.
     """
     findings: list[Finding] = []
     for element in elements:
         if element.inside_raster_container:
             # A raster element (or a nested data: URI) inside a <pattern>/
             # <foreignObject> is already covered by that container's own
-            # finding below -- never double-counted (issue #41 review
-            # fix).
+            # finding below -- never double-counted.
             continue
         if element.tag == "image":
             reason = "is a raster <image> element"
