@@ -1,0 +1,41 @@
+# Hand-authored asset metadata (ADR 0005). The asset ID is this folder's name.
+#
+# The accidental_dot fixture (issue #39, §9): its silhouette.png (see
+# tests/fixtures/catalog/generate_source_pngs.py) is a large, purpose-built
+# source carrying a main body plus one small, detached circular eye-spot --
+# 14px across on this asset's own 300x300 canvas, comfortably above
+# cut_svg's island-area cleanup floor (so it survives cleanup as a real
+# piece) yet comfortably under validate.cut_file's accidental-dot dimension
+# threshold at the catalog's default 3in reference size. Its cut file's
+# findings report holds exactly one finding: an accidental dot, nothing
+# else (no disconnected_fragments, since the dot claims the piece first).
+#
+# ecosystems deliberately match no rule-based fixture collection: neither
+# "Kelp forest" (kelp_forest_ecosystem's rule) nor pacific_coast_tide_pool
+# (an explicit, hand-picked asset list this asset was never added to).
+
+common_name = "Gumboot chiton"
+display_name = "Gumboot Chiton"
+scientific_name = "Cryptochiton stelleri"
+description = """
+The largest chiton in the world, a leathery reddish-brown grazer found
+clinging to rocks in the low intertidal and subtidal along the Pacific
+coast.
+"""
+subject_category = "Mollusk"
+tags = ["chiton", "tide pool", "rocky intertidal"]
+regions = ["California", "Oregon", "Washington", "Alaska", "Pacific Coast"]
+ecosystems = ["Low intertidal", "Subtidal"]
+taxonomic_group = "Mollusk"
+product_use_categories = ["apparel", "stickers", "wall art"]
+notes = "Silhouette source purpose-built to trip the accidental_dot finding kind (issue #39): a detached eye-spot below the dot dimension threshold."
+
+rights_status = "original_artwork"
+licensing_notes = "Original illustration commissioned for this catalog; no external license required."
+
+accuracy_status = "not_reviewed"
+
+# Source images: file is relative to this asset's sources/ directory (ADR 0003).
+[[sources]]
+role = "silhouette"
+file = "silhouette.png"

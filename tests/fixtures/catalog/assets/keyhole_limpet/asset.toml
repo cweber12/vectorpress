@@ -1,0 +1,39 @@
+# Hand-authored asset metadata (ADR 0005). The asset ID is this folder's name.
+#
+# The small_hole fixture (issue #39, §9): its silhouette.png (see
+# tests/fixtures/catalog/generate_source_pngs.py) is a large, purpose-built
+# source carrying a main body with one small hole cut from its own center --
+# 6px in radius on this asset's own 300x300 canvas, comfortably above
+# cut_svg's hole-area cleanup floor (so it survives cleanup as a real hole)
+# yet comfortably under validate.cut_file's small-hole area threshold at
+# the catalog's default 3in reference size. Its cut file's findings report
+# holds exactly one finding: a very small hole, nothing else.
+#
+# ecosystems deliberately match no rule-based fixture collection: neither
+# "Kelp forest" (kelp_forest_ecosystem's rule) nor pacific_coast_tide_pool
+# (an explicit, hand-picked asset list this asset was never added to).
+
+common_name = "Keyhole limpet"
+display_name = "Keyhole Limpet"
+scientific_name = "Fissurella volcano"
+description = """
+A cone-shaped limpet named for the small opening at the apex of its shell,
+found grazing algae on rocks in the low intertidal along the Pacific coast.
+"""
+subject_category = "Mollusk"
+tags = ["limpet", "tide pool", "rocky intertidal"]
+regions = ["California", "Pacific Coast"]
+ecosystems = ["Low intertidal", "Rocky reef"]
+taxonomic_group = "Mollusk"
+product_use_categories = ["apparel", "stickers", "wall art"]
+notes = "Silhouette source purpose-built to trip the small_hole finding kind (issue #39): a center hole below the minimum hole area."
+
+rights_status = "original_artwork"
+licensing_notes = "Original illustration commissioned for this catalog; no external license required."
+
+accuracy_status = "not_reviewed"
+
+# Source images: file is relative to this asset's sources/ directory (ADR 0003).
+[[sources]]
+role = "silhouette"
+file = "silhouette.png"

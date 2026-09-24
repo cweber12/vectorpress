@@ -109,7 +109,7 @@ def test_status_reports_the_asset_count(monkeypatch: pytest.MonkeyPatch) -> None
     result = runner.invoke(app, ["status"])
 
     assert result.exit_code == 0
-    assert "Assets: 5" in result.stdout
+    assert "Assets: 9" in result.stdout
 
 
 def test_status_reports_the_asset_count_on_a_partially_broken_catalog(
@@ -131,7 +131,7 @@ def test_status_reports_the_asset_count_on_a_partially_broken_catalog(
     result = runner.invoke(app, ["--catalog", str(root), "status"])
 
     assert result.exit_code != 0
-    assert "Assets: 4" in result.stdout
+    assert "Assets: 8" in result.stdout
 
 
 def test_status_reports_the_collection_count(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -214,26 +214,27 @@ def test_status_reports_missing_and_impossible_derivative_counts(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Acceptance criterion 2 (issue #22), updated by issue #25's flatcolor
-    fixture source, issue #27's acorn_barnacle, and issue #36's cut_svg
-    recipe and owl_limpet fixture: purple_sea_urchin, giant_green_anemone
-    and owl_limpet each have only a silhouette source, so transparent_png,
-    silhouette_svg and cut_svg are missing and flatcolor_svg is impossible
-    (3 missing + 1 impossible each = 9 missing, 3 impossible across the
-    three); ochre_sea_star has a flatcolor source too, so all four of its
-    recipe-bearing types are missing instead (4 missing, 0 impossible);
-    acorn_barnacle has only a silhouette source, so transparent_png,
-    silhouette_svg and cut_svg are missing (its truncated source is a
-    generation-time failure, not something ``status`` decodes) and
-    flatcolor_svg is impossible (3 missing, 1 impossible) -- 16 missing, 4
-    impossible overall. Still exits 0 -- these are inventory counts, not
-    metadata problems."""
+    fixture source, issue #27's acorn_barnacle, issue #36's cut_svg recipe
+    and owl_limpet fixture, and issue #39's four area-finding fixtures:
+    purple_sea_urchin, giant_green_anemone, owl_limpet, gumboot_chiton,
+    bat_star, keyhole_limpet and turban_snail each have only a silhouette
+    source, so transparent_png, silhouette_svg and cut_svg are missing and
+    flatcolor_svg is impossible (3 missing + 1 impossible each = 21
+    missing, 7 impossible across the seven); ochre_sea_star has a
+    flatcolor source too, so all four of its recipe-bearing types are
+    missing instead (4 missing, 0 impossible); acorn_barnacle has only a
+    silhouette source, so transparent_png, silhouette_svg and cut_svg are
+    missing (its truncated source is a generation-time failure, not
+    something ``status`` decodes) and flatcolor_svg is impossible (3
+    missing, 1 impossible) -- 28 missing, 8 impossible overall. Still
+    exits 0 -- these are inventory counts, not metadata problems."""
     monkeypatch.chdir(FIXTURE_CATALOG_ROOT)
 
     result = runner.invoke(app, ["status"])
 
     assert result.exit_code == 0
-    assert "Missing derivatives: 16" in result.stdout
-    assert "Impossible derivatives: 4" in result.stdout
+    assert "Missing derivatives: 28" in result.stdout
+    assert "Impossible derivatives: 8" in result.stdout
 
 
 def test_status_lists_a_missing_field_an_unknown_role_and_a_duplicate_id(

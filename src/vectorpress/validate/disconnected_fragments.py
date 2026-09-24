@@ -7,6 +7,13 @@ this detector is a genuine, deliberately-kept piece -- there is no size
 threshold here (ADR 0007's "no automatic bridging or joining": every extra
 piece is reported and left, never silently dropped or judged too small to
 matter).
+
+Called by :mod:`vectorpress.validate.cut_file` on whatever pieces
+:mod:`vectorpress.validate.accidental_dot` and :mod:`vectorpress.validate.
+tiny_isolated_shape` did *not* already claim, so a piece small enough to be
+either of those is never also reported here (issue #39's "one kind per
+shape" -- documented and tested on :class:`~vectorpress.domain.finding.
+FindingKind`).
 """
 
 from vectorpress.domain.finding import (
@@ -15,7 +22,7 @@ from vectorpress.domain.finding import (
     FindingKind,
     PathReference,
 )
-from vectorpress.validate._svg_geometry import Piece
+from vectorpress.validate._svg_geometry import Piece, non_largest_pieces
 
 _KIND = FindingKind.DISCONNECTED_FRAGMENTS
 _CLASSIFICATION = CLASSIFICATION[_KIND]
@@ -33,11 +40,7 @@ def detect(pieces: list[Piece]) -> list[Finding]:
     how :func:`vectorpress.validate._svg_geometry.parse_cut_file` happened to
     order equal-area pieces.
     """
-    if len(pieces) <= 1:
-        return []
-
-    largest = max(pieces, key=lambda piece: piece.area)
-    fragments = [piece for piece in pieces if piece is not largest]
+    fragments = non_largest_pieces(pieces)
 
     findings = [
         Finding(

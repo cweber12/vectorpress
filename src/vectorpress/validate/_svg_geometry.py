@@ -246,16 +246,60 @@ class Piece:
     bbox: BoundingBox
     area: float
 
+    @property
+    def largest_dimension(self) -> float:
+        """The longer side of this piece's own bounding box, in the same
+        SVG user units as :attr:`bbox` (issue #39): the basis for telling an
+        elongated sliver (a small area but a large extent in one direction)
+        from a genuine dot (small in every direction) -- the same "longest
+        side of a bounding box" measure :func:`svg_viewbox_longest_side`
+        already uses for the document's own physical scale, applied here to
+        one piece instead of the whole document."""
+        return max(self.bbox.max_x - self.bbox.min_x, self.bbox.max_y - self.bbox.min_y)
+
+
+@dataclass(frozen=True)
+class Hole:
+    """One interior ring (odd containment depth under even-odd fill),
+    subtracted from its immediate parent :class:`Piece`'s own area -- a
+    candidate very small hole (issue #39), identified the same way a
+    :class:`Piece` is: where it sits in the document, its own bounding box,
+    and its own (un-subtracted) area."""
+
+    element_index: int
+    subpath_index: int
+    element_id: str | None
+    bbox: BoundingBox
+    area: float
+
+
+def non_largest_pieces(pieces: list[Piece]) -> list[Piece]:
+    """Every piece except the largest by area (issue #39): the shared
+    "isolated shape" candidate pool every area-based §9 detector
+    (:mod:`vectorpress.validate.accidental_dot`, :mod:`vectorpress.validate.
+    tiny_isolated_shape`) and :mod:`vectorpress.validate.
+    disconnected_fragments` all scope themselves to -- a document with zero
+    or one piece has nothing isolated from anything else, so it yields
+    nothing. Ties on area keep whichever :func:`max` happens to pick as "the
+    largest" (arbitrary but consistent within one call), matching
+    :mod:`vectorpress.validate.disconnected_fragments`'s own pre-issue-#39
+    behavior exactly."""
+    if len(pieces) <= 1:
+        return []
+    largest = max(pieces, key=lambda piece: piece.area)
+    return [piece for piece in pieces if piece is not largest]
+
 
 @dataclass(frozen=True)
 class ParsedCutFile:
     """Everything :mod:`vectorpress.validate.cut_file`'s detectors need from
-    one SVG: its candidate pieces, and the physical scale (§9.1) a
-    threshold-based detector converts a physical-unit threshold with --
-    ``reference_size_in`` physical inches map onto
+    one SVG: its candidate pieces, its candidate holes, and the physical
+    scale (§9.1) a threshold-based detector converts a physical-unit
+    threshold with -- ``reference_size_in`` physical inches map onto
     :attr:`scale_user_units_per_inch` user units."""
 
     pieces: list[Piece]
+    holes: list[Hole]
     scale_user_units_per_inch: float
 
 
@@ -294,12 +338,25 @@ def parse_cut_file(svg_bytes: bytes, reference_size_in: float) -> ParsedCutFile:
             subpaths.append((element_index, subpath_index, element_id, points))
 
     polygons = [record[3] for record in subpaths]
+    areas = [_polygon_area(polygon) for polygon in polygons]
     representative_points = [_polygon_representative_point(polygon) for polygon in polygons]
+    # A candidate container ``j`` must have a strictly larger area than ``i``
+    # (issue #39 fix round 1): under this module's own "well-nested"
+    # simplification, two subpaths whose interiors share a point are either
+    # disjoint or one strictly contains the other, and a container is always
+    # the bigger of the two. Without this guard, a shape whose own
+    # representative point (its centroid) happens to land inside a much
+    # smaller sibling -- a hole placed dead-center inside its own parent
+    # shell, for example, the natural way to draw one -- would wrongly count
+    # as "contained in" that sibling too, on nothing more than coincidental
+    # point placement, corrupting which subpaths are real pieces at all.
     depths = [
         sum(
             1
             for j, polygon in enumerate(polygons)
-            if j != i and _point_in_polygon(representative_points[i], polygon)
+            if j != i
+            and areas[j] > areas[i]
+            and _point_in_polygon(representative_points[i], polygon)
         )
         for i in range(len(polygons))
     ]
@@ -313,20 +370,30 @@ def parse_cut_file(svg_bytes: bytes, reference_size_in: float) -> ParsedCutFile:
             for j in range(len(polygons))
             if j != i
             and depths[j] == depths[i] - 1
+            and areas[j] > areas[i]
             and _point_in_polygon(representative_points[i], polygons[j])
         ]
-        parents.append(
-            min(candidates, key=lambda j: _polygon_area(polygons[j])) if candidates else None
-        )
+        parents.append(min(candidates, key=lambda j: areas[j]) if candidates else None)
 
     pieces: list[Piece] = []
+    holes: list[Hole] = []
     for i, (element_index, subpath_index, element_id, points) in enumerate(subpaths):
         if depths[i] % 2 != 0:
-            continue  # a hole, not a piece of its own -- subtracted below
+            # A hole, not a piece of its own -- subtracted from its parent's
+            # area below, and recorded in its own right (issue #39) as a
+            # candidate very small hole.
+            holes.append(
+                Hole(
+                    element_index=element_index,
+                    subpath_index=subpath_index,
+                    element_id=element_id,
+                    bbox=_polygon_bbox(points),
+                    area=areas[i],
+                )
+            )
+            continue
         hole_area = sum(
-            _polygon_area(polygons[j])
-            for j in range(len(polygons))
-            if depths[j] == depths[i] + 1 and parents[j] == i
+            areas[j] for j in range(len(polygons)) if depths[j] == depths[i] + 1 and parents[j] == i
         )
         pieces.append(
             Piece(
@@ -334,8 +401,8 @@ def parse_cut_file(svg_bytes: bytes, reference_size_in: float) -> ParsedCutFile:
                 subpath_index=subpath_index,
                 element_id=element_id,
                 bbox=_polygon_bbox(points),
-                area=_polygon_area(points) - hole_area,
+                area=areas[i] - hole_area,
             )
         )
 
-    return ParsedCutFile(pieces=pieces, scale_user_units_per_inch=scale)
+    return ParsedCutFile(pieces=pieces, holes=holes, scale_user_units_per_inch=scale)
