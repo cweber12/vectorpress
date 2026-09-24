@@ -30,12 +30,16 @@ def _asset_toml(root: Path, asset_id: str) -> Path:
     return root / "assets" / asset_id / "asset.toml"
 
 
-def test_fixture_catalog_loads_three_valid_assets() -> None:
+def test_fixture_catalog_loads_four_valid_assets() -> None:
+    """acorn_barnacle loads cleanly too (issue #27): its only problem is a
+    generation-time one (a truncated source), never a metadata one -- see
+    ``tests/fixtures/catalog/README.md``."""
     config = load_catalog_config(FIXTURE_CATALOG_ROOT)
 
     inventory = load_assets(FIXTURE_CATALOG_ROOT, config)
 
     assert [asset.id for asset in inventory.assets] == [
+        "acorn_barnacle",
         "giant_green_anemone",
         "ochre_sea_star",
         "purple_sea_urchin",
@@ -139,7 +143,7 @@ def test_rights_status_outside_the_list_is_a_problem(catalog_copy: Path) -> None
 
     ids = {asset.id for asset in inventory.assets}
     assert "purple_sea_urchin" not in ids
-    assert len(inventory.assets) == 2
+    assert len(inventory.assets) == 3
     assert len(inventory.problems) == 1
     assert inventory.problems[0].field == "rights_status"
 
@@ -156,7 +160,7 @@ def test_accuracy_status_outside_the_list_is_a_problem(catalog_copy: Path) -> No
 
     ids = {asset.id for asset in inventory.assets}
     assert "giant_green_anemone" not in ids
-    assert len(inventory.assets) == 2
+    assert len(inventory.assets) == 3
     assert len(inventory.problems) == 1
     assert inventory.problems[0].field == "accuracy_status"
 
@@ -172,7 +176,7 @@ def test_id_differing_from_folder_name_is_a_problem(catalog_copy: Path) -> None:
 
     ids = {asset.id for asset in inventory.assets}
     assert "ochre_sea_star" not in ids
-    assert len(inventory.assets) == 2
+    assert len(inventory.assets) == 3
     assert len(inventory.problems) == 1
     assert inventory.problems[0].field == "id"
     assert "ochre_sea_star" in str(inventory.problems[0].path)
@@ -196,7 +200,7 @@ def test_toml_syntax_error_is_a_problem_naming_the_file(catalog_copy: Path) -> N
 
     inventory = load_assets(catalog_copy, config)
 
-    assert len(inventory.assets) == 2
+    assert len(inventory.assets) == 3
     assert len(inventory.problems) == 1
     assert "purple_sea_urchin" in str(inventory.problems[0].path)
 
@@ -206,7 +210,7 @@ def test_committed_fixture_catalog_is_unmodified_by_mutating_tests() -> None:
 
     inventory = load_assets(FIXTURE_CATALOG_ROOT, config)
 
-    assert len(inventory.assets) == 3
+    assert len(inventory.assets) == 4
     assert inventory.problems == []
 
 
@@ -225,7 +229,7 @@ def test_unknown_role_is_a_problem_naming_the_source(catalog_copy: Path) -> None
 
     ids = {asset.id for asset in inventory.assets}
     assert "purple_sea_urchin" not in ids
-    assert len(inventory.assets) == 2
+    assert len(inventory.assets) == 3
     assert len(inventory.problems) == 1
     problem = inventory.problems[0]
     assert problem.field == "sources[0].role"
@@ -247,7 +251,7 @@ def test_declared_missing_file_is_a_problem_naming_the_file(catalog_copy: Path) 
 
     ids = {asset.id for asset in inventory.assets}
     assert "purple_sea_urchin" not in ids
-    assert len(inventory.assets) == 2
+    assert len(inventory.assets) == 3
     assert len(inventory.problems) == 1
     problem = inventory.problems[0]
     assert problem.field == "sources[0].file"
@@ -263,7 +267,7 @@ def test_undeclared_file_in_sources_is_a_problem_naming_the_file(catalog_copy: P
 
     ids = {asset.id for asset in inventory.assets}
     assert "purple_sea_urchin" not in ids
-    assert len(inventory.assets) == 2
+    assert len(inventory.assets) == 3
     assert len(inventory.problems) == 1
     problem = inventory.problems[0]
     assert "detailed.png" in str(problem.path)
@@ -280,7 +284,7 @@ def test_duplicate_source_declaration_is_a_problem_naming_the_file(catalog_copy:
 
     ids = {asset.id for asset in inventory.assets}
     assert "purple_sea_urchin" not in ids
-    assert len(inventory.assets) == 2
+    assert len(inventory.assets) == 3
     assert len(inventory.problems) == 1
     problem = inventory.problems[0]
     assert "silhouette.png" in problem.message
@@ -299,7 +303,7 @@ def test_asset_with_no_sources_is_a_problem(catalog_copy: Path) -> None:
 
     ids = {asset.id for asset in inventory.assets}
     assert "purple_sea_urchin" not in ids
-    assert len(inventory.assets) == 2
+    assert len(inventory.assets) == 3
     assert len(inventory.problems) == 1
     problem = inventory.problems[0]
     assert problem.field == "sources"
@@ -360,7 +364,7 @@ def test_pin_to_an_undeclared_file_is_a_problem_naming_the_file_and_field(
 
     ids = {asset.id for asset in inventory.assets}
     assert "ochre_sea_star" not in ids
-    assert len(inventory.assets) == 2
+    assert len(inventory.assets) == 3
     assert len(inventory.problems) == 1
     problem = inventory.problems[0]
     assert problem.field == "derivatives.transparent_png.source"
@@ -380,7 +384,7 @@ def test_pin_to_a_file_with_an_unaccepted_role_is_a_problem(catalog_copy: Path) 
 
     ids = {asset.id for asset in inventory.assets}
     assert "purple_sea_urchin" not in ids
-    assert len(inventory.assets) == 2
+    assert len(inventory.assets) == 3
     assert len(inventory.problems) == 1
     problem = inventory.problems[0]
     assert problem.field == "derivatives.flatcolor_svg.source"
@@ -400,7 +404,7 @@ def test_pin_for_a_type_with_no_recipe_is_a_problem(catalog_copy: Path) -> None:
 
     ids = {asset.id for asset in inventory.assets}
     assert "purple_sea_urchin" not in ids
-    assert len(inventory.assets) == 2
+    assert len(inventory.assets) == 3
     assert len(inventory.problems) == 1
     problem = inventory.problems[0]
     assert problem.field == "derivatives.cut_svg.source"
@@ -652,8 +656,12 @@ def test_failed_asset_ids_names_the_broken_asset_only(catalog_copy: Path) -> Non
     inventory = load_assets(catalog_copy, config)
 
     assert failed_asset_ids(inventory, config) == ["ochre_sea_star"]
-    # the two assets that loaded fine are not named as failed
-    assert [asset.id for asset in inventory.assets] == ["giant_green_anemone", "purple_sea_urchin"]
+    # the three assets that loaded fine are not named as failed
+    assert [asset.id for asset in inventory.assets] == [
+        "acorn_barnacle",
+        "giant_green_anemone",
+        "purple_sea_urchin",
+    ]
 
 
 def test_failed_asset_ids_names_every_broken_asset_sorted_and_deduplicated(

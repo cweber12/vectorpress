@@ -37,13 +37,27 @@ committed fixture never contains `derived/`. Later slices add `overrides/`
 
 ## Assets
 
-Three tide-pool subjects from §30, each with valid metadata and one or more source
+Four tide-pool subjects from §30, each with valid metadata and one or more source
 images tagged with a role (§4.1, ADR 0003):
 
 - `ochre_sea_star` — `silhouette` (a solid blob), `lineart` (a plain placeholder), and
   `flatcolor` (three concentric rings plus a detached island, four flat colors) sources
 - `purple_sea_urchin` — a `silhouette` source (a ring: a solid shape with a hole)
 - `giant_green_anemone` — a `silhouette` source (a blob plus a detached island)
+- `acorn_barnacle` — a `silhouette` source that is a **deliberately truncated PNG**
+  (issue #27, §35): valid metadata, valid PNG signature and header, cut off partway
+  through the image data. It loads without a metadata problem (source validation
+  checks that a declared file exists, never that it decodes), so its
+  `transparent_png` and `silhouette_svg` derivatives fail at *generation* time
+  instead -- the fixture's proof that one broken source fails visibly (named asset,
+  type, source file and cause, on stderr) and never touches anything else: no
+  half-written output, no corrupted provenance, and every other asset's derivatives
+  generate normally. Its `ecosystems` deliberately match neither fixture collection
+  (`kelp_forest_ecosystem`'s rule, or `pacific_coast_tide_pool`'s explicit list), so
+  it never becomes a collection member by accident. A later PRD that adds
+  publication blocking gets a permanently-blocked asset from this one for free
+  (its derivatives can never become approved effective derivatives), with no extra
+  fixture setup.
 
 Populated by PRD 1. Each `silhouette.png` is a real shape on a transparent
 background, not a solid-color square (issue #23): the transparent PNG generator's

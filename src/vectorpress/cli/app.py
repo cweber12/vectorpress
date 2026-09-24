@@ -252,14 +252,21 @@ def generate(
     (``generated``, ``current``, ``missing`` -- ``--stale`` only, for a
     derivative it left untouched because it was never generated --
     ``impossible``, ``no generator`` for a recipe-bearing type whose
-    generator has not landed yet, or ``failed`` when the generator itself
-    raised). Regenerating is a no-op: a current derivative is reported
-    ``current`` and never rewritten (§36) unless ``--force`` asks for it
-    anyway, and even then unchanged bytes are not rewritten. An asset that
-    failed to load is skipped and named rather than stopping the rest of
-    ``--all``/``--stale`` (§35); an unknown asset ID is the same actionable
-    error ``vpress asset`` gives. Exits non-zero if any derivative failed,
-    even though every asset was still attempted.
+    generator has not landed yet, or ``failed`` when reading its source,
+    running the generator, or writing its result raised (issue #27,
+    widened from just the generator itself)). Regenerating is a no-op: a
+    current derivative is reported ``current`` and never rewritten (§36)
+    unless ``--force`` asks for it anyway, and even then unchanged bytes
+    are not rewritten. An asset that failed to load is skipped and named
+    rather than stopping the rest of ``--all``/``--stale`` (§35); an
+    unknown asset ID is the same actionable error ``vpress asset`` gives.
+
+    Each ``failed`` derivative also gets its own stderr line naming the
+    asset, type, source file and cause (§35: failures must be visible and
+    understandable), on top of its place in the stdout report above; a run
+    with at least one failure ends with a stderr summary of how many.
+    Exits non-zero if any derivative failed, even though every asset was
+    still attempted.
     """
     selectors = [asset_id is not None, all_assets, stale]
     if sum(selectors) != 1:
@@ -291,7 +298,7 @@ def generate(
             raise typer.Exit(code=1)
         targets = [result.asset]
 
-    any_failed = False
+    failure_count = 0
     for target in targets:
         for result in generate_asset(
             target, asset_dir(root, config, target.id), stale_only=stale, force=force
@@ -301,9 +308,15 @@ def generate(
                 f"{result.outcome.value}\t{result.detail}"
             )
             if result.outcome is GenerationOutcome.FAILED:
-                any_failed = True
+                failure_count += 1
+                typer.echo(
+                    f"generate: {result.asset_id} {result.derivative_type.value} failed "
+                    f"(source: {result.source_file}): {result.detail}",
+                    err=True,
+                )
 
-    if any_failed:
+    if failure_count:
+        typer.echo(f"generate: {failure_count} derivative(s) failed", err=True)
         raise typer.Exit(code=1)
 
 

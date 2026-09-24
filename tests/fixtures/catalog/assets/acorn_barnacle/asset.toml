@@ -1,0 +1,39 @@
+# Hand-authored asset metadata (ADR 0005). The asset ID is this folder's name.
+#
+# Deliberately broken (issue #27, §35): its only source, silhouette.png, is a
+# truncated PNG -- valid signature and header, cut off before the pixel data
+# finishes decoding (see tests/fixtures/catalog/generate_source_pngs.py).
+# Metadata below is otherwise entirely valid: source validation only checks
+# that a declared file exists, never that it decodes (README.md), so this
+# asset loads cleanly and its two recipe-bearing derivative types each fail
+# at generation time instead of failing to load.
+#
+# ecosystems deliberately match no rule-based fixture collection: neither
+# "Kelp forest" (kelp_forest_ecosystem's rule) nor pacific_coast_tide_pool
+# (an explicit, hand-picked asset list that this asset was never added to).
+
+common_name = "Acorn barnacle"
+display_name = "Acorn Barnacle"
+scientific_name = "Balanus glandula"
+description = """
+A small, volcano-shaped barnacle that encrusts rocks in the high and mid
+intertidal zone along the Pacific coast, tolerating long stretches out of
+water between tides.
+"""
+subject_category = "Crustacean"
+tags = ["barnacle", "tide pool", "rocky intertidal"]
+regions = ["California", "Oregon", "Washington", "Pacific Coast"]
+ecosystems = ["High intertidal", "Splash zone"]
+taxonomic_group = "Crustacean"
+product_use_categories = ["apparel", "stickers"]
+notes = "Source deliberately truncated to exercise generation-failure handling (issue #27)."
+
+rights_status = "original_artwork"
+licensing_notes = "Original illustration commissioned for this catalog; no external license required."
+
+accuracy_status = "not_reviewed"
+
+# Source images: file is relative to this asset's sources/ directory (ADR 0003).
+[[sources]]
+role = "silhouette"
+file = "silhouette.png"

@@ -9,6 +9,12 @@ ADR 0007's "sources/ is read-only to the tool" (issue #4).
 Runs against a temporary copy rather than the committed fixture directly
 (issue #23): ``generate`` writes real files under each asset's ``derived/``,
 and the committed fixture must never contain one (this directory's README).
+
+The fixture's fourth asset, ``acorn_barnacle``, has a deliberately truncated
+source (issue #27, §35): a ``generate`` that reaches it fails without ever
+touching a byte under ``sources/`` -- exercised directly below alongside the
+successful commands, since source preservation must hold on the failure path
+too, not just the happy one.
 """
 
 import hashlib
@@ -46,16 +52,28 @@ def test_every_cli_command_leaves_source_images_unchanged(
     before = _hash_all_sources(root)
     assert before, "fixture catalog should have committed source images to hash"
 
-    results = [
+    succeeding_results = [
         runner.invoke(app, ["status"]),
         runner.invoke(app, ["assets"]),
         *(runner.invoke(app, ["asset", asset_id]) for asset_id in FIXTURE_ASSET_IDS),
-        runner.invoke(app, ["generate", "--all"]),
         *(runner.invoke(app, ["generate", asset_id]) for asset_id in FIXTURE_ASSET_IDS),
     ]
-
-    for result in results:
+    for result in succeeding_results:
         assert result.exit_code == 0, result.output
+
+    # generate --all, and generating acorn_barnacle directly, both exit
+    # non-zero (issue #27): its only source is a deliberately truncated PNG,
+    # so transparent_png and silhouette_svg fail to generate. §35's "a
+    # failure involving one asset should not silently corrupt unrelated
+    # products" -- proven here as "does not touch a single source byte,
+    # including its own" -- holds on this failing path too, not only the
+    # successful commands above.
+    failing_results = [
+        runner.invoke(app, ["generate", "--all"]),
+        runner.invoke(app, ["generate", "acorn_barnacle"]),
+    ]
+    for result in failing_results:
+        assert result.exit_code == 1, result.output
 
     after = _hash_all_sources(root)
     assert after == before

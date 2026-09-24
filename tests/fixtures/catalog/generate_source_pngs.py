@@ -190,6 +190,28 @@ MULTI_COLOR_SOURCE_IMAGES: list[tuple[str, str, str, list[list[Rgba]]]] = [
     ),
 ]
 
+# (asset ID, filename, role, mask factory, RGBA fill color, byte offset to
+# truncate at): a deliberately broken source (issue #27, §35) -- valid PNG
+# signature and IHDR chunk, cut off partway through the (single) IDAT chunk,
+# with no IEND. Pillow's ``Image.open`` still succeeds (the header alone is
+# enough to identify the format and read its size/mode), but forcing a full
+# decode (``.convert("RGBA")``, which both transparent_png and silhouette_svg
+# do) raises ``OSError: image file is truncated`` -- a generation failure,
+# never a metadata problem, since source validation only checks that the
+# declared file exists (README.md). 50 bytes lands inside the IDAT chunk for
+# every mask this script can produce at ``SIZE`` 16 (the full PNG is under
+# 100 bytes); acorn_barnacle is the only asset with a source built this way.
+TRUNCATED_SOURCE_IMAGES: list[tuple[str, str, str, Grid, Rgba, int]] = [
+    (
+        "acorn_barnacle",
+        "silhouette.png",
+        "silhouette",
+        _solid_blob(SIZE, cx=7.5, cy=7.5, radius=5.5),
+        (150, 100, 50, 255),
+        50,
+    ),
+]
+
 # (filename under the catalog root, RGBA fill color). The placeholder brand
 # mark that tests/fixtures/catalog/brand.toml's mark_file points at (issue #3).
 MARK_IMAGE = ("mark.png", (28, 74, 122, 255))
@@ -216,6 +238,13 @@ def main() -> None:
         out_path = out_dir / filename
         out_path.write_bytes(_encode_png(SIZE, pixels))
         print(f"wrote {out_path}")
+
+    for asset_id, filename, _role, mask, rgba, truncate_to in TRUNCATED_SOURCE_IMAGES:
+        out_dir = FIXTURE_ASSETS_DIR / asset_id / "sources"
+        out_dir.mkdir(parents=True, exist_ok=True)
+        out_path = out_dir / filename
+        out_path.write_bytes(make_shaped_png(SIZE, mask, rgba)[:truncate_to])
+        print(f"wrote {out_path} (truncated to {truncate_to} bytes)")
 
     mark_filename, mark_rgba = MARK_IMAGE
     mark_path = FIXTURE_CATALOG_ROOT / mark_filename
