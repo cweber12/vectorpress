@@ -82,6 +82,7 @@ def test_load_catalog_on_the_clean_fixture_has_no_problems() -> None:
         "acorn_barnacle",
         "giant_green_anemone",
         "ochre_sea_star",
+        "owl_limpet",
         "purple_sea_urchin",
     ]
     assert [c.slug for c in catalog.collections] == [
@@ -107,6 +108,7 @@ def test_load_catalog_without_brand_toml_reports_its_absence(catalog_copy: Path)
         "acorn_barnacle",
         "giant_green_anemone",
         "ochre_sea_star",
+        "owl_limpet",
         "purple_sea_urchin",
     ]
     assert catalog.brand is None
@@ -166,7 +168,12 @@ def test_load_catalog_aggregates_asset_problems_and_keeps_the_valid_assets(
     catalog = load_catalog(catalog_copy)
 
     loaded_ids = {asset.id for asset in catalog.assets}
-    assert loaded_ids == {"acorn_barnacle", "giant_green_anemone", "purple_sea_urchin"}
+    assert loaded_ids == {
+        "acorn_barnacle",
+        "giant_green_anemone",
+        "owl_limpet",
+        "purple_sea_urchin",
+    }
     assert len(catalog.problems) == 1
     assert "ochre_sea_star" in str(catalog.problems[0].path)
     assert catalog.problems[0].field == "subject_category"

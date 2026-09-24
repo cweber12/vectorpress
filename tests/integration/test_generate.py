@@ -55,6 +55,21 @@ FIXTURE_SILHOUETTE_OUTPUTS = [
 ]
 
 # (asset ID, expected customer-facing filename): §20's slugified display name
+# plus cut_svg's ``-cut.svg`` suffix (issue #36). Every fixture asset with a
+# decodable silhouette source -- the three FIXTURE_SILHOUETTE_OUTPUTS assets
+# plus owl_limpet (the cut_svg cleanup fixture) -- so its cut SVG is
+# snapshotted too (the issue's "snapshot the cut SVG text for every fixture
+# asset that has a decodable silhouette source"); acorn_barnacle's does not
+# decode, so it is excluded here the same way it is from every other
+# FIXTURE_*_OUTPUTS list.
+FIXTURE_CUT_SVG_OUTPUTS = [
+    ("ochre_sea_star", "ochre-sea-star-cut.svg"),
+    ("purple_sea_urchin", "purple-sea-urchin-cut.svg"),
+    ("giant_green_anemone", "giant-green-anemone-cut.svg"),
+    ("owl_limpet", "owl-limpet-cut.svg"),
+]
+
+# (asset ID, expected customer-facing filename): §20's slugified display name
 # plus flatcolor_svg's ``-color.svg`` suffix (issue #25). Only ochre_sea_star
 # has a flatcolor source; the other two fixture assets have none, so
 # flatcolor_svg stays impossible for them (see FIXTURE_IMPOSSIBLE_FLATCOLOR).
@@ -137,6 +152,58 @@ def test_generate_all_writes_every_silhouette_svg_with_provenance(
         asset_result = runner.invoke(app, ["asset", asset_id])
         assert asset_result.exit_code == 0, asset_result.output
         assert f"silhouette_svg\tcurrent\t{filename}" in asset_result.stdout
+
+
+@pytest.mark.integration
+def test_generate_all_writes_every_cut_svg_with_provenance(
+    monkeypatch: pytest.MonkeyPatch, temp_catalog_root: Path
+) -> None:
+    """Acceptance criterion 1 (issue #36): ``generate --all`` on a temp copy
+    of the fixture writes each asset's ``<slug>-cut.svg`` under its
+    ``derived/``, each with a provenance record beside it; ``vpress asset``
+    then shows it ``current``. ``generate`` no longer reports ``no
+    generator`` for ``cut_svg``."""
+    monkeypatch.chdir(temp_catalog_root)
+
+    result = runner.invoke(app, ["generate", "--all"])
+
+    assert result.exit_code == 1, result.output
+    assert "no generator" not in result.stdout
+    for asset_id, filename in FIXTURE_CUT_SVG_OUTPUTS:
+        assert f"{asset_id}\tcut_svg\tgenerated\t{filename}" in result.stdout
+
+        derived_dir = temp_catalog_root / "assets" / asset_id / DERIVED_DIRNAME
+        output_path = derived_dir / filename
+        assert output_path.is_file()
+
+        provenance = read_provenance(derived_dir, filename)
+        assert provenance is not None
+        assert provenance.output_file == filename
+        assert provenance.generator == "cut_svg"
+        assert provenance.output_hash == sha256_bytes(output_path.read_bytes())
+        # the effective reference size is part of the recorded provenance
+        # parameters, not just the recipe's own static declaration (issue
+        # #36's "reference size in the recipe identity").
+        assert provenance.parameters["reference_size_in"] == 3.0
+
+        asset_result = runner.invoke(app, ["asset", asset_id])
+        assert asset_result.exit_code == 0, asset_result.output
+        assert f"cut_svg\tcurrent\t{filename}" in asset_result.stdout
+
+
+@pytest.mark.integration
+def test_vpress_asset_shows_cut_svg_missing_before_generation(
+    monkeypatch: pytest.MonkeyPatch, temp_catalog_root: Path
+) -> None:
+    """Acceptance criterion 2: before generation, ``vpress asset
+    ochre_sea_star`` shows ``cut_svg`` ``missing`` from its silhouette
+    source, the same shape ``silhouette_svg`` already shows."""
+    monkeypatch.chdir(temp_catalog_root)
+
+    result = runner.invoke(app, ["asset", "ochre_sea_star"])
+
+    assert result.exit_code == 0, result.output
+    assert "cut_svg\tmissing\tsilhouette.png (silhouette)" in result.stdout
 
 
 @pytest.mark.integration
@@ -351,6 +418,32 @@ def test_silhouette_svg_text_is_locked_by_snapshot(
 
 
 @pytest.mark.integration
+@pytest.mark.parametrize("asset_id,filename", FIXTURE_CUT_SVG_OUTPUTS)
+def test_cut_svg_text_is_locked_by_snapshot(
+    monkeypatch: pytest.MonkeyPatch,
+    temp_catalog_root: Path,
+    snapshot: SnapshotAssertion,
+    asset_id: str,
+    filename: str,
+) -> None:
+    """Acceptance criterion 5 (issue #36): each cut SVG is locked
+    byte-for-byte as text, so the cleanup pass, tracer, or a library upgrade
+    cannot silently change output without a reviewed snapshot diff.
+    Identical on ubuntu and windows (§36): potracer is pure Python,
+    ``scipy.ndimage``'s labelling and morphology are integer/boolean
+    operations with no floating-point step, and ``svg_document``'s
+    fixed-precision number formatting absorbs any last-bit libm difference
+    between platforms before it reaches text."""
+    monkeypatch.chdir(temp_catalog_root)
+
+    result = runner.invoke(app, ["generate", asset_id])
+    assert result.exit_code == 0, result.output
+
+    output_path = temp_catalog_root / "assets" / asset_id / DERIVED_DIRNAME / filename
+    assert output_path.read_text(encoding="utf-8") == snapshot
+
+
+@pytest.mark.integration
 @pytest.mark.parametrize("asset_id,filename", FIXTURE_FLATCOLOR_OUTPUTS)
 def test_flatcolor_svg_text_is_locked_by_snapshot(
     monkeypatch: pytest.MonkeyPatch,
@@ -382,10 +475,11 @@ def test_second_generate_all_reports_current_and_changes_nothing(
     monkeypatch: pytest.MonkeyPatch, temp_catalog_root: Path
 ) -> None:
     """Acceptance criterion 3 (issue #23) and acceptance criterion 4 (issue
-    #24, issue #25): a second ``generate --all`` reports every
-    ``transparent_png``, every ``silhouette_svg``, and ochre_sea_star's
-    ``flatcolor_svg`` as ``current``, and no file under any ``derived/``
-    changes bytes or mtime (§36) -- the flat-color SVG is idempotent too."""
+    #24, issue #25, issue #36): a second ``generate --all`` reports every
+    ``transparent_png``, every ``silhouette_svg``, every ``cut_svg``, and
+    ochre_sea_star's ``flatcolor_svg`` as ``current``, and no file under any
+    ``derived/`` changes bytes or mtime (§36) -- the flat-color and cut-file
+    SVGs are idempotent too."""
     monkeypatch.chdir(temp_catalog_root)
     first = runner.invoke(app, ["generate", "--all"])
     assert first.exit_code == 1, first.output
@@ -403,6 +497,8 @@ def test_second_generate_all_reports_current_and_changes_nothing(
         assert f"{asset_id}\ttransparent_png\tcurrent\t{filename}" in second.stdout
     for asset_id, filename in FIXTURE_SILHOUETTE_OUTPUTS:
         assert f"{asset_id}\tsilhouette_svg\tcurrent\t{filename}" in second.stdout
+    for asset_id, filename in FIXTURE_CUT_SVG_OUTPUTS:
+        assert f"{asset_id}\tcut_svg\tcurrent\t{filename}" in second.stdout
     for asset_id, filename in FIXTURE_FLATCOLOR_OUTPUTS:
         assert f"{asset_id}\tflatcolor_svg\tcurrent\t{filename}" in second.stdout
     for asset_id in FIXTURE_IMPOSSIBLE_FLATCOLOR:
@@ -479,32 +575,33 @@ def test_vpress_status_missing_count_drops_after_generation(
     monkeypatch.chdir(temp_catalog_root)
     before = runner.invoke(app, ["status"])
     assert before.exit_code == 0, before.output
-    # purple_sea_urchin and giant_green_anemone each contribute 2 missing
-    # (transparent_png, silhouette_svg) and 1 impossible (flatcolor_svg);
-    # ochre_sea_star has a flatcolor source (issue #25) so all 3 of its
-    # recipe-bearing types are missing instead: 2*2 + 3 = 7. acorn_barnacle
-    # (issue #27) has only a silhouette source: 2 more missing
-    # (transparent_png, silhouette_svg), 1 more impossible (flatcolor_svg)
-    # -- 9 missing, 3 impossible overall.
-    assert "Missing derivatives: 9" in before.stdout
-    assert "Impossible derivatives: 3" in before.stdout
+    # purple_sea_urchin, giant_green_anemone and owl_limpet (issue #36) each
+    # contribute 3 missing (transparent_png, silhouette_svg, cut_svg) and 1
+    # impossible (flatcolor_svg); ochre_sea_star has a flatcolor source
+    # (issue #25) so all 4 of its recipe-bearing types are missing instead:
+    # 3*3 + 4 = 13. acorn_barnacle (issue #27) has only a silhouette source:
+    # 3 more missing (transparent_png, silhouette_svg, cut_svg), 1 more
+    # impossible (flatcolor_svg) -- 16 missing, 4 impossible overall.
+    assert "Missing derivatives: 16" in before.stdout
+    assert "Impossible derivatives: 4" in before.stdout
 
     generate_result = runner.invoke(app, ["generate", "--all"])
-    # non-zero: acorn_barnacle's truncated source fails two derivatives
-    # (issue #27) -- the assertions below cover only the other three assets.
+    # non-zero: acorn_barnacle's truncated source fails three derivatives
+    # (issue #27, widened by issue #36) -- the assertions below cover only
+    # the other four assets.
     assert generate_result.exit_code == 1, generate_result.output
 
     after = runner.invoke(app, ["status"])
 
     assert after.exit_code == 0, after.output
     # Every recipe-bearing type for every asset with an acceptable,
-    # decodable source (issue #24, issue #25) moves from missing to
-    # current; flatcolor_svg stays impossible for the two assets with no
+    # decodable source (issue #24, issue #25, issue #36) moves from missing
+    # to current; flatcolor_svg stays impossible for the assets with no
     # flatcolor source (counted separately, not as missing). acorn_barnacle's
-    # two derivatives never generate (its source never decodes), so they
+    # three derivatives never generate (its source never decodes), so they
     # stay missing -- generation failure never counts as "current".
-    assert "Missing derivatives: 2" in after.stdout
-    assert "Impossible derivatives: 3" in after.stdout
+    assert "Missing derivatives: 3" in after.stdout
+    assert "Impossible derivatives: 4" in after.stdout
 
 
 @pytest.mark.integration
@@ -568,13 +665,13 @@ def test_overwriting_a_source_marks_exactly_its_derivatives_stale(
     monkeypatch: pytest.MonkeyPatch, temp_catalog_root: Path
 ) -> None:
     """Acceptance criterion 1: overwriting ``purple_sea_urchin``'s only
-    source (it has just a ``silhouette`` source, so both ``transparent_png``
-    and ``silhouette_svg`` select it) with different valid content marks
-    exactly those two derivatives ``stale (source changed)`` in ``vpress
-    asset``, counted in ``vpress status``; every other derivative in the
-    catalog -- including ``ochre_sea_star``'s and
-    ``giant_green_anemone``'s, which do not share that file -- stays
-    ``current``."""
+    source (it has just a ``silhouette`` source, so ``transparent_png``,
+    ``silhouette_svg`` and ``cut_svg`` -- issue #36 -- all select it) with
+    different valid content marks exactly those three derivatives
+    ``stale (source changed)`` in ``vpress asset``, counted in ``vpress
+    status``; every other derivative in the catalog -- including
+    ``ochre_sea_star``'s and ``giant_green_anemone``'s, which do not share
+    that file -- stays ``current``."""
     monkeypatch.chdir(temp_catalog_root)
     generate_result = runner.invoke(app, ["generate", "--all"])
     assert generate_result.exit_code == 1, generate_result.output
@@ -592,10 +689,11 @@ def test_overwriting_a_source_marks_exactly_its_derivatives_stale(
         "silhouette_svg\tstale (source changed)\tpurple-sea-urchin-silhouette.svg"
         in asset_result.stdout
     )
+    assert "cut_svg\tstale (source changed)\tpurple-sea-urchin-cut.svg" in asset_result.stdout
 
     status_result = runner.invoke(app, ["status"])
     assert status_result.exit_code == 0, status_result.output
-    assert "Stale derivatives: 2" in status_result.stdout
+    assert "Stale derivatives: 3" in status_result.stdout
 
     # every other derivative in the catalog stays current.
     for asset_id, filename in FIXTURE_OUTPUTS:
@@ -687,9 +785,12 @@ def test_recipe_parameter_change_marks_every_derivative_of_that_type_stale(
     """Acceptance criterion 3: a recipe parameter change (monkeypatched)
     marks every derivative of that type stale, across every asset -- here,
     ``silhouette_svg``'s ``curve_tolerance``, which every one of the three
-    fixture assets has a derivative of. ``transparent_png`` and
-    ``flatcolor_svg`` are untouched (a different recipe, a different
-    identity hash)."""
+    original fixture assets has a derivative of (a fourth,
+    ``owl_limpet`` -- issue #36 -- also generates a ``silhouette_svg`` and
+    goes stale the same way, so it counts towards the global total below
+    even though it is not in ``FIXTURE_SILHOUETTE_OUTPUTS``).
+    ``transparent_png``, ``cut_svg`` and ``flatcolor_svg`` are untouched (a
+    different recipe, a different identity hash each)."""
     monkeypatch.chdir(temp_catalog_root)
     first = runner.invoke(app, ["generate", "--all"])
     assert first.exit_code == 1, first.output
@@ -715,7 +816,7 @@ def test_recipe_parameter_change_marks_every_derivative_of_that_type_stale(
 
     status_result = runner.invoke(app, ["status"])
     assert status_result.exit_code == 0, status_result.output
-    assert "Stale derivatives: 3" in status_result.stdout
+    assert "Stale derivatives: 4" in status_result.stdout
 
 
 @pytest.mark.integration
@@ -811,3 +912,85 @@ def test_force_regenerates_current_derivatives_without_rewriting_unchanged_bytes
     # round 1: write_derivative now skips the provenance write too, when
     # its serialized payload already matches what is on disk).
     assert after == before
+
+
+# --- reference size in the recipe identity (issue #36) -----------------------------
+
+
+@pytest.mark.integration
+def test_changing_reference_size_in_marks_every_cut_svg_stale_and_nothing_else(
+    monkeypatch: pytest.MonkeyPatch, temp_catalog_root: Path
+) -> None:
+    """Acceptance criterion 7: changing ``reference_size_in`` in the temp
+    copy's ``catalog.toml`` (the catalog default cut-file thresholds are
+    measured against, §9.1) makes every ``cut_svg`` derivative
+    ``stale (recipe changed)`` -- it is merged into the effective recipe
+    identity (ADR 0004) -- and leaves every other recipe-bearing type
+    ``current``: none of them read ``reference_size_in`` at all."""
+    monkeypatch.chdir(temp_catalog_root)
+    first = runner.invoke(app, ["generate", "--all"])
+    assert first.exit_code == 1, first.output
+
+    catalog_toml = temp_catalog_root / "catalog.toml"
+    catalog_toml.write_text(
+        catalog_toml.read_text(encoding="utf-8") + "\nreference_size_in = 6.0\n",
+        encoding="utf-8",
+    )
+
+    for asset_id, filename in FIXTURE_CUT_SVG_OUTPUTS:
+        result = runner.invoke(app, ["asset", asset_id])
+        assert result.exit_code == 0, result.output
+        assert f"cut_svg\tstale (recipe changed)\t{filename}" in result.stdout
+
+    for asset_id, filename in FIXTURE_OUTPUTS:
+        result = runner.invoke(app, ["asset", asset_id])
+        assert result.exit_code == 0, result.output
+        assert f"transparent_png\tcurrent\t{filename}" in result.stdout
+    for asset_id, filename in FIXTURE_SILHOUETTE_OUTPUTS:
+        result = runner.invoke(app, ["asset", asset_id])
+        assert result.exit_code == 0, result.output
+        assert f"silhouette_svg\tcurrent\t{filename}" in result.stdout
+    for asset_id, filename in FIXTURE_FLATCOLOR_OUTPUTS:
+        result = runner.invoke(app, ["asset", asset_id])
+        assert result.exit_code == 0, result.output
+        assert f"flatcolor_svg\tcurrent\t{filename}" in result.stdout
+
+    status_result = runner.invoke(app, ["status"])
+    assert status_result.exit_code == 0, status_result.output
+    # ochre_sea_star, purple_sea_urchin, giant_green_anemone and owl_limpet
+    # (FIXTURE_CUT_SVG_OUTPUTS) each contribute one stale cut_svg.
+    assert "Stale derivatives: 4" in status_result.stdout
+
+
+@pytest.mark.integration
+def test_changing_a_cut_svg_cleanup_parameter_changes_its_recipe_identity(
+    monkeypatch: pytest.MonkeyPatch, temp_catalog_root: Path
+) -> None:
+    """Acceptance criterion 7: a cleanup threshold (``island_min_area_in2``
+    here) is a recipe parameter (issue #36's "every threshold is a recipe
+    parameter in physical units"), so changing it marks every ``cut_svg``
+    stale the same way a tracing-parameter change already does for
+    ``silhouette_svg`` (ADR 0004) -- other recipe-bearing types are
+    untouched."""
+    monkeypatch.chdir(temp_catalog_root)
+    first = runner.invoke(app, ["generate", "--all"])
+    assert first.exit_code == 1, first.output
+
+    original = recipe_module.RECIPES[DerivativeType.CUT_SVG]
+    changed = Recipe(
+        derivative_type=original.derivative_type,
+        accepted_roles=original.accepted_roles,
+        generator=original.generator,
+        parameters={**original.parameters, "island_min_area_in2": 0.5},
+    )
+    monkeypatch.setitem(recipe_module.RECIPES, DerivativeType.CUT_SVG, changed)
+
+    for asset_id, filename in FIXTURE_CUT_SVG_OUTPUTS:
+        result = runner.invoke(app, ["asset", asset_id])
+        assert result.exit_code == 0, result.output
+        assert f"cut_svg\tstale (recipe changed)\t{filename}" in result.stdout
+
+    for asset_id, filename in FIXTURE_SILHOUETTE_OUTPUTS:
+        result = runner.invoke(app, ["asset", asset_id])
+        assert result.exit_code == 0, result.output
+        assert f"silhouette_svg\tcurrent\t{filename}" in result.stdout

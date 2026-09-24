@@ -197,7 +197,7 @@ def asset(
         typer.echo(f"  {source.file}\t{source.role}")
 
     typer.echo("Derivatives:")
-    for status in asset_derivative_statuses(found, asset_dir(root, config, found.id)):
+    for status in asset_derivative_statuses(found, asset_dir(root, config, found.id), config):
         if status.state is DerivativeState.IMPOSSIBLE:
             typer.echo(f"  {status.derivative_type.value}\t{status.state.value}\t{status.reason}")
         elif status.state is DerivativeState.CURRENT:
@@ -301,7 +301,11 @@ def generate(
     failure_count = 0
     for target in targets:
         for result in generate_asset(
-            target, asset_dir(root, config, target.id), stale_only=stale, force=force
+            target,
+            asset_dir(root, config, target.id),
+            stale_only=stale,
+            force=force,
+            config=config,
         ):
             typer.echo(
                 f"{result.asset_id}\t{result.derivative_type.value}\t"

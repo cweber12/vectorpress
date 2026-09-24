@@ -58,6 +58,29 @@ RECIPES: dict[DerivativeType, Recipe] = {
         generator="silhouette_svg",
         parameters={"alpha_threshold": 127, "curve_tolerance": 0.2, "speckle_size": 2},
     ),
+    DerivativeType.CUT_SVG: Recipe(
+        derivative_type=DerivativeType.CUT_SVG,
+        accepted_roles=("silhouette",),
+        generator="cut_svg",
+        parameters={
+            "alpha_threshold": 127,
+            # Every cleanup threshold below is a physical measurement, not a
+            # pixel count (ADR 0007, §9.1): "island", "hole" and "opening
+            # width" are only meaningful at a known output size, and that
+            # size -- the catalog's (or, later, a product's) reference size
+            # -- is not part of this static declaration (issue #36: it is
+            # merged in at generation time as an *effective* parameter, by
+            # ``pipeline.generate``, so changing it alone still changes this
+            # recipe's identity without editing this dict).
+            "island_min_area_in2": 0.01,
+            "hole_min_area_in2": 0.01,
+            "opening_width_in": 0.06,
+            # Coarser than silhouette_svg's 0.2 (issue #36's "typically a
+            # coarser curve tolerance"): a cut file trades fine detail for
+            # manufacturability on purpose (§6.3).
+            "curve_tolerance": 0.5,
+        },
+    ),
     DerivativeType.FLATCOLOR_SVG: Recipe(
         derivative_type=DerivativeType.FLATCOLOR_SVG,
         accepted_roles=("flatcolor",),

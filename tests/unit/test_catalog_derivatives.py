@@ -106,7 +106,7 @@ def test_pin_is_selected_over_the_preference_order_default() -> None:
 # --- select_derivatives: only recipe-bearing types, in declaration order ----------
 
 
-def test_select_derivatives_reports_only_the_three_recipe_bearing_types() -> None:
+def test_select_derivatives_reports_only_the_four_recipe_bearing_types() -> None:
     asset = _asset([Source(role="silhouette", file="silhouette.png")])
 
     selections = select_derivatives(asset)
@@ -114,15 +114,16 @@ def test_select_derivatives_reports_only_the_three_recipe_bearing_types() -> Non
     assert [s.derivative_type for s in selections] == [
         DerivativeType.TRANSPARENT_PNG,
         DerivativeType.SILHOUETTE_SVG,
+        DerivativeType.CUT_SVG,
         DerivativeType.FLATCOLOR_SVG,
     ]
 
 
 def test_select_derivatives_matches_the_fixture_asset_shape() -> None:
     """Mirrors the shape ``vpress asset ochre_sea_star`` and its siblings
-    show (issue #22 acceptance criterion 1): transparent_png and
-    silhouette_svg select the silhouette source as missing, flatcolor_svg is
-    impossible."""
+    show (issue #22 acceptance criterion 1, issue #36): transparent_png,
+    silhouette_svg and cut_svg all select the silhouette source as missing,
+    flatcolor_svg is impossible."""
     asset = _asset([Source(role="silhouette", file="silhouette.png")])
 
     by_type = {s.derivative_type: s for s in select_derivatives(asset)}
@@ -133,6 +134,10 @@ def test_select_derivatives_matches_the_fixture_asset_shape() -> None:
     )
     assert by_type[DerivativeType.SILHOUETTE_SVG].state is DerivativeState.MISSING
     assert by_type[DerivativeType.SILHOUETTE_SVG].source == Source(
+        role="silhouette", file="silhouette.png"
+    )
+    assert by_type[DerivativeType.CUT_SVG].state is DerivativeState.MISSING
+    assert by_type[DerivativeType.CUT_SVG].source == Source(
         role="silhouette", file="silhouette.png"
     )
     assert by_type[DerivativeType.FLATCOLOR_SVG].state is DerivativeState.IMPOSSIBLE
@@ -152,9 +157,10 @@ def test_count_derivative_states_tallies_across_assets() -> None:
 
     counts = count_derivative_states([one_source_asset, two_source_asset])
 
-    # Each asset: transparent_png missing, silhouette_svg missing,
-    # flatcolor_svg impossible (neither asset has a flatcolor source).
-    assert counts.missing == 4
+    # Each asset: transparent_png missing, silhouette_svg missing, cut_svg
+    # missing (issue #36), flatcolor_svg impossible (neither asset has a
+    # flatcolor source).
+    assert counts.missing == 6
     assert counts.impossible == 2
 
 

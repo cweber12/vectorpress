@@ -12,6 +12,7 @@ Both ``vpress asset`` and ``vpress generate`` (``cli``) call this module, so
 "is this derivative current" is answered in exactly one place.
 """
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
@@ -33,11 +34,37 @@ from vectorpress.catalog.provenance import (
     write_derivative,
 )
 from vectorpress.domain.asset import Asset, Source
-from vectorpress.domain.catalog_config import CatalogConfig
+from vectorpress.domain.catalog_config import DEFAULT_REFERENCE_SIZE_IN, CatalogConfig
 from vectorpress.domain.derivative_state import DerivativeState
 from vectorpress.domain.derivative_type import DerivativeType, derivative_filename
 from vectorpress.domain.recipe import RECIPES, Recipe
 from vectorpress.pipeline.registry import get_generator
+
+
+def _effective_parameters(recipe: Recipe, config: CatalogConfig | None) -> Mapping[str, object]:
+    """``recipe.parameters``, augmented with catalog-level values a
+    generator needs but that are not part of a recipe's own static
+    declaration (issue #36): currently only ``cut_svg``'s reference size --
+    its cleanup thresholds are physical (§9.1), and the reference size they
+    are measured against is a catalog setting (a later issue adds a product
+    override), not something ``domain.recipe`` has any business knowing
+    about (ADR 0006).
+
+    ``config`` is ``None`` for a caller with no catalog in hand at all (a
+    unit test exercising generation directly against a fabricated asset
+    folder, the same shape ``tests/unit/test_pipeline_generate.py`` already
+    uses for every other recipe) -- falls back to
+    :data:`~vectorpress.domain.catalog_config.DEFAULT_REFERENCE_SIZE_IN`,
+    matching what an unset ``catalog.toml`` would have resolved to anyway.
+
+    Every other recipe returns its own ``parameters`` completely unchanged.
+    """
+    if recipe.derivative_type is not DerivativeType.CUT_SVG:
+        return recipe.parameters
+    reference_size_in = (
+        config.reference_size_in if config is not None else DEFAULT_REFERENCE_SIZE_IN
+    )
+    return {**recipe.parameters, "reference_size_in": reference_size_in}
 
 
 @dataclass(frozen=True)
@@ -64,7 +91,9 @@ class DerivativeStatus:
     output_filename: str | None
 
 
-def asset_derivative_statuses(asset: Asset, asset_dir_path: Path) -> list[DerivativeStatus]:
+def asset_derivative_statuses(
+    asset: Asset, asset_dir_path: Path, config: CatalogConfig | None = None
+) -> list[DerivativeStatus]:
     """One :class:`DerivativeStatus` per recipe-bearing derivative type, for
     one asset, upgrading :func:`~vectorpress.catalog.derivatives.select_derivatives`'s
     ``MISSING`` to ``CURRENT`` or ``STALE`` where generation has already
@@ -73,8 +102,12 @@ def asset_derivative_statuses(asset: Asset, asset_dir_path: Path) -> list[Deriva
     A type whose recipe has no generator yet can never be ``CURRENT`` or
     ``STALE``: it stays ``MISSING``, the same as before generation existed
     at all. Every type this PRD covers (``transparent_png``,
-    ``silhouette_svg``, ``flatcolor_svg``) now has one; a later PRD's types
-    are the ones this still applies to.
+    ``silhouette_svg``, ``cut_svg``, ``flatcolor_svg``) now has one; a later
+    PRD's types are the ones this still applies to.
+
+    ``config`` feeds :func:`_effective_parameters` -- currently only
+    ``cut_svg`` cares (its reference size), so every other type's currency
+    check is unaffected by it either way (issue #36).
     """
     statuses: list[DerivativeStatus] = []
     for selection in select_derivatives(asset):
@@ -86,8 +119,12 @@ def asset_derivative_statuses(asset: Asset, asset_dir_path: Path) -> list[Deriva
         if state is DerivativeState.MISSING and recipe.generator is not None:
             assert selection.source is not None  # MISSING always carries a selected source
             candidate = derivative_filename(asset.display_name, recipe.derivative_type)
+            effective_parameters = _effective_parameters(recipe, config)
             currency = derivative_currency(
-                asset_dir_path, candidate, selection.source.file, recipe_identity_hash(recipe)
+                asset_dir_path,
+                candidate,
+                selection.source.file,
+                recipe_identity_hash(recipe, effective_parameters),
             )
             state = currency.state
             if state is DerivativeState.STALE:
@@ -116,7 +153,7 @@ def count_derivative_states(
     return tally_derivative_states(
         status.state
         for asset in assets
-        for status in asset_derivative_statuses(asset, asset_dir(root, config, asset.id))
+        for status in asset_derivative_statuses(asset, asset_dir(root, config, asset.id), config)
     )
 
 
@@ -175,13 +212,24 @@ class GeneratorError(Exception):
     """
 
 
-def _generate_one(asset: Asset, recipe: Recipe, source: Source, asset_dir_path: Path) -> str:
+def _generate_one(
+    asset: Asset,
+    recipe: Recipe,
+    source: Source,
+    asset_dir_path: Path,
+    config: CatalogConfig | None,
+) -> str:
     """Run ``recipe``'s generator against ``source`` and persist the result
     with provenance (§35, §36). Returns the output filename.
 
     ``catalog.provenance.read_source_bytes`` is the only source read; the
-    generator itself takes those bytes and never touches the filesystem
-    (ADR 0006).
+    generator itself takes only bytes and its *effective* parameters
+    (:func:`_effective_parameters` -- ``recipe.parameters`` plus, for
+    ``cut_svg``, the catalog's reference size, issue #36) and never touches
+    the filesystem (ADR 0006). Those same effective parameters are what gets
+    recorded in provenance and hashed into ``recipe_hash``, so a later
+    ``reference_size_in`` change is detected as a recipe change the same way
+    any other parameter change is.
 
     Every step -- reading the source, running the generator, and writing
     the result -- is wrapped in one :class:`GeneratorError` (issue #27,
@@ -201,7 +249,8 @@ def _generate_one(asset: Asset, recipe: Recipe, source: Source, asset_dir_path: 
 
     try:
         source_bytes = read_source_bytes(asset_dir_path, source.file)
-        output = generator(source_bytes, recipe.parameters)
+        effective_parameters = _effective_parameters(recipe, config)
+        output = generator(source_bytes, effective_parameters)
         filename = derivative_filename(asset.display_name, recipe.derivative_type)
 
         provenance = Provenance(
@@ -209,8 +258,8 @@ def _generate_one(asset: Asset, recipe: Recipe, source: Source, asset_dir_path: 
             source_hash=sha256_bytes(source_bytes),
             derivative_type=recipe.derivative_type.value,
             generator=recipe.generator,
-            parameters=dict(recipe.parameters),
-            recipe_hash=recipe_identity_hash(recipe),
+            parameters=dict(effective_parameters),
+            recipe_hash=recipe_identity_hash(recipe, effective_parameters),
             generator_versions={"vectorpress": __version__, **output.library_versions},
             output_file=filename,
             output_hash=sha256_bytes(output.output_bytes),
@@ -229,6 +278,7 @@ def generate_asset(
     *,
     stale_only: bool = False,
     force: bool = False,
+    config: CatalogConfig | None = None,
 ) -> list[GenerationResult]:
     """Generate every recipe-bearing derivative type for one asset (issue
     #23's ``vpress generate <asset_id>``; ``stale_only`` and ``force`` are
@@ -259,7 +309,7 @@ def generate_asset(
     of ``--all``/``--stale`` either.
     """
     results: list[GenerationResult] = []
-    for status in asset_derivative_statuses(asset, asset_dir_path):
+    for status in asset_derivative_statuses(asset, asset_dir_path, config):
         recipe = RECIPES[status.derivative_type]
 
         if status.state is DerivativeState.IMPOSSIBLE:
@@ -278,7 +328,7 @@ def generate_asset(
             # MISSING (not stale_only) or STALE, or CURRENT under --force.
             assert status.source is not None  # MISSING/STALE/CURRENT always carry a selected source
             try:
-                detail = _generate_one(asset, recipe, status.source, asset_dir_path)
+                detail = _generate_one(asset, recipe, status.source, asset_dir_path, config)
                 outcome = GenerationOutcome.GENERATED
             except GeneratorError as exc:
                 outcome = GenerationOutcome.FAILED

@@ -14,6 +14,7 @@ import hashlib
 import json
 import os
 import tempfile
+from collections.abc import Mapping
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
@@ -37,19 +38,32 @@ def sha256_bytes(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
-def recipe_identity_hash(recipe: Recipe) -> str:
+def recipe_identity_hash(recipe: Recipe, parameters: Mapping[str, object] | None = None) -> str:
     """The recipe identity hash: derivative type, generator name, and
     parameters (ADR 0004: "recipe identity including parameters, hashed so a
     parameter change changes the identity").
+
+    ``parameters`` defaults to ``recipe.parameters`` -- every recipe but
+    ``cut_svg`` (currently). ``cut_svg``'s cleanup thresholds are physical
+    (§9.1), so its generator also needs the catalog's reference size, which
+    is not part of ``recipe.parameters``' static declaration -- it is a
+    catalog-wide setting, not something ``domain.recipe`` has any business
+    knowing about (ADR 0006). ``pipeline.generate`` computes that *effective*
+    parameter mapping (recipe parameters plus reference size) once and passes
+    it here explicitly, so a ``reference_size_in`` change changes exactly
+    this recipe's identity (issue #36) the same way any other parameter
+    change would -- without ``domain.recipe`` or this function needing to
+    know which recipes have catalog-level parameters and which don't.
 
     ``json.dumps(..., sort_keys=True)`` makes the encoding independent of
     ``parameters``' key order, so the hash depends only on the recipe's
     actual content -- not something incidental like dict insertion order.
     """
+    effective_parameters = recipe.parameters if parameters is None else parameters
     payload = {
         "derivative_type": recipe.derivative_type.value,
         "generator": recipe.generator,
-        "parameters": recipe.parameters,
+        "parameters": effective_parameters,
     }
     encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
     return sha256_bytes(encoded)
