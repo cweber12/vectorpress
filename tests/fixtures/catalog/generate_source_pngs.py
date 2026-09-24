@@ -15,6 +15,13 @@ Each ``silhouette.png`` is a real shape on a transparent background rather
 than a solid-color square (issue #23): the transparent PNG generator's crop
 and hole-preserving behaviour needs actual content to crop and actual holes
 to preserve, which a single solid color cannot exercise.
+
+``ochre_sea_star`` also gets a ``flatcolor.png`` (issue #25): three
+concentric rings plus a small detached island, four flat, distinct colors on
+a transparent background, with the innermost ring fully enclosed by the one
+around it -- exactly what ``flatcolor_svg``'s quantize-then-trace-per-color
+generator needs to exercise both nesting (a hole in one color's region where
+another color's region sits) and a disjoint extra region.
 """
 
 from __future__ import annotations
@@ -91,6 +98,38 @@ def _blob_with_detached_island(size: int) -> Grid:
     return [[main[y][x] or (x, y) in island_cells for x in range(size)] for y in range(size)]
 
 
+def _flatcolor_rings_with_island(
+    size: int,
+    *,
+    cx: float,
+    cy: float,
+    ring_colors: list[tuple[float, Rgba]],
+    island_cells: set[tuple[int, int]],
+    island_color: Rgba,
+) -> list[list[Rgba]]:
+    """Concentric flat-color rings (issue #25's flatcolor fixture source):
+    ``ring_colors`` is ``[(outer_radius, color), ...]`` from the outermost
+    ring inward, each pixel colored by the first (smallest) radius it falls
+    within -- so the innermost entry is a solid disk fully enclosed by every
+    ring around it -- plus a small detached ``island_color`` region, all on
+    a transparent background."""
+    pixels: list[list[Rgba]] = []
+    for y in range(size):
+        row: list[Rgba] = []
+        for x in range(size):
+            if (x, y) in island_cells:
+                row.append(island_color)
+                continue
+            distance = ((x + 0.5 - cx) ** 2 + (y + 0.5 - cy) ** 2) ** 0.5
+            pixel = TRANSPARENT
+            for radius, color in ring_colors:
+                if distance <= radius:
+                    pixel = color
+            row.append(pixel)
+        pixels.append(row)
+    return pixels
+
+
 # (asset ID, filename under its sources/, role, mask factory, RGBA fill color).
 # ochre_sea_star gets two roles (silhouette + lineart) to exercise an
 # asset with several sources (issue #4 acceptance criteria); lineart stays a
@@ -126,6 +165,31 @@ SOLID_SOURCE_IMAGES: list[tuple[str, str, str, Rgba]] = [
     ("ochre_sea_star", "lineart.png", "lineart", (20, 20, 20, 255)),
 ]
 
+# (asset ID, filename, role, pre-colored pixel grid): sources with more than
+# one flat color, so a single mask + fill color (SHAPED_SOURCE_IMAGES' shape)
+# cannot express them. ochre_sea_star's flatcolor.png (issue #25) is the only
+# one so far; the other two fixture assets deliberately get no flatcolor
+# source, so flatcolor_svg stays impossible for them.
+MULTI_COLOR_SOURCE_IMAGES: list[tuple[str, str, str, list[list[Rgba]]]] = [
+    (
+        "ochre_sea_star",
+        "flatcolor.png",
+        "flatcolor",
+        _flatcolor_rings_with_island(
+            SIZE,
+            cx=7.5,
+            cy=7.5,
+            ring_colors=[
+                (6.5, (196, 93, 38, 255)),  # outer ring: ochre
+                (4.5, (230, 210, 170, 255)),  # middle ring: cream
+                (2.0, (91, 46, 130, 255)),  # inner disk: purple, fully enclosed
+            ],
+            island_cells={(12, 2), (13, 2), (12, 3), (13, 3)},
+            island_color=(58, 140, 92, 255),  # detached island: green
+        ),
+    ),
+]
+
 # (filename under the catalog root, RGBA fill color). The placeholder brand
 # mark that tests/fixtures/catalog/brand.toml's mark_file points at (issue #3).
 MARK_IMAGE = ("mark.png", (28, 74, 122, 255))
@@ -144,6 +208,13 @@ def main() -> None:
         out_dir.mkdir(parents=True, exist_ok=True)
         out_path = out_dir / filename
         out_path.write_bytes(make_png(SIZE, rgba))
+        print(f"wrote {out_path}")
+
+    for asset_id, filename, _role, pixels in MULTI_COLOR_SOURCE_IMAGES:
+        out_dir = FIXTURE_ASSETS_DIR / asset_id / "sources"
+        out_dir.mkdir(parents=True, exist_ok=True)
+        out_path = out_dir / filename
+        out_path.write_bytes(_encode_png(SIZE, pixels))
         print(f"wrote {out_path}")
 
     mark_filename, mark_rgba = MARK_IMAGE

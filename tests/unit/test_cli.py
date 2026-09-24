@@ -197,18 +197,21 @@ def test_status_on_the_clean_fixture_states_there_are_no_problems(
 def test_status_reports_missing_and_impossible_derivative_counts(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Acceptance criterion 2 (issue #22): each of the three fixture assets
-    contributes transparent_png and silhouette_svg as missing (their only
-    declared source is silhouette) and flatcolor_svg as impossible (none has
-    a flatcolor source); still exits 0 -- these are inventory counts, not
-    metadata problems."""
+    """Acceptance criterion 2 (issue #22), updated by issue #25's flatcolor
+    fixture source: purple_sea_urchin and giant_green_anemone each
+    contribute transparent_png and silhouette_svg as missing plus
+    flatcolor_svg as impossible (2 missing + 1 impossible each = 4 missing,
+    2 impossible); ochre_sea_star now has a flatcolor source, so all three
+    of its recipe-bearing types are missing instead (3 missing, 0
+    impossible) -- 7 missing, 2 impossible overall. Still exits 0 -- these
+    are inventory counts, not metadata problems."""
     monkeypatch.chdir(FIXTURE_CATALOG_ROOT)
 
     result = runner.invoke(app, ["status"])
 
     assert result.exit_code == 0
-    assert "Missing derivatives: 6" in result.stdout
-    assert "Impossible derivatives: 3" in result.stdout
+    assert "Missing derivatives: 7" in result.stdout
+    assert "Impossible derivatives: 2" in result.stdout
 
 
 def test_status_lists_a_missing_field_an_unknown_role_and_a_duplicate_id(
@@ -317,7 +320,8 @@ def test_assets_reports_a_source_count_per_asset(monkeypatch: pytest.MonkeyPatch
 
     assert result.exit_code == 0
     lines = {line.split("\t")[0]: line for line in result.stdout.splitlines() if line.strip()}
-    assert lines["ochre_sea_star"].split("\t")[-1] == "2"
+    # ochre_sea_star also has a flatcolor source now (issue #25).
+    assert lines["ochre_sea_star"].split("\t")[-1] == "3"
     assert lines["purple_sea_urchin"].split("\t")[-1] == "1"
     assert lines["giant_green_anemone"].split("\t")[-1] == "1"
 
@@ -338,18 +342,21 @@ def test_asset_shows_id_display_name_statuses_and_sources(
     assert "silhouette" in result.stdout
     assert "lineart.png" in result.stdout
     assert "lineart" in result.stdout
+    assert "flatcolor.png" in result.stdout
+    assert "flatcolor" in result.stdout
 
 
-def test_asset_lists_derivatives_missing_and_impossible(
+def test_asset_lists_derivatives_missing_and_impossible_for_an_asset_without_flatcolor(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Acceptance criterion 1 (issue #22): transparent_png and
     silhouette_svg select the silhouette source as missing, flatcolor_svg is
-    impossible naming the accepted role, for each of the three fixture
-    assets (ochre_sea_star, purple_sea_urchin, giant_green_anemone)."""
+    impossible naming the accepted role, for the two fixture assets with no
+    flatcolor source (purple_sea_urchin, giant_green_anemone; ochre_sea_star
+    has one since issue #25 and is covered separately below)."""
     monkeypatch.chdir(FIXTURE_CATALOG_ROOT)
 
-    for asset_id in ["ochre_sea_star", "purple_sea_urchin", "giant_green_anemone"]:
+    for asset_id in ["purple_sea_urchin", "giant_green_anemone"]:
         result = runner.invoke(app, ["asset", asset_id])
 
         assert result.exit_code == 0
@@ -358,6 +365,24 @@ def test_asset_lists_derivatives_missing_and_impossible(
         assert "silhouette_svg\tmissing\tsilhouette.png (silhouette)" in result.stdout
         assert "flatcolor_svg\timpossible\t" in result.stdout
         assert "flatcolor" in result.stdout
+
+
+def test_asset_lists_derivatives_for_the_asset_with_a_flatcolor_source(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """ochre_sea_star's flatcolor source (issue #25) makes flatcolor_svg
+    missing rather than impossible, and -- since the transparent_png recipe
+    prefers flatcolor over silhouette (issue #22's accepted-roles order) --
+    transparent_png now selects it too, not the silhouette source."""
+    monkeypatch.chdir(FIXTURE_CATALOG_ROOT)
+
+    result = runner.invoke(app, ["asset", "ochre_sea_star"])
+
+    assert result.exit_code == 0
+    assert "Derivatives:" in result.stdout
+    assert "transparent_png\tmissing\tflatcolor.png (flatcolor)" in result.stdout
+    assert "silhouette_svg\tmissing\tsilhouette.png (silhouette)" in result.stdout
+    assert "flatcolor_svg\tmissing\tflatcolor.png (flatcolor)" in result.stdout
 
 
 def test_asset_with_unknown_id_exits_non_zero_and_names_the_id(

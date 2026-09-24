@@ -72,7 +72,16 @@ def test_silhouette_svg_has_a_landed_generator_with_its_tracing_parameters() -> 
     }
 
 
-def test_flatcolor_svg_has_no_generator_yet() -> None:
-    """PRD 3 lands its generator; until then ``vpress generate`` reports it
-    ``no generator`` rather than attempting to run one (issue #23)."""
-    assert RECIPES[DerivativeType.FLATCOLOR_SVG].generator is None
+def test_flatcolor_svg_has_a_landed_generator_with_its_parameters() -> None:
+    """Issue #25: the flat-color SVG generator, with its quantization
+    parameter (``max_colors``) alongside the same three tracing parameters
+    ``silhouette_svg`` uses, all part of the recipe identity (ADR 0004)."""
+    recipe = RECIPES[DerivativeType.FLATCOLOR_SVG]
+
+    assert recipe.generator == "flatcolor_svg"
+    assert recipe.parameters == {
+        "alpha_threshold": 127,
+        "curve_tolerance": 0.2,
+        "speckle_size": 2,
+        "max_colors": 16,
+    }

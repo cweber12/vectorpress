@@ -36,7 +36,7 @@ from PIL import Image
 
 from vectorpress.pipeline._potrace_trace import trace_subpaths
 from vectorpress.pipeline.generator import GeneratorOutput
-from vectorpress.pipeline.svg_document import render_svg
+from vectorpress.pipeline.svg_document import Fill, render_svg
 
 #: This recipe's generator name (:attr:`vectorpress.domain.recipe.Recipe.generator`).
 GENERATOR_NAME = "silhouette_svg"
@@ -95,7 +95,7 @@ def generate(source_bytes: bytes, parameters: Mapping[str, object]) -> Generator
     mask = _ink_mask(source_bytes, alpha_threshold)
     subpaths = trace_subpaths(mask, speckle_size=speckle_size, curve_tolerance=curve_tolerance)
 
-    output_bytes = render_svg(subpaths, fill=_FILL, fill_rule="evenodd")
+    output_bytes = render_svg([Fill(fill=_FILL, subpaths=subpaths)], fill_rule="evenodd")
     return GeneratorOutput(
         output_bytes=output_bytes,
         library_versions={

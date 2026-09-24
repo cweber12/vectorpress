@@ -27,13 +27,12 @@ class DerivativeType(StrEnum):
 
 
 #: The customer-facing filename suffix for each derivative type with a
-#: landed generator (§20, issue #23, issue #24): every type gets an
-#: explicit suffix, no type uses the bare stem. A later slice adds
-#: ``-color.svg`` alongside ``flatcolor_svg``'s generator, the same way
-#: :data:`~vectorpress.domain.recipe.RECIPES` grows one type at a time.
+#: landed generator (§20, issue #23, issue #24, issue #25): every type gets
+#: an explicit suffix, no type uses the bare stem.
 _FILENAME_SUFFIXES: dict[DerivativeType, str] = {
     DerivativeType.TRANSPARENT_PNG: "-color.png",
     DerivativeType.SILHOUETTE_SVG: "-silhouette.svg",
+    DerivativeType.FLATCOLOR_SVG: "-color.svg",
 }
 
 _SLUG_STRIP_RE = re.compile(r"[^a-z0-9]+")

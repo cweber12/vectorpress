@@ -73,12 +73,15 @@ def test_sources_parse_with_role_and_file() -> None:
 
 
 def test_asset_with_two_roles_loads_both_sources() -> None:
+    """ochre_sea_star also gets a ``flatcolor`` source (issue #25), so it
+    declares three roles, not two -- the name stays as the original issue
+    #4 acceptance criterion's, but the assertion covers every role now."""
     config = load_catalog_config(FIXTURE_CATALOG_ROOT)
 
     inventory = load_assets(FIXTURE_CATALOG_ROOT, config)
 
     ochre = next(a for a in inventory.assets if a.id == "ochre_sea_star")
-    assert {source.role for source in ochre.sources} == {"silhouette", "lineart"}
+    assert {source.role for source in ochre.sources} == {"silhouette", "lineart", "flatcolor"}
 
 
 def test_missing_required_field_is_a_problem_and_other_assets_still_load(

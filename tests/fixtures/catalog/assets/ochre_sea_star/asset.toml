@@ -28,3 +28,7 @@ file = "silhouette.png"
 [[sources]]
 role = "lineart"
 file = "lineart.png"
+
+[[sources]]
+role = "flatcolor"
+file = "flatcolor.png"

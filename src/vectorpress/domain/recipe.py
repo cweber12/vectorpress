@@ -29,9 +29,8 @@ class Recipe:
     ``generator`` names the :mod:`vectorpress.pipeline` generator that
     produces this type's output, looked up through
     :func:`vectorpress.pipeline.registry.get_generator`; ``None`` for a
-    recipe-bearing type whose generator has not landed yet (``flatcolor_svg``
-    in this slice -- PRD 3 gives it one, issue #25). ``parameters`` are
-    passed to the generator verbatim and are part of the recipe identity
+    recipe-bearing type whose generator has not landed yet. ``parameters``
+    are passed to the generator verbatim and are part of the recipe identity
     (ADR 0004): changing them changes every derivative's provenance and marks
     it stale, even when ``generator`` itself is unchanged.
     """
@@ -62,8 +61,13 @@ RECIPES: dict[DerivativeType, Recipe] = {
     DerivativeType.FLATCOLOR_SVG: Recipe(
         derivative_type=DerivativeType.FLATCOLOR_SVG,
         accepted_roles=("flatcolor",),
-        generator=None,
-        parameters={},
+        generator="flatcolor_svg",
+        parameters={
+            "alpha_threshold": 127,
+            "curve_tolerance": 0.2,
+            "speckle_size": 2,
+            "max_colors": 16,
+        },
     ),
 }
 

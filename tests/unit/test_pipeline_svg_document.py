@@ -16,6 +16,7 @@ import pytest
 from vectorpress.pipeline.svg_document import (
     CornerSegment,
     CurveSegment,
+    Fill,
     Subpath,
     format_number,
     render_path_d,
@@ -99,7 +100,9 @@ def test_render_svg_drops_a_single_point_degenerate_subpath() -> None:
     """The degenerate point contributes nothing to the document: it is
     absent from the rendered path data and the viewBox is exactly the real
     square's own bounds, not expanded to include the stray point."""
-    output = render_svg([_square_subpath(), _point_subpath((100.0, 100.0))], fill="#000000")
+    output = render_svg(
+        [Fill(fill="#000000", subpaths=[_square_subpath(), _point_subpath((100.0, 100.0))])]
+    )
 
     text = output.decode("utf-8")
     assert "100" not in text
@@ -107,7 +110,7 @@ def test_render_svg_drops_a_single_point_degenerate_subpath() -> None:
 
 
 def test_render_svg_drops_a_zero_height_flat_line_subpath() -> None:
-    output = render_svg([_square_subpath(), _flat_line_subpath()], fill="#000000")
+    output = render_svg([Fill(fill="#000000", subpaths=[_square_subpath(), _flat_line_subpath()])])
 
     text = output.decode("utf-8")
     assert 'viewBox="0 0 4 4"' in text
@@ -116,12 +119,67 @@ def test_render_svg_drops_a_zero_height_flat_line_subpath() -> None:
 
 def test_render_svg_raises_when_every_subpath_is_degenerate() -> None:
     with pytest.raises(ValueError, match="no non-degenerate geometry"):
-        render_svg([_point_subpath()], fill="#000000")
+        render_svg([Fill(fill="#000000", subpaths=[_point_subpath()])])
 
 
 def test_render_svg_raises_for_no_subpaths_at_all() -> None:
     with pytest.raises(ValueError, match="no non-degenerate geometry"):
-        render_svg([], fill="#000000")
+        render_svg([])
+
+
+def test_render_svg_raises_when_every_fill_is_entirely_degenerate() -> None:
+    """Several fills, each entirely degenerate, still add up to nothing
+    renderable (not just a single empty fill)."""
+    with pytest.raises(ValueError, match="no non-degenerate geometry"):
+        render_svg(
+            [
+                Fill(fill="#ff0000", subpaths=[_point_subpath()]),
+                Fill(fill="#00ff00", subpaths=[_flat_line_subpath()]),
+            ]
+        )
+
+
+# --- several fills: one <path> per fill, in the order given, viewBox spans all ----
+
+
+def test_render_svg_emits_one_path_per_fill_in_the_given_order() -> None:
+    small_square = Subpath(
+        start=(1.0, 1.0),
+        segments=(
+            CornerSegment(through=(2.0, 1.0), end=(2.0, 1.0)),
+            CornerSegment(through=(2.0, 2.0), end=(2.0, 2.0)),
+            CornerSegment(through=(1.0, 2.0), end=(1.0, 2.0)),
+            CornerSegment(through=(1.0, 1.0), end=(1.0, 1.0)),
+        ),
+    )
+    output = render_svg(
+        [
+            Fill(fill="#ff0000", subpaths=[_square_subpath()]),
+            Fill(fill="#00ff00", subpaths=[small_square]),
+        ]
+    )
+
+    text = output.decode("utf-8")
+    red_index = text.index('fill="#ff0000"')
+    green_index = text.index('fill="#00ff00"')
+    assert red_index < green_index  # document order matches the given fill order
+    assert text.count("<path") == 2
+    assert 'viewBox="0 0 4 4"' in text  # tight to the union of both fills' geometry
+
+
+def test_render_svg_drops_a_fill_whose_own_subpaths_are_all_degenerate() -> None:
+    """§8: "no invisible elements" -- a fill contributing nothing visible
+    gets no ``<path>`` element at all, not an empty one."""
+    output = render_svg(
+        [
+            Fill(fill="#000000", subpaths=[_square_subpath()]),
+            Fill(fill="#ff0000", subpaths=[_point_subpath((100.0, 100.0))]),
+        ]
+    )
+
+    text = output.decode("utf-8")
+    assert text.count("<path") == 1
+    assert "#ff0000" not in text
 
 
 # --- tight_viewbox: true curve extrema, not control points (review fix round 1) ----
