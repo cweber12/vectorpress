@@ -104,14 +104,26 @@ images tagged with a role (§4.1, ADR 0003):
   findings report holds exactly one finding: `narrow_feature`, located at the
   neck. Its `ecosystems` deliberately match neither fixture collection.
 - `coralline_algae` — a `silhouette` source only, on its own larger (300x300)
-  canvas: the `excessive_complexity` fixture (issue #40). A disk whose own
-  radius wobbles sinusoidally around its full perimeter -- 22 ripples, each one
-  requiring potrace to fit its own curve segments no matter how coarse
-  `cut_svg`'s own `curve_tolerance` is, so this shape's own node count (46) is
-  far above `validate.cut_file`'s own excessive-complexity node-count cap (30),
-  while every local width stays well above the narrow-feature threshold. Its
-  cut file's findings report holds exactly one finding: `excessive_complexity`.
+  canvas: the `excessive_complexity` fixture (issue #40; retuned in review fix
+  round 1, PR #46). A disk whose own radius wobbles sinusoidally around its
+  full perimeter -- 400 fine ripples, each one requiring potrace to fit its
+  own curve segments no matter how coarse `cut_svg`'s own `curve_tolerance`
+  is, so this shape's own node count (127) packs to about 13.4 nodes per inch
+  of its own perimeter at the catalog default -- above `validate.cut_file`'s
+  own excessive-complexity **density** threshold (11.0 nodes/in, the
+  size-aware measure §9.1 names), not the absolute node-count backstop (127
+  is nowhere near it). Every ripple's own amplitude is small relative to its
+  own tight spacing, so no local width anywhere on this outline drops below
+  the narrow-feature threshold. Its cut file's findings report holds exactly
+  one finding: `excessive_complexity`, nothing else, at the catalog default.
   Its `ecosystems` deliberately match neither fixture collection.
+  (A first version of this fixture used a coarser, larger-amplitude,
+  lower-frequency ripple that tripped the node-count cap instead of density,
+  and a small dot/sliver piece elsewhere in this catalog could trip density
+  purely from having a tiny perimeter -- both fixed in review fix round 1:
+  density is now judged only above a minimum physical perimeter
+  (`excessive_complexity_min_perimeter_in`), and the cap is a generous
+  backstop, not the primary measure.)
 - `acorn_barnacle` — a `silhouette` source that is a **deliberately truncated PNG**
   (issue #27, §35): valid metadata, valid PNG signature and header, cut off partway
   through the image data. It loads without a metadata problem (source validation

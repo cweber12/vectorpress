@@ -1,4 +1,5 @@
-"""The ``excessive_complexity`` detector (§9, §9.1, ADR 0007, issue #40).
+"""The ``excessive_complexity`` detector (§9, §9.1, ADR 0007, issue #40, PR
+#46 review fix round 1).
 
 A path whose node count is out of proportion to its own physical size is
 hard to cut cleanly and hard for a human to review or hand-edit -- issue
@@ -7,10 +8,25 @@ size (§9.1): a piece's own authored node count (:attr:`~vectorpress.
 validate._svg_geometry.Piece.node_count` -- every ``Move``/``Line``/curve/
 ``Arc`` segment, never the fixed-step curve *sampling*
 :mod:`vectorpress.validate._svg_geometry` also flattens every subpath to)
-divided by its own flattened perimeter's physical length. A **density**
-alone would let a merely large piece accumulate an unmanageable raw node
-count while still reading as "proportionate" -- so an absolute cap on the
-raw node count backstops it regardless of physical size.
+divided by its own flattened perimeter's physical length.
+
+**Density alone grows without bound as a piece shrinks** (review fix round
+1): a plain 4-6 node dot or sliver a few hundredths of an inch across
+already reads as "tens of nodes per inch" purely from having a tiny
+perimeter, nothing to do with genuine complexity -- exactly the shape
+:mod:`vectorpress.validate.accidental_dot` and :mod:`vectorpress.validate.
+tiny_isolated_shape` already exist to name. Density is therefore judged only
+on a piece whose own perimeter is at or above ``min_perimeter_in`` -- a
+piece smaller than that is left entirely to the dot/tiny-shape kinds, never
+judged for complexity at all (not even against the absolute cap below,
+which exists for a *large, genuinely overbuilt* path, not a small one).
+
+The **absolute node cap** (``max_node_count``) is a backstop against a
+pathologically node-heavy path whose density alone would not flag it (a
+huge, evenly detailed design, say) -- set well above what realistic traced
+artwork ever needs (hundreds of nodes, not tens), so in practice the density
+measure above is what actually catches an excessively complex piece; the
+cap is deliberately the rarer path to a finding, not the common one.
 
 A piece trips this kind when either measure is out of bounds; the
 ``measured_value``/``threshold`` recorded are whichever one it tripped
@@ -31,7 +47,7 @@ from vectorpress.domain.finding import (
     FindingKind,
     PathReference,
 )
-from vectorpress.domain.numeric_format import round_number
+from vectorpress.domain.numeric_format import format_number, round_number
 from vectorpress.validate._svg_geometry import Piece
 
 _KIND = FindingKind.EXCESSIVE_COMPLEXITY
@@ -53,12 +69,16 @@ def detect(
     pieces: list[Piece],
     scale_user_units_per_inch: float,
     max_nodes_per_inch: float,
+    min_perimeter_in: float,
     max_node_count: float,
 ) -> list[Finding]:
     """One finding per piece whose node density (nodes per physical inch of
-    its own perimeter, §9.1) exceeds ``max_nodes_per_inch``, or whose raw
-    node count exceeds ``max_node_count`` -- whichever it trips (density
-    first).
+    its own perimeter, §9.1) exceeds ``max_nodes_per_inch`` -- judged only
+    when the piece's own perimeter is at or above ``min_perimeter_in``, so a
+    piece too small for "per inch" to mean anything is never judged by
+    density at all (review fix round 1) -- or whose raw node count exceeds
+    ``max_node_count`` regardless of size, a backstop checked whenever
+    density does not already explain the finding.
 
     Findings are returned in a fixed, deterministic order -- by path
     reference (element index, then subpath index) -- matching every other
@@ -68,15 +88,16 @@ def detect(
     for piece in pieces:
         perimeter_in = _perimeter(piece.outer_ring) / scale_user_units_per_inch
         nodes_per_inch = piece.node_count / perimeter_in if perimeter_in > 0 else 0.0
+        density_judged = perimeter_in >= min_perimeter_in
 
-        if nodes_per_inch > max_nodes_per_inch:
+        if density_judged and nodes_per_inch > max_nodes_per_inch:
             measured_value = round_number(nodes_per_inch)
             threshold = round_number(max_nodes_per_inch)
             reason = f"{measured_value} nodes/in, above the {threshold} nodes/in threshold"
         elif piece.node_count > max_node_count:
             measured_value = round_number(float(piece.node_count))
             threshold = round_number(max_node_count)
-            reason = f"{piece.node_count} nodes, above the {threshold}-node cap"
+            reason = f"{piece.node_count} nodes, above the {format_number(max_node_count)}-node cap"
         else:
             continue
 

@@ -1,15 +1,21 @@
 # Hand-authored asset metadata (ADR 0005). The asset ID is this folder's name.
 #
-# The excessive_complexity fixture (issue #40, §9): its silhouette.png (see
+# The excessive_complexity fixture (issue #40, §9; retuned in review fix
+# round 1, PR #46): its silhouette.png (see
 # tests/fixtures/catalog/generate_source_pngs.py) is a large, purpose-built
 # source carrying a disk whose own radius wobbles sinusoidally around its
-# full perimeter -- 22 ripples on this asset's own 300x300 canvas, each one
-# requiring potrace to fit its own curve segments no matter how coarse
-# cut_svg's own curve_tolerance is, so this shape's own node count (46) is
-# far above validate.cut_file's own excessive-complexity node-count cap
-# (30), while every local width stays well above the narrow-feature
-# threshold. Its cut file's findings report holds exactly one finding:
-# excessive_complexity, nothing else.
+# full perimeter -- 400 fine ripples on this asset's own 300x300 canvas,
+# each one requiring potrace to fit its own curve segments no matter how
+# coarse cut_svg's own curve_tolerance is, so this shape's own node count
+# (127) packs to about 13.4 nodes per inch of its own perimeter at the
+# catalog's default 3in reference size -- above
+# validate.cut_file's own excessive-complexity density threshold (11.0
+# nodes/in), the size-aware measure the issue's own §9.1 names, not the
+# absolute node-count backstop (127 is nowhere near it). Every ripple's own
+# amplitude is small relative to its own tight spacing, so no local width
+# anywhere on this outline drops below the narrow-feature threshold. Its
+# cut file's findings report holds exactly one finding: excessive_complexity,
+# nothing else, at the catalog default.
 #
 # ecosystems deliberately match no rule-based fixture collection: neither
 # "Kelp forest" (kelp_forest_ecosystem's rule) nor pacific_coast_tide_pool

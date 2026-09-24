@@ -55,20 +55,45 @@ from vectorpress.validate._svg_geometry import Piece, parse_cut_file
 #: exactly) would make every dot-shaped candidate mathematically incapable
 #: of surviving cleanup at all -- no shape could ever trip this detector.
 #:
-#: ``excessive_complexity_max_nodes_per_in`` and
-#: ``excessive_complexity_max_node_count`` (issue #40) have no cleanup
-#: counterpart -- ``cut_svg``'s own cleanup never simplifies node count
-#: directly (``curve_tolerance`` governs potrace's own curve fitting, not a
-#: physical threshold this table could sit strictly above the same way an
-#: area or width can) -- see :mod:`vectorpress.validate.excessive_complexity`
-#: for how the two combine.
+#: ``excessive_complexity_max_nodes_per_in``, ``excessive_complexity_
+#: min_perimeter_in`` and ``excessive_complexity_max_node_count`` (issue
+#: #40) have no cleanup counterpart -- ``cut_svg``'s own cleanup never
+#: simplifies node count directly (``curve_tolerance`` governs potrace's own
+#: curve fitting, not a physical threshold this table could sit strictly
+#: above the same way an area or width can) -- see :mod:`vectorpress.
+#: validate.excessive_complexity` for how the three combine.
+#:
+#: ``excessive_complexity_min_perimeter_in`` (review fix round 1, PR #46):
+#: below this perimeter, "nodes per inch" is not judged at all -- a plain
+#: 4-6 node dot or sliver a few hundredths of an inch across otherwise reads
+#: as tens of nodes per inch purely from being tiny, nothing to do with
+#: genuine complexity (exactly what :mod:`vectorpress.validate.
+#: accidental_dot`/:mod:`vectorpress.validate.tiny_isolated_shape` already
+#: name). ``0.75`` sits comfortably above every such piece this fixture
+#: catalog's own dot/sliver subjects (``gumboot_chiton``, ``bat_star``)
+#: produce at either the catalog default or ``kelp_forest_mini_pack``'s own
+#: smaller reference-size override (their own perimeters top out around
+#: 0.52in at the catalog default, smaller still at the override), and
+#: comfortably below a genuine second piece's own perimeter (``giant_green_
+#: anemone``'s and ``owl_limpet``'s own detached islands, each upward of
+#: 1.5in at the catalog default).
+#:
+#: ``excessive_complexity_max_nodes_per_in`` (review fix round 1, PR #46):
+#: ``11.0`` sits above the densest *judged* (perimeter at or above
+#: ``excessive_complexity_min_perimeter_in``) piece any pre-existing fixture
+#: asset produces at either reference size -- ``giant_green_anemone``'s own
+#: detached island, ~9.56 nodes/in at ``kelp_forest_mini_pack``'s 1in
+#: override, the highest observed -- with room to spare, while
+#: ``coralline_algae``'s own finely rippled outline (issue #40) clears it
+#: with a comfortable margin too (~13.4 nodes/in at the catalog default).
 THRESHOLDS: dict[str, float] = {
     "accidental_dot_max_dimension_in": 0.2,
     "tiny_isolated_shape_min_area_in2": 0.02,
     "small_hole_min_area_in2": 0.02,
     "narrow_feature_min_width_in": 0.1,
-    "excessive_complexity_max_nodes_per_in": 20.0,
-    "excessive_complexity_max_node_count": 30.0,
+    "excessive_complexity_max_nodes_per_in": 11.0,
+    "excessive_complexity_min_perimeter_in": 0.75,
+    "excessive_complexity_max_node_count": 300.0,
 }
 
 
@@ -146,6 +171,7 @@ def validate_cut_file(svg_bytes: bytes, reference_size_in: float) -> ValidationR
         parsed.pieces,
         scale,
         THRESHOLDS["excessive_complexity_max_nodes_per_in"],
+        THRESHOLDS["excessive_complexity_min_perimeter_in"],
         THRESHOLDS["excessive_complexity_max_node_count"],
     )
 

@@ -288,9 +288,10 @@ def test_sliver_below_threshold_is_also_a_narrow_feature() -> None:
     """Issue #40: narrow_feature and tiny_isolated_shape are independent
     axes over the same piece -- this sliver is both small in area and
     narrow in width, so it carries exactly one finding of each kind, never
-    a conflict between them."""
+    a conflict between them (restored exact count, review fix round 1)."""
     result = validate_cut_file(_SLIVER_BELOW_THRESHOLD, REFERENCE_SIZE_IN)
 
+    assert len(result.findings) == 2
     kinds = {finding.kind for finding in result.findings}
     assert kinds == {FindingKind.TINY_ISOLATED_SHAPE, FindingKind.NARROW_FEATURE}
 
@@ -492,9 +493,15 @@ def test_a_path_with_far_too_many_nodes_for_its_size_yields_one_excessive_comple
     assert finding.kind is FindingKind.EXCESSIVE_COMPLEXITY
     assert finding.path_reference.element_index == 0
     assert finding.path_reference.subpath_index == 0
-    assert finding.measured_value is not None
-    assert finding.threshold is not None
-    assert finding.measured_value > finding.threshold
+    # Recorded with the density measure and its own threshold (review fix
+    # round 1, PR #46's "a piece that trips density at its size is recorded
+    # with the density measure and threshold") -- 44 nodes over a perimeter
+    # of ~0.8043in (well above ``excessive_complexity_min_perimeter_in``, so
+    # density is judged at all) is ~54.7 nodes/in, against the 11.0
+    # nodes/in threshold -- never the absolute node-count cap, nowhere near
+    # tripped at 44 nodes.
+    assert finding.measured_value == pytest.approx(54.7001)
+    assert finding.threshold == pytest.approx(THRESHOLDS["excessive_complexity_max_nodes_per_in"])
 
 
 def test_a_simple_path_of_the_same_size_yields_no_excessive_complexity_finding() -> None:
@@ -509,3 +516,30 @@ def test_a_simple_path_of_the_same_size_yields_no_excessive_complexity_finding()
 
     kinds = {finding.kind for finding in result.findings}
     assert FindingKind.EXCESSIVE_COMPLEXITY not in kinds
+
+
+def test_a_small_plain_square_below_the_min_perimeter_yields_no_finding_even_though_its_own_density_would_trip() -> (
+    None
+):
+    """Review fix round 1, PR #46: density (nodes per inch of perimeter)
+    grows without bound as a piece shrinks, so a plain 4-node square small
+    enough on its own -- 2x2 user units, a perimeter of 8 user units, 0.08in
+    at this test's 100-user-units-per-inch scale, far below
+    ``excessive_complexity_min_perimeter_in`` (0.75in) -- reads as an absurd
+    54 nodes/in if judged at all (4 nodes / 0.08in), comfortably clearing
+    ``excessive_complexity_max_nodes_per_in`` (11.0). Density is never
+    judged below the minimum perimeter, so this small, unremarkable square
+    -- the same authored node count as any plain rectangle in this file --
+    yields no finding of any kind: it is left entirely to the dot and
+    tiny-shape kinds (neither of which trips here either, since this
+    document has no other piece to compare it against as an isolated
+    shape -- it is the document's own only, and so largest, piece)."""
+    small_square_svg = (
+        b'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 100" width="300" height="100">'
+        b'<path d="M0,0 L2,0 L2,2 L0,2 Z"/></svg>'
+    )
+
+    result = validate_cut_file(small_square_svg, REFERENCE_SIZE_IN)
+
+    assert result.outcome is ValidationOutcome.PASS
+    assert result.findings == ()

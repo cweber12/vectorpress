@@ -443,16 +443,32 @@ def _nudibranch_silhouette_with_a_narrow_neck(size: int) -> Grid:
 def _coralline_algae_silhouette_with_a_ragged_outline(size: int) -> Grid:
     """A disk whose own radius wobbles sinusoidally around its full
     perimeter -- coralline algae's own finely crusted, irregular edge,
-    issue #40's own example -- 22 ripples, each one requiring potrace to fit
-    its own curve segments no matter how coarse ``cut_svg``'s own
-    ``curve_tolerance`` is, so this shape's own node count (and so its nodes
-    per inch of perimeter, §9.1) is far higher than a plain disk this size
-    needs. The ripples are spaced and sized to leave every local width well
-    above the narrow-feature threshold, so this shape's cut file trips
-    exactly one finding: ``excessive_complexity``, nothing else."""
+    issue #40's own example -- 400 fine ripples, each one requiring potrace
+    to fit its own curve segments no matter how coarse ``cut_svg``'s own
+    ``curve_tolerance`` is, so this shape's own node count (127) packs far
+    more densely into its own perimeter than a plain disk this size needs:
+    about 13.4 nodes per inch of perimeter (§9.1) at the catalog's default
+    3in reference size, comfortably above ``validate.cut_file``'s own
+    ``excessive_complexity_max_nodes_per_in`` (11.0) -- this shape trips on
+    that size-aware density measure, never the absolute node-count backstop
+    (127 is nowhere near it). Each ripple's own amplitude is small enough,
+    relative to its own tight spacing, that no local width anywhere on this
+    outline drops below the narrow-feature threshold (review fix round 1,
+    PR #46: a coarser, larger-amplitude ripple pattern -- the shape this
+    fixture originally shipped with -- read as genuinely narrow at several
+    points along its own edge instead), so this shape's cut file trips
+    exactly one finding: ``excessive_complexity``, nothing else, at the
+    catalog default. (A wider ripple spacing keeps every individual notch
+    well clear of the narrow-feature threshold; a *finer* one, as here,
+    keeps each notch's own amplitude small enough that the notch itself
+    never reads as a narrow protrusion either -- both ends of the spacing
+    spectrum were tuned empirically against the real pipeline, documented
+    in this module's own docstring above, to land on 400 ripples as the
+    frequency dense enough to need many curve segments without ever
+    locally narrowing the shape.)"""
     base_radius = 130.0
-    amplitude = 6.0
-    ripples = 22
+    amplitude = 2.1
+    ripples = 400
     center = size / 2
     grid: Grid = []
     for y in range(size):
