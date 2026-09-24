@@ -152,8 +152,8 @@ def test_prd_03_acceptance_walkthrough(temp_catalog_root: Path, temp_findings_di
         assert _LOCATION_RE.match(columns[1]), line
 
     # Both pass and needs review occur (validate --all alone already has
-    # both -- ochre_sea_star/purple_sea_urchin/turban_snail pass,
-    # gumboot_chiton/bat_star/keyhole_limpet/nudibranch/coralline_algae/
-    # giant_green_anemone/owl_limpet need review).
+    # both -- ochre_sea_star/purple_sea_urchin/giant_green_anemone/
+    # turban_snail pass, gumboot_chiton/bat_star/keyhole_limpet/nudibranch/
+    # coralline_algae/owl_limpet need review).
     assert "\tpass" in validate_all_result.stdout
     assert "\tneeds review" in validate_all_result.stdout
