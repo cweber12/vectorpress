@@ -60,6 +60,27 @@ from vectorpress.validate.cut_file import validate_cut_file
 
 runner = CliRunner()
 
+#: Rich (via typer's usage-error rendering) wraps a long message across
+#: several lines inside a bordered panel, box-drawing characters and all,
+#: and -- on a runner that detects color support, e.g. CI -- wraps
+#: individual words in ANSI SGR escape sequences too, splitting an option
+#: name like ``--reference-size`` across several escape-coded fragments.
+#: Stripping both, then collapsing whitespace, before asserting on the
+#: message text makes the check robust to exactly where the wrap falls and
+#: to whether the runner colors its output -- the same helper (and the same
+#: reasoning, issue #26 review fix rounds 1-2) ``tests/unit/test_cli.py``
+#: already established for its own usage-error assertions; duplicated here
+#: rather than imported, matching this test suite's own convention of a
+#: small per-file helper over a cross-file import (e.g. every integration
+#: test file's own ``temp_catalog_root`` fixture).
+_ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
+_BOX_DRAWING_RE = re.compile(r"[─-╿]")
+
+
+def _normalized_output(output: str) -> str:
+    return " ".join(_BOX_DRAWING_RE.sub(" ", _ANSI_RE.sub("", output)).split())
+
+
 FIXTURE_CATALOG_ROOT = Path(__file__).parents[1] / "fixtures" / "catalog"
 
 # (asset ID, cut-file filename) -- every fixture asset with a decodable
@@ -974,7 +995,7 @@ def test_validate_file_outside_any_catalog_requires_reference_size(
     result = runner.invoke(app, ["validate", "--file", str(svg_path)])
 
     assert result.exit_code != 0
-    assert "--reference-size" in result.output
+    assert "--reference-size" in _normalized_output(result.output)
 
 
 @pytest.mark.integration
