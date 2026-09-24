@@ -23,7 +23,7 @@ def test_self_intersecting_bowtie_yields_one_overlap_finding() -> None:
     other at the middle."""
     svg = _HEAD + b'<path d="M0,0 L100,100 L100,0 L0,100 Z"/>' + _TAIL
 
-    result = validate_cut_file(svg, REFERENCE_SIZE_IN)
+    result = validate_cut_file(svg, REFERENCE_SIZE_IN, catalog_reference_size_in=REFERENCE_SIZE_IN)
 
     assert result.outcome is ValidationOutcome.NEEDS_REVIEW
     findings = [f for f in result.findings if f.kind is FindingKind.OVERLAP]
@@ -41,7 +41,7 @@ def test_simple_convex_polygon_has_no_self_intersection() -> None:
     """Near miss: a plain, simple (non-self-crossing) square."""
     svg = _HEAD + b'<path d="M0,0 L100,0 L100,100 L0,100 Z"/>' + _TAIL
 
-    result = validate_cut_file(svg, REFERENCE_SIZE_IN)
+    result = validate_cut_file(svg, REFERENCE_SIZE_IN, catalog_reference_size_in=REFERENCE_SIZE_IN)
 
     kinds = {finding.kind for finding in result.findings}
     assert FindingKind.OVERLAP not in kinds
@@ -63,7 +63,7 @@ def test_two_overlapping_shapes_yield_one_overlap_finding_naming_both() -> None:
         + _TAIL
     )
 
-    result = validate_cut_file(svg, REFERENCE_SIZE_IN)
+    result = validate_cut_file(svg, REFERENCE_SIZE_IN, catalog_reference_size_in=REFERENCE_SIZE_IN)
 
     assert result.outcome is ValidationOutcome.NEEDS_REVIEW
     findings = [f for f in result.findings if f.kind is FindingKind.OVERLAP]
@@ -88,7 +88,7 @@ def test_a_proper_hole_is_not_an_overlap() -> None:
         + _TAIL
     )
 
-    result = validate_cut_file(svg, REFERENCE_SIZE_IN)
+    result = validate_cut_file(svg, REFERENCE_SIZE_IN, catalog_reference_size_in=REFERENCE_SIZE_IN)
 
     kinds = {finding.kind for finding in result.findings}
     assert FindingKind.OVERLAP not in kinds
@@ -103,7 +103,7 @@ def test_two_disjoint_shapes_yield_no_overlap_finding() -> None:
         + _TAIL
     )
 
-    result = validate_cut_file(svg, REFERENCE_SIZE_IN)
+    result = validate_cut_file(svg, REFERENCE_SIZE_IN, catalog_reference_size_in=REFERENCE_SIZE_IN)
 
     kinds = {finding.kind for finding in result.findings}
     assert FindingKind.OVERLAP not in kinds
@@ -121,7 +121,7 @@ def test_two_identical_stacked_shapes_are_duplicate_not_overlap() -> None:
         + _TAIL
     )
 
-    result = validate_cut_file(svg, REFERENCE_SIZE_IN)
+    result = validate_cut_file(svg, REFERENCE_SIZE_IN, catalog_reference_size_in=REFERENCE_SIZE_IN)
 
     kinds = {finding.kind for finding in result.findings}
     assert FindingKind.OVERLAP not in kinds
@@ -137,7 +137,7 @@ def test_two_crossing_bare_line_segments_are_not_an_overlap() -> None:
     segment reaches."""
     svg = _HEAD + b'<path d="M0,0 L40,40 M0,40 L40,0"/>' + _TAIL
 
-    result = validate_cut_file(svg, REFERENCE_SIZE_IN)
+    result = validate_cut_file(svg, REFERENCE_SIZE_IN, catalog_reference_size_in=REFERENCE_SIZE_IN)
 
     kinds = {finding.kind for finding in result.findings}
     assert FindingKind.OVERLAP not in kinds

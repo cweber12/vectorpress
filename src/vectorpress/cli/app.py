@@ -389,7 +389,7 @@ def _echo_finding(finding: Finding) -> None:
     typer.echo(f"  {finding.kind.value}\t{_format_location(finding)}\t{finding.message}")
 
 
-def _validate_file(file: Path, reference_size_in: float) -> None:
+def _validate_file(file: Path, reference_size_in: float, catalog_reference_size_in: float) -> None:
     """Validate any SVG on disk with the same ``validate_cut_file`` asset
     validation uses, print the report, and write nothing."""
     if not file.is_file():
@@ -398,7 +398,9 @@ def _validate_file(file: Path, reference_size_in: float) -> None:
 
     svg_bytes = file.read_bytes()
     try:
-        validation = validate_cut_file(svg_bytes, reference_size_in)
+        validation = validate_cut_file(
+            svg_bytes, reference_size_in, catalog_reference_size_in=catalog_reference_size_in
+        )
     except Exception as exc:  # any parse failure is a reported validation failure (§35)
         typer.echo(f"validate: {file} failed: {exc}", err=True)
         raise typer.Exit(code=1) from exc
@@ -477,18 +479,22 @@ def validate(
             raise typer.BadParameter(
                 "--product is not supported with --file.", param_hint="--product"
             )
-        if reference_size is not None:
-            file_reference_size_in = reference_size
+        file_config = _optional_catalog_config(ctx)
+        if file_config is not None:
+            # excessive_complexity is judged at the catalog size (ADR 0010).
+            catalog_reference_size_in = file_config.reference_size_in
+        elif reference_size is not None:
+            # Outside a catalog, the given size is the only one there is.
+            catalog_reference_size_in = reference_size
         else:
-            file_config = _optional_catalog_config(ctx)
-            if file_config is None:
-                raise typer.BadParameter(
-                    "No catalog found here; --reference-size is required for "
-                    "--file outside a catalog.",
-                    param_hint="--reference-size",
-                )
-            file_reference_size_in = file_config.reference_size_in
-        _validate_file(file, file_reference_size_in)
+            raise typer.BadParameter(
+                "No catalog found here; --reference-size is required for --file outside a catalog.",
+                param_hint="--reference-size",
+            )
+        file_reference_size_in = (
+            reference_size if reference_size is not None else catalog_reference_size_in
+        )
+        _validate_file(file, file_reference_size_in, catalog_reference_size_in)
         return
 
     root, config = _locate_and_load_config(ctx)
@@ -530,6 +536,12 @@ def validate(
             if resolved_product is not None
             else ""
         )
+        if reference_size_in != config.reference_size_in:
+            # excessive_complexity is judged at the catalog size (ADR 0010).
+            size_note += (
+                f"\t(excessive_complexity at the "
+                f"{format_number(config.reference_size_in)}in catalog size)"
+            )
         typer.echo(f"{target.id}\tcut_svg\t{outcome.filename}\t{result_text}{size_note}")
         for finding in outcome.validation.findings:
             _echo_finding(finding)

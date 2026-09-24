@@ -43,7 +43,9 @@ def test_trip_svg_findings_json_is_locked_by_snapshot(
 ) -> None:
     svg_bytes = (FIXTURES_DIR / f"{name}.svg").read_bytes()
 
-    result = validate_cut_file(svg_bytes, REFERENCE_SIZE_IN)
+    result = validate_cut_file(
+        svg_bytes, REFERENCE_SIZE_IN, catalog_reference_size_in=REFERENCE_SIZE_IN
+    )
 
     payload = {
         "result": result.outcome.value,
@@ -55,7 +57,9 @@ def test_trip_svg_findings_json_is_locked_by_snapshot(
 def test_clean_svg_passes_with_no_findings() -> None:
     svg_bytes = (FIXTURES_DIR / "clean.svg").read_bytes()
 
-    result = validate_cut_file(svg_bytes, REFERENCE_SIZE_IN)
+    result = validate_cut_file(
+        svg_bytes, REFERENCE_SIZE_IN, catalog_reference_size_in=REFERENCE_SIZE_IN
+    )
 
     assert result.outcome is ValidationOutcome.PASS
     assert result.findings == ()

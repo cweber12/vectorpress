@@ -26,7 +26,7 @@ def _svg(*extra: bytes) -> bytes:
 def test_image_element_yields_one_raster_content_finding() -> None:
     svg = _svg(b'<image x="0" y="0" width="20" height="20" href="foo.png"/>')
 
-    result = validate_cut_file(svg, REFERENCE_SIZE_IN)
+    result = validate_cut_file(svg, REFERENCE_SIZE_IN, catalog_reference_size_in=REFERENCE_SIZE_IN)
 
     assert result.outcome is ValidationOutcome.NEEDS_REVIEW
     assert len(result.findings) == 1
@@ -42,7 +42,7 @@ def test_no_image_element_yields_no_raster_content_finding() -> None:
     """Near miss: a plain path-only document."""
     svg = _svg()
 
-    result = validate_cut_file(svg, REFERENCE_SIZE_IN)
+    result = validate_cut_file(svg, REFERENCE_SIZE_IN, catalog_reference_size_in=REFERENCE_SIZE_IN)
 
     kinds = {finding.kind for finding in result.findings}
     assert FindingKind.RASTER_CONTENT not in kinds
@@ -56,7 +56,7 @@ def test_data_uri_in_a_style_attribute_yields_raster_content_finding() -> None:
         b'<rect x="0" y="0" width="10" height="10" style="fill:url(data:image/png;base64,AA)"/>'
     )
 
-    result = validate_cut_file(svg, REFERENCE_SIZE_IN)
+    result = validate_cut_file(svg, REFERENCE_SIZE_IN, catalog_reference_size_in=REFERENCE_SIZE_IN)
 
     kinds = {finding.kind for finding in result.findings}
     assert FindingKind.RASTER_CONTENT in kinds
@@ -66,7 +66,7 @@ def test_ordinary_url_reference_yields_no_raster_content_finding() -> None:
     """Near miss: a ``url(#id)`` reference is not a data: URI."""
     svg = _svg(b'<rect x="0" y="0" width="10" height="10" fill="url(#gradient)"/>')
 
-    result = validate_cut_file(svg, REFERENCE_SIZE_IN)
+    result = validate_cut_file(svg, REFERENCE_SIZE_IN, catalog_reference_size_in=REFERENCE_SIZE_IN)
 
     kinds = {finding.kind for finding in result.findings}
     assert FindingKind.RASTER_CONTENT not in kinds
@@ -82,7 +82,7 @@ def test_pattern_with_an_image_child_yields_raster_content_finding() -> None:
         b"</pattern></defs>"
     )
 
-    result = validate_cut_file(svg, REFERENCE_SIZE_IN)
+    result = validate_cut_file(svg, REFERENCE_SIZE_IN, catalog_reference_size_in=REFERENCE_SIZE_IN)
 
     findings = [f for f in result.findings if f.kind is FindingKind.RASTER_CONTENT]
     assert len(findings) == 1
@@ -98,7 +98,7 @@ def test_pattern_with_only_vector_children_yields_no_raster_content_finding() ->
         b"</pattern></defs>"
     )
 
-    result = validate_cut_file(svg, REFERENCE_SIZE_IN)
+    result = validate_cut_file(svg, REFERENCE_SIZE_IN, catalog_reference_size_in=REFERENCE_SIZE_IN)
 
     kinds = {finding.kind for finding in result.findings}
     assert FindingKind.RASTER_CONTENT not in kinds
@@ -111,7 +111,7 @@ def test_foreignobject_with_a_data_uri_yields_raster_content_finding() -> None:
         b"</foreignObject>"
     )
 
-    result = validate_cut_file(svg, REFERENCE_SIZE_IN)
+    result = validate_cut_file(svg, REFERENCE_SIZE_IN, catalog_reference_size_in=REFERENCE_SIZE_IN)
 
     findings = [f for f in result.findings if f.kind is FindingKind.RASTER_CONTENT]
     assert len(findings) == 1
@@ -126,7 +126,7 @@ def test_empty_foreignobject_yields_no_raster_content_finding() -> None:
     out of that detector's own scope too)."""
     svg = _svg(b'<foreignObject x="0" y="0" width="10" height="10"/>')
 
-    result = validate_cut_file(svg, REFERENCE_SIZE_IN)
+    result = validate_cut_file(svg, REFERENCE_SIZE_IN, catalog_reference_size_in=REFERENCE_SIZE_IN)
 
     kinds = {finding.kind for finding in result.findings}
     assert FindingKind.RASTER_CONTENT not in kinds

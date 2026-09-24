@@ -41,7 +41,7 @@ def test_validate_cut_file_parses_xml_once_and_each_path_once(
     monkeypatch.setattr(ET, "fromstring", counting_fromstring)
     monkeypatch.setattr(se, "Path", counting_path)
 
-    validate_cut_file(svg_bytes, 3.0)
+    validate_cut_file(svg_bytes, 3.0, catalog_reference_size_in=3.0)
 
     assert fromstring_calls == 1
     assert path_parses == path_count

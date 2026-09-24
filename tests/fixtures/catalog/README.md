@@ -128,6 +128,8 @@ images tagged with a role (§4.1, ADR 0003):
   own tight spacing, so no local width anywhere on this outline drops below
   the narrow-feature threshold. Its cut file's findings report holds exactly
   one finding: `excessive_complexity`, nothing else, at the catalog default.
+  Complexity is measured at the catalog default under any product override too
+  (ADR 0010), so it reads the same ~13.4 nodes/in at `kelp_forest_mini_pack`'s 1in.
   Its `ecosystems` deliberately match neither fixture collection.
   (A first version of this fixture used a coarser, larger-amplitude,
   lower-frequency ripple that tripped the node-count cap instead of density,

@@ -2,6 +2,7 @@
 # name: test_findings_json_is_locked_by_snapshot[bat_star-bat-star-cut.svg]
   dict({
     'content_hash': '0f7a670a7aeb86ed02766a0f4b387d7fd5663043ab1c12b4d015aaa64be00186',
+    'excessive_complexity_reference_size_in': 3.0,
     'findings': list([
       dict({
         'classification': 'needs_review',
@@ -40,6 +41,7 @@
 # name: test_findings_json_is_locked_by_snapshot[coralline_algae-coralline-algae-cut.svg]
   dict({
     'content_hash': 'c9e729d1088e93b96c4537130286c6d85e44898daf3e929e559f90cd23791acf',
+    'excessive_complexity_reference_size_in': 3.0,
     'findings': list([
       dict({
         'classification': 'needs_review',
@@ -78,6 +80,7 @@
 # name: test_findings_json_is_locked_by_snapshot[giant_green_anemone-giant-green-anemone-cut.svg]
   dict({
     'content_hash': 'af8bd7fd1ffdf4385a7d4d87a3422574763606c897dc71bc109d29f6461f9ce3',
+    'excessive_complexity_reference_size_in': 3.0,
     'findings': list([
     ]),
     'reference_size_in': 3.0,
@@ -98,6 +101,7 @@
 # name: test_findings_json_is_locked_by_snapshot[gumboot_chiton-gumboot-chiton-cut.svg]
   dict({
     'content_hash': '526771f6aafe457dae0a8f5775938aefdfb540aedff07f4c6cec496a257cee48',
+    'excessive_complexity_reference_size_in': 3.0,
     'findings': list([
       dict({
         'classification': 'needs_review',
@@ -136,6 +140,7 @@
 # name: test_findings_json_is_locked_by_snapshot[keyhole_limpet-keyhole-limpet-cut.svg]
   dict({
     'content_hash': '8e507d53b4799d2e88e5e4fad7971d2a5c2072c8da88a0aa59073bac14734ae4',
+    'excessive_complexity_reference_size_in': 3.0,
     'findings': list([
       dict({
         'classification': 'needs_review',
@@ -174,6 +179,7 @@
 # name: test_findings_json_is_locked_by_snapshot[nudibranch-nudibranch-cut.svg]
   dict({
     'content_hash': '19b302fcd300549d6ec0a6046cb855bb107e4cefe52189c0979b0daf1140bdc1',
+    'excessive_complexity_reference_size_in': 3.0,
     'findings': list([
       dict({
         'classification': 'needs_review',
@@ -212,6 +218,7 @@
 # name: test_findings_json_is_locked_by_snapshot[ochre_sea_star-ochre-sea-star-cut.svg]
   dict({
     'content_hash': '8b9ba0291c089ef4877a9bbf20df3fe6834a2ee1aa63e0eb8ab71f1158b81d81',
+    'excessive_complexity_reference_size_in': 3.0,
     'findings': list([
     ]),
     'reference_size_in': 3.0,
@@ -232,6 +239,7 @@
 # name: test_findings_json_is_locked_by_snapshot[owl_limpet-owl-limpet-cut.svg]
   dict({
     'content_hash': '924c2319b1c4eb0b36fe3476d1e9ea4aa3e595f267840c41251cd06762e47973',
+    'excessive_complexity_reference_size_in': 3.0,
     'findings': list([
       dict({
         'classification': 'needs_review',
@@ -270,6 +278,7 @@
 # name: test_findings_json_is_locked_by_snapshot[purple_sea_urchin-purple-sea-urchin-cut.svg]
   dict({
     'content_hash': 'edcb8c90ddc172cda4d7748a7719d67b29a79689866c45f0c73eb756d106873c',
+    'excessive_complexity_reference_size_in': 3.0,
     'findings': list([
     ]),
     'reference_size_in': 3.0,
@@ -290,6 +299,7 @@
 # name: test_findings_json_is_locked_by_snapshot[turban_snail-turban-snail-cut.svg]
   dict({
     'content_hash': 'e79374b5b9e4f445ead1200619ac8f3f2754d246373843271840973980bd10a9',
+    'excessive_complexity_reference_size_in': 3.0,
     'findings': list([
     ]),
     'reference_size_in': 3.0,
@@ -310,6 +320,7 @@
 # name: test_product_size_findings_json_is_locked_by_snapshot[bat_star-bat-star-cut.svg]
   dict({
     'content_hash': '0f7a670a7aeb86ed02766a0f4b387d7fd5663043ab1c12b4d015aaa64be00186',
+    'excessive_complexity_reference_size_in': 3.0,
     'findings': list([
       dict({
         'classification': 'needs_review',
@@ -348,6 +359,7 @@
 # name: test_product_size_findings_json_is_locked_by_snapshot[coralline_algae-coralline-algae-cut.svg]
   dict({
     'content_hash': 'c9e729d1088e93b96c4537130286c6d85e44898daf3e929e559f90cd23791acf',
+    'excessive_complexity_reference_size_in': 3.0,
     'findings': list([
       dict({
         'classification': 'needs_review',
@@ -358,8 +370,8 @@
           'min_x': 20.8288,
           'min_y': 20.8236,
         }),
-        'measured_value': 40.2041,
-        'message': 'excessive geometric complexity: path element 0, subpath 0 has 40.2041 nodes/in, above the 11.0 nodes/in threshold',
+        'measured_value': 13.4014,
+        'message': 'excessive geometric complexity: path element 0, subpath 0 has 13.4014 nodes/in, above the 11.0 nodes/in threshold',
         'path_reference': dict({
           'element_index': 0,
           'id': None,
@@ -386,28 +398,11 @@
 # name: test_product_size_findings_json_is_locked_by_snapshot[giant_green_anemone-giant-green-anemone-cut.svg]
   dict({
     'content_hash': 'af8bd7fd1ffdf4385a7d4d87a3422574763606c897dc71bc109d29f6461f9ce3',
+    'excessive_complexity_reference_size_in': 3.0,
     'findings': list([
-      dict({
-        'classification': 'needs_review',
-        'kind': 'excessive_complexity',
-        'location': dict({
-          'max_x': 288.632,
-          'max_y': 286.719,
-          'min_x': 12.0,
-          'min_y': 13.4601,
-        }),
-        'measured_value': 13.7051,
-        'message': 'excessive geometric complexity: path element 0, subpath 0 has 13.7051 nodes/in, above the 11.0 nodes/in threshold',
-        'path_reference': dict({
-          'element_index': 0,
-          'id': None,
-          'subpath_index': 0,
-        }),
-        'threshold': 11.0,
-      }),
     ]),
     'reference_size_in': 1.0,
-    'result': 'needs_review',
+    'result': 'pass',
     'thresholds': dict({
       'accidental_dot_max_dimension_in': 0.2,
       'excessive_complexity_max_node_count': 300.0,
@@ -424,6 +419,7 @@
 # name: test_product_size_findings_json_is_locked_by_snapshot[gumboot_chiton-gumboot-chiton-cut.svg]
   dict({
     'content_hash': '526771f6aafe457dae0a8f5775938aefdfb540aedff07f4c6cec496a257cee48',
+    'excessive_complexity_reference_size_in': 3.0,
     'findings': list([
       dict({
         'classification': 'needs_review',
@@ -462,6 +458,7 @@
 # name: test_product_size_findings_json_is_locked_by_snapshot[keyhole_limpet-keyhole-limpet-cut.svg]
   dict({
     'content_hash': '8e507d53b4799d2e88e5e4fad7971d2a5c2072c8da88a0aa59073bac14734ae4',
+    'excessive_complexity_reference_size_in': 3.0,
     'findings': list([
       dict({
         'classification': 'needs_review',
@@ -500,6 +497,7 @@
 # name: test_product_size_findings_json_is_locked_by_snapshot[nudibranch-nudibranch-cut.svg]
   dict({
     'content_hash': '19b302fcd300549d6ec0a6046cb855bb107e4cefe52189c0979b0daf1140bdc1',
+    'excessive_complexity_reference_size_in': 3.0,
     'findings': list([
       dict({
         'classification': 'needs_review',
@@ -538,28 +536,11 @@
 # name: test_product_size_findings_json_is_locked_by_snapshot[ochre_sea_star-ochre-sea-star-cut.svg]
   dict({
     'content_hash': '8b9ba0291c089ef4877a9bbf20df3fe6834a2ee1aa63e0eb8ab71f1158b81d81',
+    'excessive_complexity_reference_size_in': 3.0,
     'findings': list([
-      dict({
-        'classification': 'needs_review',
-        'kind': 'excessive_complexity',
-        'location': dict({
-          'max_x': 288.6211,
-          'max_y': 285.0,
-          'min_x': 11.1437,
-          'min_y': 15.6894,
-        }),
-        'measured_value': 13.7679,
-        'message': 'excessive geometric complexity: path element 0, subpath 0 has 13.7679 nodes/in, above the 11.0 nodes/in threshold',
-        'path_reference': dict({
-          'element_index': 0,
-          'id': None,
-          'subpath_index': 0,
-        }),
-        'threshold': 11.0,
-      }),
     ]),
     'reference_size_in': 1.0,
-    'result': 'needs_review',
+    'result': 'pass',
     'thresholds': dict({
       'accidental_dot_max_dimension_in': 0.2,
       'excessive_complexity_max_node_count': 300.0,
@@ -576,6 +557,7 @@
 # name: test_product_size_findings_json_is_locked_by_snapshot[owl_limpet-owl-limpet-cut.svg]
   dict({
     'content_hash': '924c2319b1c4eb0b36fe3476d1e9ea4aa3e595f267840c41251cd06762e47973',
+    'excessive_complexity_reference_size_in': 3.0,
     'findings': list([
       dict({
         'classification': 'needs_review',
@@ -614,6 +596,7 @@
 # name: test_product_size_findings_json_is_locked_by_snapshot[purple_sea_urchin-purple-sea-urchin-cut.svg]
   dict({
     'content_hash': 'edcb8c90ddc172cda4d7748a7719d67b29a79689866c45f0c73eb756d106873c',
+    'excessive_complexity_reference_size_in': 3.0,
     'findings': list([
       dict({
         'classification': 'needs_review',
@@ -831,24 +814,6 @@
         }),
         'threshold': 0.1,
       }),
-      dict({
-        'classification': 'needs_review',
-        'kind': 'excessive_complexity',
-        'location': dict({
-          'max_x': 278.9694,
-          'max_y': 275.1708,
-          'min_x': 15.2963,
-          'min_y': 20.3667,
-        }),
-        'measured_value': 14.1332,
-        'message': 'excessive geometric complexity: path element 0, subpath 0 has 14.1332 nodes/in, above the 11.0 nodes/in threshold',
-        'path_reference': dict({
-          'element_index': 0,
-          'id': None,
-          'subpath_index': 0,
-        }),
-        'threshold': 11.0,
-      }),
     ]),
     'reference_size_in': 1.0,
     'result': 'needs_review',
@@ -868,6 +833,7 @@
 # name: test_product_size_findings_json_is_locked_by_snapshot[turban_snail-turban-snail-cut.svg]
   dict({
     'content_hash': 'e79374b5b9e4f445ead1200619ac8f3f2754d246373843271840973980bd10a9',
+    'excessive_complexity_reference_size_in': 3.0,
     'findings': list([
       dict({
         'classification': 'needs_review',

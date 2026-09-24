@@ -29,7 +29,7 @@ from vectorpress.validate import (
 from vectorpress.validate._document_elements import parse_document_elements
 from vectorpress.validate._pieces import Piece, parse_cut_file
 from vectorpress.validate._subpaths import parse_subpaths
-from vectorpress.validate._svg_document import parse_svg_document
+from vectorpress.validate._svg_document import parse_svg_document, svg_viewbox_longest_side
 
 #: Every physical-unit threshold the §9 detectors use, keyed by name,
 #: recorded verbatim with every findings report. :func:`vectorpress.
@@ -88,8 +88,9 @@ from vectorpress.validate._svg_document import parse_svg_document
 #: ``excessive_complexity_max_nodes_per_in``: ``11.0`` sits above every
 #: real-art fixture outline at the catalog default, while
 #: ``coralline_algae``'s finely rippled outline clears it (~13.4 nodes/in).
-#: Density rises as the same outline shrinks, so at a 1in product size the
-#: real-art sea star and anemone read ~13.7 nodes/in and are flagged too.
+#: Both ``excessive_complexity`` measures that take a size are judged at the
+#: catalog reference size, never a product's override (ADR 0010), so these
+#: values mean the same thing at every product size.
 #:
 #: ``stray_object_off_canvas_tolerance_in``: :mod:`vectorpress.validate.
 #: stray_object`'s own off-canvas check applies this tolerance to a
@@ -147,10 +148,19 @@ def _unclaimed(pieces: list[Piece], claimed: set[tuple[int, int | None]]) -> lis
     return [piece for piece in pieces if (piece.element_index, piece.subpath_index) not in claimed]
 
 
-def validate_cut_file(svg_bytes: bytes, reference_size_in: float) -> ValidationResult:
+def validate_cut_file(
+    svg_bytes: bytes, reference_size_in: float, *, catalog_reference_size_in: float
+) -> ValidationResult:
     """Validate one cut file's bytes against every §9 detector, at
     ``reference_size_in`` physical inches (§9.1); each detector contributes
     its own findings to the same result.
+
+    ``catalog_reference_size_in`` is the catalog's default reference size,
+    the size the cut file was traced at (ADR 0009).
+    :mod:`vectorpress.validate.excessive_complexity` alone is judged there
+    rather than at ``reference_size_in`` (ADR 0010): complexity is a property
+    of the traced geometry, not of how large it is cut. Every other detector
+    judges what can physically be cut at ``reference_size_in``.
 
     The bytes are parsed once (:func:`~vectorpress.validate._svg_document.
     parse_svg_document`), and three views are derived from that one parse:
@@ -214,9 +224,12 @@ def validate_cut_file(svg_bytes: bytes, reference_size_in: float) -> ValidationR
         parsed.pieces, scale, THRESHOLDS["narrow_feature_min_width_in"]
     )
 
+    # Computed the same way ``parse_cut_file`` computes ``scale``, so when the
+    # two sizes are equal the two scales are bit-identical.
+    catalog_scale = svg_viewbox_longest_side(document) / catalog_reference_size_in
     complexity_findings = excessive_complexity.detect(
         parsed.pieces,
-        scale,
+        catalog_scale,
         THRESHOLDS["excessive_complexity_max_nodes_per_in"],
         THRESHOLDS["excessive_complexity_min_perimeter_in"],
         THRESHOLDS["excessive_complexity_max_node_count"],

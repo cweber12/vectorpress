@@ -27,7 +27,7 @@ _TAIL = b"</svg>"
 def test_two_identical_holes_yield_one_duplicate_geometry_finding() -> None:
     svg = _HEAD + b'<path fill-rule="evenodd" d="' + _MAIN_BODY + _HOLE + _HOLE + b'"/>' + _TAIL
 
-    result = validate_cut_file(svg, REFERENCE_SIZE_IN)
+    result = validate_cut_file(svg, REFERENCE_SIZE_IN, catalog_reference_size_in=REFERENCE_SIZE_IN)
 
     assert result.outcome is ValidationOutcome.NEEDS_REVIEW
     findings = [f for f in result.findings if f.kind is FindingKind.DUPLICATE_GEOMETRY]
@@ -50,7 +50,7 @@ def test_two_different_holes_yield_no_duplicate_geometry_finding() -> None:
         _HEAD + b'<path fill-rule="evenodd" d="' + _MAIN_BODY + _HOLE + other_hole + b'"/>' + _TAIL
     )
 
-    result = validate_cut_file(svg, REFERENCE_SIZE_IN)
+    result = validate_cut_file(svg, REFERENCE_SIZE_IN, catalog_reference_size_in=REFERENCE_SIZE_IN)
 
     kinds = {finding.kind for finding in result.findings}
     assert FindingKind.DUPLICATE_GEOMETRY not in kinds
@@ -68,7 +68,7 @@ def test_three_identical_holes_yield_one_finding_per_pair() -> None:
         + _TAIL
     )
 
-    result = validate_cut_file(svg, REFERENCE_SIZE_IN)
+    result = validate_cut_file(svg, REFERENCE_SIZE_IN, catalog_reference_size_in=REFERENCE_SIZE_IN)
 
     findings = [f for f in result.findings if f.kind is FindingKind.DUPLICATE_GEOMETRY]
     assert len(findings) == 3  # (1,2), (1,3), (2,3)
@@ -93,7 +93,7 @@ def test_duplicate_found_regardless_of_starting_vertex_or_winding_direction() ->
         + _TAIL
     )
 
-    result = validate_cut_file(svg, REFERENCE_SIZE_IN)
+    result = validate_cut_file(svg, REFERENCE_SIZE_IN, catalog_reference_size_in=REFERENCE_SIZE_IN)
 
     kinds = {finding.kind for finding in result.findings}
     assert FindingKind.DUPLICATE_GEOMETRY in kinds
@@ -107,7 +107,7 @@ def test_two_identical_bare_line_segments_are_not_a_duplicate() -> None:
     open_path` is the one detector a bare line segment reaches."""
     svg = _HEAD + b'<path d="M120,10 L150,40 M120,10 L150,40"/>' + _TAIL
 
-    result = validate_cut_file(svg, REFERENCE_SIZE_IN)
+    result = validate_cut_file(svg, REFERENCE_SIZE_IN, catalog_reference_size_in=REFERENCE_SIZE_IN)
 
     kinds = {finding.kind for finding in result.findings}
     assert FindingKind.DUPLICATE_GEOMETRY not in kinds

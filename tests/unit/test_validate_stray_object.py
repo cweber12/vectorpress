@@ -26,7 +26,7 @@ def _svg(*extra: bytes) -> bytes:
 def test_off_canvas_rect_yields_one_stray_object_finding() -> None:
     svg = _svg(b'<rect x="150" y="150" width="10" height="10"/>')
 
-    result = validate_cut_file(svg, REFERENCE_SIZE_IN)
+    result = validate_cut_file(svg, REFERENCE_SIZE_IN, catalog_reference_size_in=REFERENCE_SIZE_IN)
 
     assert result.outcome is ValidationOutcome.NEEDS_REVIEW
     assert len(result.findings) == 1
@@ -41,7 +41,7 @@ def test_in_canvas_rect_yields_no_stray_object_finding() -> None:
     """Near miss: the same rect, fully inside the viewBox."""
     svg = _svg(b'<rect x="10" y="10" width="10" height="10"/>')
 
-    result = validate_cut_file(svg, REFERENCE_SIZE_IN)
+    result = validate_cut_file(svg, REFERENCE_SIZE_IN, catalog_reference_size_in=REFERENCE_SIZE_IN)
 
     kinds = {finding.kind for finding in result.findings}
     assert FindingKind.STRAY_OBJECT not in kinds
@@ -57,7 +57,7 @@ def test_the_main_path_landing_a_hair_past_the_edge_is_not_off_canvas() -> None:
     #41 review fix round 1)."""
     svg = _HEAD + b'<path d="M0,0 L100,0 L100,100.0001 L0,100.0001 Z"/>' + _TAIL
 
-    result = validate_cut_file(svg, REFERENCE_SIZE_IN)
+    result = validate_cut_file(svg, REFERENCE_SIZE_IN, catalog_reference_size_in=REFERENCE_SIZE_IN)
 
     kinds = {finding.kind for finding in result.findings}
     assert FindingKind.STRAY_OBJECT not in kinds
@@ -74,7 +74,7 @@ def test_the_main_path_landing_a_hair_past_the_edge_is_not_off_canvas() -> None:
 def test_off_canvas_path_yields_a_stray_object_finding() -> None:
     svg = _svg(b'<path d="M150,150 L160,150 L160,160 L150,160 Z"/>')
 
-    result = validate_cut_file(svg, REFERENCE_SIZE_IN)
+    result = validate_cut_file(svg, REFERENCE_SIZE_IN, catalog_reference_size_in=REFERENCE_SIZE_IN)
 
     findings = [f for f in result.findings if f.kind is FindingKind.STRAY_OBJECT]
     assert len(findings) == 1
@@ -91,7 +91,7 @@ def test_a_path_within_the_off_canvas_tolerance_yields_no_stray_object_finding()
     separate stray element instead."""
     svg = _svg(b'<path d="M95,95 L99,95 L99,100.05 L95,100.05 Z"/>')
 
-    result = validate_cut_file(svg, REFERENCE_SIZE_IN)
+    result = validate_cut_file(svg, REFERENCE_SIZE_IN, catalog_reference_size_in=REFERENCE_SIZE_IN)
 
     kinds = {finding.kind for finding in result.findings}
     assert FindingKind.STRAY_OBJECT not in kinds
@@ -102,7 +102,7 @@ def test_a_path_clearly_past_the_off_canvas_tolerance_still_trips() -> None:
     tolerance -- still flagged."""
     svg = _svg(b'<path d="M95,95 L99,95 L99,101 L95,101 Z"/>')
 
-    result = validate_cut_file(svg, REFERENCE_SIZE_IN)
+    result = validate_cut_file(svg, REFERENCE_SIZE_IN, catalog_reference_size_in=REFERENCE_SIZE_IN)
 
     kinds = {finding.kind for finding in result.findings}
     assert FindingKind.STRAY_OBJECT in kinds
@@ -111,7 +111,7 @@ def test_a_path_clearly_past_the_off_canvas_tolerance_still_trips() -> None:
 def test_hidden_path_yields_a_stray_object_finding() -> None:
     svg = _svg(b'<path d="M95,5 L99,5 L99,9 L95,9 Z" display="none"/>')
 
-    result = validate_cut_file(svg, REFERENCE_SIZE_IN)
+    result = validate_cut_file(svg, REFERENCE_SIZE_IN, catalog_reference_size_in=REFERENCE_SIZE_IN)
 
     findings = [f for f in result.findings if f.kind is FindingKind.STRAY_OBJECT]
     assert len(findings) == 1
@@ -124,7 +124,7 @@ def test_style_declared_invisible_path_yields_a_stray_object_finding() -> None:
     plain ``visibility="hidden"`` attribute already is."""
     svg = _svg(b'<path d="M95,15 L99,15 L99,19 L95,19 Z" style="visibility:hidden"/>')
 
-    result = validate_cut_file(svg, REFERENCE_SIZE_IN)
+    result = validate_cut_file(svg, REFERENCE_SIZE_IN, catalog_reference_size_in=REFERENCE_SIZE_IN)
 
     kinds = {finding.kind for finding in result.findings}
     assert FindingKind.STRAY_OBJECT in kinds
@@ -136,7 +136,7 @@ def test_visible_path_with_a_real_stroke_and_no_fill_is_not_invisible() -> None:
     path" concern, not stray_object's)."""
     svg = _svg(b'<path d="M95,25 L99,25 L99,29 L95,29 Z" fill="none" stroke="black"/>')
 
-    result = validate_cut_file(svg, REFERENCE_SIZE_IN)
+    result = validate_cut_file(svg, REFERENCE_SIZE_IN, catalog_reference_size_in=REFERENCE_SIZE_IN)
 
     kinds = {finding.kind for finding in result.findings}
     assert FindingKind.STRAY_OBJECT not in kinds
@@ -148,7 +148,7 @@ def test_visible_path_with_a_real_stroke_and_no_fill_is_not_invisible() -> None:
 def test_empty_group_yields_a_stray_object_finding_with_no_bbox() -> None:
     svg = _svg(b'<g id="leftover"/>')
 
-    result = validate_cut_file(svg, REFERENCE_SIZE_IN)
+    result = validate_cut_file(svg, REFERENCE_SIZE_IN, catalog_reference_size_in=REFERENCE_SIZE_IN)
 
     findings = [f for f in result.findings if f.kind is FindingKind.STRAY_OBJECT]
     assert len(findings) == 1
@@ -160,7 +160,7 @@ def test_nonempty_group_yields_no_stray_object_finding() -> None:
     """Near miss: a group that actually contains something."""
     svg = _svg(b'<g><rect x="10" y="10" width="5" height="5"/></g>')
 
-    result = validate_cut_file(svg, REFERENCE_SIZE_IN)
+    result = validate_cut_file(svg, REFERENCE_SIZE_IN, catalog_reference_size_in=REFERENCE_SIZE_IN)
 
     kinds = {finding.kind for finding in result.findings}
     assert FindingKind.STRAY_OBJECT not in kinds
@@ -172,7 +172,7 @@ def test_nonempty_group_yields_no_stray_object_finding() -> None:
 def test_display_none_element_yields_stray_object_finding() -> None:
     svg = _svg(b'<rect x="10" y="10" width="5" height="5" display="none"/>')
 
-    result = validate_cut_file(svg, REFERENCE_SIZE_IN)
+    result = validate_cut_file(svg, REFERENCE_SIZE_IN, catalog_reference_size_in=REFERENCE_SIZE_IN)
 
     kinds = {finding.kind for finding in result.findings}
     assert FindingKind.STRAY_OBJECT in kinds
@@ -181,7 +181,7 @@ def test_display_none_element_yields_stray_object_finding() -> None:
 def test_visibility_hidden_element_yields_stray_object_finding() -> None:
     svg = _svg(b'<rect x="10" y="10" width="5" height="5" visibility="hidden"/>')
 
-    result = validate_cut_file(svg, REFERENCE_SIZE_IN)
+    result = validate_cut_file(svg, REFERENCE_SIZE_IN, catalog_reference_size_in=REFERENCE_SIZE_IN)
 
     kinds = {finding.kind for finding in result.findings}
     assert FindingKind.STRAY_OBJECT in kinds
@@ -190,7 +190,7 @@ def test_visibility_hidden_element_yields_stray_object_finding() -> None:
 def test_zero_opacity_element_yields_stray_object_finding() -> None:
     svg = _svg(b'<rect x="10" y="10" width="5" height="5" opacity="0"/>')
 
-    result = validate_cut_file(svg, REFERENCE_SIZE_IN)
+    result = validate_cut_file(svg, REFERENCE_SIZE_IN, catalog_reference_size_in=REFERENCE_SIZE_IN)
 
     kinds = {finding.kind for finding in result.findings}
     assert FindingKind.STRAY_OBJECT in kinds
@@ -199,7 +199,7 @@ def test_zero_opacity_element_yields_stray_object_finding() -> None:
 def test_zero_fill_opacity_element_yields_stray_object_finding() -> None:
     svg = _svg(b'<rect x="10" y="10" width="5" height="5" fill-opacity="0"/>')
 
-    result = validate_cut_file(svg, REFERENCE_SIZE_IN)
+    result = validate_cut_file(svg, REFERENCE_SIZE_IN, catalog_reference_size_in=REFERENCE_SIZE_IN)
 
     kinds = {finding.kind for finding in result.findings}
     assert FindingKind.STRAY_OBJECT in kinds
@@ -208,7 +208,7 @@ def test_zero_fill_opacity_element_yields_stray_object_finding() -> None:
 def test_no_fill_and_no_stroke_element_yields_stray_object_finding() -> None:
     svg = _svg(b'<rect x="10" y="10" width="5" height="5" fill="none"/>')
 
-    result = validate_cut_file(svg, REFERENCE_SIZE_IN)
+    result = validate_cut_file(svg, REFERENCE_SIZE_IN, catalog_reference_size_in=REFERENCE_SIZE_IN)
 
     kinds = {finding.kind for finding in result.findings}
     assert FindingKind.STRAY_OBJECT in kinds
@@ -218,7 +218,7 @@ def test_visible_element_yields_no_stray_object_finding() -> None:
     """Near miss: an ordinary, visible element (default fill)."""
     svg = _svg(b'<rect x="10" y="10" width="5" height="5"/>')
 
-    result = validate_cut_file(svg, REFERENCE_SIZE_IN)
+    result = validate_cut_file(svg, REFERENCE_SIZE_IN, catalog_reference_size_in=REFERENCE_SIZE_IN)
 
     kinds = {finding.kind for finding in result.findings}
     assert FindingKind.STRAY_OBJECT not in kinds
@@ -229,7 +229,7 @@ def test_no_fill_but_a_real_stroke_is_not_invisible() -> None:
     when it still has a stroke -- it is genuinely drawn, just unfilled."""
     svg = _svg(b'<rect x="10" y="10" width="5" height="5" fill="none" stroke="black"/>')
 
-    result = validate_cut_file(svg, REFERENCE_SIZE_IN)
+    result = validate_cut_file(svg, REFERENCE_SIZE_IN, catalog_reference_size_in=REFERENCE_SIZE_IN)
 
     kinds = {finding.kind for finding in result.findings}
     assert FindingKind.STRAY_OBJECT not in kinds
@@ -241,7 +241,7 @@ def test_no_fill_but_a_real_stroke_is_not_invisible() -> None:
 def test_text_element_yields_stray_object_finding() -> None:
     svg = _svg(b'<text x="10" y="10">note</text>')
 
-    result = validate_cut_file(svg, REFERENCE_SIZE_IN)
+    result = validate_cut_file(svg, REFERENCE_SIZE_IN, catalog_reference_size_in=REFERENCE_SIZE_IN)
 
     findings = [f for f in result.findings if f.kind is FindingKind.STRAY_OBJECT]
     assert len(findings) == 1
@@ -257,7 +257,7 @@ def test_off_canvas_element_inside_defs_is_never_a_stray_object() -> None:
     "stray"."""
     svg = _svg(b'<defs><rect x="150" y="150" width="10" height="10"/></defs>')
 
-    result = validate_cut_file(svg, REFERENCE_SIZE_IN)
+    result = validate_cut_file(svg, REFERENCE_SIZE_IN, catalog_reference_size_in=REFERENCE_SIZE_IN)
 
     kinds = {finding.kind for finding in result.findings}
     assert FindingKind.STRAY_OBJECT not in kinds
@@ -272,7 +272,7 @@ def test_invisible_element_inside_a_pattern_tile_is_never_a_stray_object() -> No
         b"</pattern></defs>"
     )
 
-    result = validate_cut_file(svg, REFERENCE_SIZE_IN)
+    result = validate_cut_file(svg, REFERENCE_SIZE_IN, catalog_reference_size_in=REFERENCE_SIZE_IN)
 
     kinds = {finding.kind for finding in result.findings}
     assert FindingKind.STRAY_OBJECT not in kinds
