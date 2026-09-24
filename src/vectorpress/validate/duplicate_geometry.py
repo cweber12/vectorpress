@@ -1,4 +1,4 @@
-"""The ``duplicate_geometry`` detector (§9, ADR 0007, issue #41).
+"""The ``duplicate_geometry`` detector (§9, ADR 0007).
 
 Two subpaths with the exact same geometry -- the same shape stacked
 exactly on top of itself, or repeated verbatim elsewhere in the document --
@@ -6,7 +6,7 @@ serve no purpose a cut file needs and can only make a hand edit (or a
 copy-paste mistake) harder to reason about; the §8 builder's own tracer
 never emits the same ring twice.
 
-Runs over every :mod:`vectorpress.validate._svg_geometry.Subpath` in the
+Runs over every :mod:`vectorpress.validate._subpaths.Subpath` in the
 document (not grouped into piece/hole), comparing every pair: two subpaths
 are "the same geometry" when their own flattened point sets match, each
 rounded to :data:`~vectorpress.domain.numeric_format.DECIMAL_PLACES` (the
@@ -30,7 +30,7 @@ from vectorpress.domain.finding import (
     PathReference,
 )
 from vectorpress.domain.numeric_format import round_number
-from vectorpress.validate._svg_geometry import Subpath
+from vectorpress.validate._subpaths import Subpath
 
 _KIND = FindingKind.DUPLICATE_GEOMETRY
 _CLASSIFICATION = CLASSIFICATION[_KIND]
@@ -38,8 +38,8 @@ _CLASSIFICATION = CLASSIFICATION[_KIND]
 
 #: How close a subpath's own last flattened point must be to its first
 #: before :func:`_signature` treats them as "the same point" and drops the
-#: redundant one -- :mod:`vectorpress.validate._svg_geometry.
-#: _flatten_subpath` appends an explicit ``Close`` segment's own end point
+#: redundant one -- :func:`vectorpress.validate._svg_document.
+#: flatten_subpath` appends an explicit ``Close`` segment's own end point
 #: (identical to the subpath's start) as a genuine extra point, so without
 #: this, *which* vertex is the duplicated one -- and so the point
 #: *multiset* :func:`_signature` builds -- would depend on which vertex
@@ -69,17 +69,16 @@ def detect(subpaths: list[Subpath]) -> list[Finding]:
     geometry means an identical bbox too).
 
     A subpath under three points -- a bare open line segment, say -- is
-    never a candidate here (issue #41 review fix round 1): "the same
-    geometry" means nothing for a shape with no real interior, and
-    :func:`~vectorpress.validate._svg_geometry.parse_subpaths` itself keeps
-    one only for :mod:`vectorpress.validate.open_path`'s own sake.
+    never a candidate here: "the same geometry" means nothing for a shape
+    with no real interior, and :func:`~vectorpress.validate._subpaths.
+    parse_subpaths` itself keeps one only for :mod:`vectorpress.validate.open_path`'s own sake.
 
     ``subpaths`` is already in document order (:func:`~vectorpress.
-    validate._svg_geometry.parse_subpaths`), so iterating pairs with the
+    validate._subpaths.parse_subpaths`), so iterating pairs with the
     first index always less than the second already yields findings in a
     fixed, deterministic order -- by the first (lower document order)
     subpath's own path reference, then the second's -- with no further
-    sort needed (issue #37's own ordering rule).
+    sort needed.
     """
     subpaths = [subpath for subpath in subpaths if len(subpath.points) >= 3]
     signatures = [_signature(subpath) for subpath in subpaths]

@@ -1,4 +1,4 @@
-"""The ``overlap`` detector (§9, ADR 0007, issue #41).
+"""The ``overlap`` detector (§9, ADR 0007).
 
 Two closed, filled subpaths whose own boundaries genuinely cross -- neither
 one simply nested inside the other as a hole -- or a single subpath whose
@@ -6,25 +6,25 @@ own boundary crosses itself, can only come from a hand edit: the §8
 builder's own tracer never emits self-intersecting or mutually crossing
 geometry.
 
-Deliberately independent of :mod:`vectorpress.validate._svg_geometry`'s own
-piece/hole containment-parity grouping (that module's own docstring: "your
-overlap and self-intersection detection must not rely on it"): a genuinely
+Deliberately independent of :mod:`vectorpress.validate._pieces`'s own
+piece/hole containment-parity grouping (overlap and self-intersection
+detection must not rely on it): a genuinely
 overlapping pair can be *misclassified* by that parity model as a hole of
 the other (its smaller area, and its own representative point happening to
 land inside the bigger one, even though part of its own boundary sticks
 out) -- so this runs directly over every raw :class:`~vectorpress.validate.
-_svg_geometry.Subpath`'s own ring, testing every pair (and every subpath
+_subpaths.Subpath`'s own ring, testing every pair (and every subpath
 against itself) for a genuine crossing via :func:`~vectorpress.validate.
-_svg_geometry.find_ring_intersections`/:func:`~vectorpress.validate.
-_svg_geometry.find_self_intersections`, never consulting :class:`~
-vectorpress.validate._svg_geometry.Piece`/:class:`~vectorpress.validate.
-_svg_geometry.Hole` at all.
+_segment_intersection.find_ring_intersections`/:func:`~vectorpress.
+validate._segment_intersection.find_self_intersections`, never consulting
+:class:`~vectorpress.validate._pieces.Piece`/:class:`~vectorpress.validate.
+_pieces.Hole` at all.
 
 Two subpaths that coincide exactly (:mod:`vectorpress.validate.
 duplicate_geometry`'s own concern) never trip this: their edges run
 collinear on top of each other rather than crossing transversally, and
-:func:`~vectorpress.validate._svg_geometry.find_ring_intersections`
-deliberately does not count that as a crossing.
+:func:`~vectorpress.validate._segment_intersection.
+find_ring_intersections` deliberately does not count that as a crossing.
 """
 
 from vectorpress.domain.finding import (
@@ -35,12 +35,12 @@ from vectorpress.domain.finding import (
     PathReference,
 )
 from vectorpress.domain.numeric_format import round_number
-from vectorpress.validate._svg_geometry import (
-    Point,
-    Subpath,
+from vectorpress.validate._segment_intersection import (
     find_ring_intersections,
     find_self_intersections,
 )
+from vectorpress.validate._subpaths import Subpath
+from vectorpress.validate._svg_document import Point
 
 _KIND = FindingKind.OVERLAP
 _CLASSIFICATION = CLASSIFICATION[_KIND]
@@ -67,20 +67,19 @@ def detect(subpaths: list[Subpath]) -> list[Finding]:
     other (§9), located at the crossing point(s)' own bounding box.
 
     A subpath under three points -- a bare open line segment, say -- is
-    never a candidate here (issue #41 review fix round 1): a two-point
-    "ring" has exactly one edge, which can never cross itself, and
-    :func:`~vectorpress.validate._svg_geometry.parse_subpaths` itself keeps
+    never a candidate here: a two-point "ring" has exactly one edge, which
+    can never cross itself, and :func:`~vectorpress.validate._subpaths.
+    parse_subpaths` itself keeps
     one only for :mod:`vectorpress.validate.open_path`'s own sake.
 
     Findings are returned in a fixed, deterministic order -- self-
     intersections first (by path reference), then pairwise overlaps (by
     the first, then the second, subpath's own path reference; ``subpaths``
     is already in document order, :func:`~vectorpress.validate.
-    _svg_geometry.parse_subpaths`, so iterating pairs with the first index
+    _subpaths.parse_subpaths`, so iterating pairs with the first index
     always less than the second already yields them in that order, the
     same reasoning :mod:`vectorpress.validate.duplicate_geometry` uses) --
-    matching every other detector in this package (issue #37's own
-    ordering rule).
+    matching every other detector in this package.
     """
     subpaths = [subpath for subpath in subpaths if len(subpath.points) >= 3]
 

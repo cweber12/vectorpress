@@ -1,4 +1,4 @@
-"""The ``tiny_isolated_shape`` detector (§9, §9.1, ADR 0007, issue #39).
+"""The ``tiny_isolated_shape`` detector (§9, §9.1, ADR 0007).
 
 An isolated shape (any piece but the document's largest -- the same
 candidate pool :mod:`vectorpress.validate.accidental_dot` and
@@ -9,8 +9,8 @@ still be large (elongated, not compact) but whose actual cut area is not.
 
 ``pieces`` here is already the candidate pool with every
 :mod:`vectorpress.validate.accidental_dot` finding's own piece removed by
-:mod:`vectorpress.validate.cut_file` (issue #39's "dot and tiny shape are
-mutually exclusive by construction"): a compact piece small enough to read
+:mod:`vectorpress.validate.cut_file`, so the two are mutually exclusive by
+construction: a compact piece small enough to read
 as a dot is reported only there, never here too, even though a dot's area is
 typically small as well.
 """
@@ -22,7 +22,7 @@ from vectorpress.domain.finding import (
     PathReference,
 )
 from vectorpress.domain.numeric_format import round_number
-from vectorpress.validate._svg_geometry import Piece, non_largest_pieces
+from vectorpress.validate._pieces import Piece, non_largest_pieces
 
 _KIND = FindingKind.TINY_ISOLATED_SHAPE
 _CLASSIFICATION = CLASSIFICATION[_KIND]
@@ -35,13 +35,13 @@ def detect(
     ``min_area_in2`` physical square inches, converted to this document's
     own user units via ``scale_user_units_per_inch`` (§9.1). The document's
     largest piece is never a candidate (:func:`~vectorpress.validate.
-    _svg_geometry.non_largest_pieces`) -- ``pieces`` also excludes whatever
+    _pieces.non_largest_pieces`) -- ``pieces`` also excludes whatever
     :mod:`vectorpress.validate.accidental_dot` already claimed, passed in by
     :mod:`vectorpress.validate.cut_file`.
 
     Findings are returned in a fixed, deterministic order -- by path
     reference (element index, then subpath index) -- matching every other
-    detector in this package (issue #37's own ordering rule).
+    detector in this package.
     """
     min_area_user_units2 = min_area_in2 * scale_user_units_per_inch**2
     candidates = non_largest_pieces(pieces)

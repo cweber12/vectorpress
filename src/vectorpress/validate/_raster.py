@@ -1,22 +1,21 @@
 # pyright: basic
 """The one place :mod:`vectorpress.validate` talks to ``scipy.ndimage``
-directly (issue #40), mirroring :mod:`vectorpress.pipeline._ndimage_cleanup`'s
-own split for the same library and :mod:`vectorpress.validate._svg_geometry`'s
+directly, mirroring :mod:`vectorpress.pipeline._ndimage_cleanup`'s own
+split for the same library and :mod:`vectorpress.validate._svg_document`'s
 own split for ``svgelements``: every touch of a third-party array/morphology
 API is isolated in this one small module, so :mod:`vectorpress.validate.
 narrow_feature` stays a plain, fully-typed function over these two small
 typed helpers.
 
-**Why rasterize at all, here.** :mod:`vectorpress.validate._svg_geometry`
+**Why rasterize at all, here.** :mod:`vectorpress.validate._pieces`
 already turns a cut file's path data into exact polygons, but "narrower than
 a minimum physical width" has no closed-form answer over an arbitrary
-polygon the way area or a bounding box does -- issue #40 itself leaves the
-method open ("any method is fine if it is deterministic"). A morphological
-opening (erode by half the minimum width, then dilate) is the same
-technique :mod:`vectorpress.pipeline.cut_svg`'s own cleanup already uses to
-erase a hairline spur (:func:`vectorpress.pipeline._ndimage_cleanup.
-open_narrow_features`) -- reused here as a *measurement* instead of a
-cleanup step: whatever an opening at the validation threshold's width erases
+polygon the way area or a bounding box does, and any deterministic method
+will do. A morphological opening (erode by half the minimum width, then
+dilate) is the same technique :mod:`vectorpress.pipeline.cut_svg`'s own
+cleanup already uses to erase a hairline spur (:func:`vectorpress.pipeline.
+_ndimage_cleanup.open_narrow_features`) -- reused here as a *measurement*
+instead of a cleanup step: whatever an opening at the validation threshold's width erases
 from a piece's own raster is, by construction, narrower than that threshold
 somewhere along its own length.
 
@@ -33,7 +32,7 @@ and ``scipy`` are installed), one row of pixel centers at a time: every ring
 edge that crosses that row's horizontal scanline contributes an x crossing,
 and a pixel is ink when its own center falls after an odd number of
 crossings -- the same even-odd rule :func:`vectorpress.validate.
-_svg_geometry._point_in_polygon` applies per point, generalized here to
+_pieces.point_in_polygon` applies per point, generalized here to
 every ring of one piece (its own outer contour plus its immediate holes) at
 once, exactly how a compound ``fill-rule="evenodd"`` path already renders.
 Only ``+``, ``-``, ``*``, ``/`` and a stable sort run per pixel -- no
@@ -57,7 +56,7 @@ Point = tuple[float, float]
 
 #: The morphological opening's own structuring-element radius, in pixels,
 #: fixed regardless of the narrow-feature threshold's physical value or the
-#: document's own scale (issue #40): :func:`pixel_size_for_min_width` picks
+#: document's own scale: :func:`pixel_size_for_min_width` picks
 #: the raster's own resolution so the threshold width always spans exactly
 #: ``2 * _STRUCTURE_RADIUS_PX`` pixels, so every raster's own quantization
 #: error is the same fixed fraction of the threshold it measures against,
@@ -67,8 +66,8 @@ _STRUCTURE_RADIUS_PX = 8
 
 #: A one- or two-pixel sliver left over from rasterization's own
 #: quantization (a ring edge grazing a pixel row) is not a real narrow
-#: feature -- this floors what counts as a genuine opening-removed region
-#: (issue #40's "keeping differences above a negligible area").
+#: feature -- this floors what counts as a genuine opening-removed region,
+#: keeping only differences above a negligible area.
 _NEGLIGIBLE_DIFF_AREA_PX = 4
 
 #: A morphological opening does not only erase genuinely narrow strips: a
@@ -104,14 +103,14 @@ def pixel_size_for_min_width(min_width_user_units: float) -> float:
     """SVG user units per raster pixel so that ``min_width_user_units`` (the
     narrow-feature threshold, already converted from physical inches to this
     document's own user units) spans exactly ``2 * _STRUCTURE_RADIUS_PX``
-    pixels (issue #40)."""
+    pixels."""
     return min_width_user_units / (2 * _STRUCTURE_RADIUS_PX)
 
 
 @dataclass(frozen=True)
 class Raster:
     """One piece's own boolean ink grid plus the mapping back to SVG user
-    units (issue #40): ``mask[row, col]`` is ink at the pixel whose center
+    units: ``mask[row, col]`` is ink at the pixel whose center
     sits at ``(origin_x + (col + 0.5) * pixel_size, origin_y + (row + 0.5) *
     pixel_size)``."""
 
@@ -137,7 +136,7 @@ def rasterize_piece(
     hole_rings: tuple[tuple[Point, ...], ...],
     pixel_size: float,
 ) -> Raster:
-    """``outer_ring`` minus ``hole_rings`` (even-odd, issue #40) as a boolean
+    """``outer_ring`` minus ``hole_rings`` (even-odd) as a boolean
     grid at ``pixel_size`` SVG user units per pixel, tightly cropped to the
     piece's own bounding box plus :data:`_PAD_PX` pixels of background
     padding on every side."""
@@ -185,7 +184,7 @@ def _opened(mask: NDArray[np.bool_]) -> NDArray[np.bool_]:
     (erode, then dilate back) -- the same "erase anything narrower than
     this" operation :func:`vectorpress.pipeline._ndimage_cleanup.
     open_narrow_features` performs on a generated cut file's raw ink mask,
-    run here purely to measure rather than to clean up (issue #40)."""
+    run here purely to measure rather than to clean up."""
     return cast(
         "NDArray[np.bool_]",
         ndi.binary_opening(mask, structure=_disk_structure(_STRUCTURE_RADIUS_PX)),
@@ -195,7 +194,7 @@ def _opened(mask: NDArray[np.bool_]) -> NDArray[np.bool_]:
 @dataclass(frozen=True)
 class NarrowRegion:
     """One connected region a morphological opening removed from a piece's
-    own raster (issue #40): its own pixel bounding box (row/col, half-open
+    own raster: its own pixel bounding box (row/col, half-open
     on the max side) and the narrowest local width found within it, in
     pixels."""
 
@@ -208,7 +207,7 @@ class NarrowRegion:
 
 def _elongation(rows: NDArray[np.float64], cols: NDArray[np.float64]) -> float:
     """A rotation-invariant "length over width" measure of one region's own
-    pixel coordinates (issue #40): the square root of the ratio between the
+    pixel coordinates: the square root of the ratio between the
     larger and smaller eigenvalue of their covariance matrix, computed
     directly from the closed form for a 2x2 symmetric matrix (``+``, ``-``,
     ``*``, ``/`` and one ``sqrt`` -- no ``numpy.linalg`` call whose own
@@ -237,7 +236,7 @@ def narrow_regions(raster: Raster) -> list[NarrowRegion]:
     erased from ``raster``'s own mask that is both above
     :data:`_NEGLIGIBLE_DIFF_AREA_PX` and elongated enough
     (:data:`_MIN_ELONGATION`) to be a genuine narrow feature rather than a
-    sharp convex corner's own opening artifact (issue #40) -- a piece with
+    sharp convex corner's own opening artifact -- a piece with
     nothing narrower than the threshold anywhere yields none. Ordered by
     document row-major position (top-left corner) for a deterministic
     finding order within one piece."""
@@ -258,7 +257,7 @@ def narrow_regions(raster: Raster) -> list[NarrowRegion]:
     # the threshold along a region of roughly uniform width, and far more
     # robust than the *smallest* value, which is dominated by the region's
     # own ragged, one-pixel-wide raster boundary rather than the feature's
-    # real geometry (issue #40's "the narrowest width found").
+    # real geometry.
     distance = cast("NDArray[np.float64]", ndi.distance_transform_edt(raster.mask))
 
     regions: list[NarrowRegion] = []

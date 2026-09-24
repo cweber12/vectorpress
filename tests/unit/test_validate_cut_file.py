@@ -1,6 +1,6 @@
 """validate.cut_file: the disconnected-fragments, accidental-dot,
 tiny-isolated-shape and small-hole findings-report tracer (§9, §9.1, §35,
-ADR 0006, ADR 0007, issue #37, issue #39).
+ADR 0006, ADR 0007).
 
 Every SVG here is hand-written, never produced by
 :mod:`vectorpress.pipeline.cut_svg` (``tests/integration/test_validate.py``
@@ -16,7 +16,7 @@ from vectorpress.domain.derivative_type import DerivativeType
 from vectorpress.domain.finding import BoundingBox, FindingKind, ValidationOutcome
 from vectorpress.domain.recipe import RECIPES
 from vectorpress.validate import excessive_complexity
-from vectorpress.validate._svg_geometry import Piece
+from vectorpress.validate._pieces import Piece
 from vectorpress.validate.cut_file import THRESHOLDS, validate_cut_file
 
 REFERENCE_SIZE_IN = 3.0
@@ -56,7 +56,7 @@ _WIDTH_HEIGHT_ONLY_NO_VIEWBOX = (
 )
 
 
-# --- one piece passes, two pieces need review (issue #37 acceptance criteria) --------------
+# --- one piece passes, two pieces need review --------------------------------------------
 
 
 def test_one_piece_svg_passes_with_no_findings() -> None:
@@ -91,7 +91,7 @@ def test_two_piece_finding_is_located_at_the_smaller_pieces_own_bbox() -> None:
 
 
 def test_two_piece_finding_names_its_path_reference() -> None:
-    """A path reference so an editor can navigate to it (issue #37): the
+    """A path reference so an editor can navigate to it: the
     element (this SVG's only ``<path>``, so index 0) and the offending
     subpath's index within it (the second subpath, index 1)."""
     result = validate_cut_file(_TWO_PIECE, REFERENCE_SIZE_IN)
@@ -112,8 +112,7 @@ def test_three_pieces_report_two_findings_neither_for_the_largest() -> None:
 
 def test_findings_are_in_a_deterministic_document_order() -> None:
     """Findings are ordered by path reference (element, then subpath index),
-    not by area or any other incidental ordering (issue #37's "findings in a
-    deterministic order")."""
+    not by area or any other incidental ordering."""
     result = validate_cut_file(_THREE_PIECE, REFERENCE_SIZE_IN)
 
     ordered = [f.path_reference.subpath_index for f in result.findings]
@@ -140,8 +139,8 @@ def test_svg_with_no_viewbox_and_no_width_or_height_fails_visibly() -> None:
 
 
 def test_width_and_height_alone_are_enough_without_a_viewbox() -> None:
-    """Falls back to ``width``/``height`` per issue #37's "falling back to
-    width/height" -- only the *absence of both* fails."""
+    """Falls back to ``width``/``height`` -- only the *absence of both*
+    fails."""
     result = validate_cut_file(_WIDTH_HEIGHT_ONLY_NO_VIEWBOX, REFERENCE_SIZE_IN)
 
     assert result.outcome is ValidationOutcome.PASS
@@ -152,7 +151,7 @@ def test_unparseable_svg_fails_visibly() -> None:
         validate_cut_file(b"not an svg document at all", REFERENCE_SIZE_IN)
 
 
-# --- accidental dot, tiny isolated shape, small hole (issue #39) -------------------------
+# --- accidental dot, tiny isolated shape, small hole -------------------------------------
 #
 # Every SVG below shares one viewBox ("0 0 300 100") and REFERENCE_SIZE_IN
 # (3.0in), so the physical scale is always 300 / 3.0 = 100 user units per
@@ -161,7 +160,7 @@ def test_unparseable_svg_fails_visibly() -> None:
 # tiny_isolated_shape_min_area_in2 / small_hole_min_area_in2 (0.02in^2 each)
 # is 200 square user units. A large main body (a 90x90 square, area 8100,
 # dimension 90) anchors every SVG as the unambiguous largest piece -- never
-# itself a dot/tiny-shape/fragment candidate (ADR 0007, issue #37).
+# itself a dot/tiny-shape/fragment candidate (ADR 0007).
 
 _MAIN_BODY = "M0,0 L90,0 L90,90 L0,90 Z"
 
@@ -185,8 +184,7 @@ _DOT_SIZED_PIECE_ABOVE_THRESHOLD = (
 # A 50x3 rectangle (area 150, dimension 50): area is under the tiny-shape
 # threshold (200 sq units), but its dimension (50) is well above the dot
 # threshold (20 units) -- not compact enough to read as a dot, so it falls
-# through to the tiny-shape check instead (a thin sliver, issue #39's own
-# example).
+# through to the tiny-shape check instead (a thin sliver).
 _SLIVER_BELOW_THRESHOLD = (
     b'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 100" width="300" height="100">'
     b'<path d="' + _MAIN_BODY.encode() + b" M200,0 L250,0 L250,3 L200,3 Z" + b'"/></svg>'
@@ -222,7 +220,7 @@ _PINHOLE_SIZED_HOLE_ABOVE_THRESHOLD = (
     + b'"/></svg>'
 )
 
-# One document combining every kind at once (mutual exclusion, issue #39):
+# One document combining every kind at once (mutual exclusion):
 # the main body (subpath 0) with its own small hole (subpath 1), a dot
 # (subpath 2), a sliver (subpath 3), and a genuine extra piece well above
 # both area/dimension thresholds (subpath 4, a 30x30 = 900 sq unit square).
@@ -255,7 +253,7 @@ def test_dot_below_threshold_yields_exactly_one_accidental_dot_finding() -> None
 
 
 def test_dot_sized_piece_above_threshold_is_never_reported_as_a_dot() -> None:
-    """Issue #39's "the same shapes above threshold yield none": no
+    """The same shape above threshold yields no
     ACCIDENTAL_DOT (nor TINY_ISOLATED_SHAPE) finding -- the piece is still a
     real extra piece, so it is reported as a disconnected fragment instead
     (ADR 0007's "no bridging": a kept extra piece is always flagged
@@ -271,7 +269,7 @@ def test_dot_sized_piece_above_threshold_is_never_reported_as_a_dot() -> None:
 def test_sliver_below_threshold_yields_exactly_one_tiny_isolated_shape_finding() -> None:
     """This sliver is 3 units tall -- under both the tiny-shape area
     threshold (200 sq units) and, independently, the narrow-feature width
-    threshold (10 units, issue #40): narrow_feature is not one of the three
+    threshold (10 units): narrow_feature is not one of the three
     mutually-exclusive piece-classification kinds (:class:`FindingKind`'s
     own "one kind per shape" note names only accidental_dot,
     tiny_isolated_shape and disconnected_fragments), so it fires alongside
@@ -291,10 +289,10 @@ def test_sliver_below_threshold_yields_exactly_one_tiny_isolated_shape_finding()
 
 
 def test_sliver_below_threshold_is_also_a_narrow_feature() -> None:
-    """Issue #40: narrow_feature and tiny_isolated_shape are independent
-    axes over the same piece -- this sliver is both small in area and
-    narrow in width, so it carries exactly one finding of each kind, never
-    a conflict between them (restored exact count, review fix round 1)."""
+    """narrow_feature and tiny_isolated_shape are independent axes over the
+    same piece -- this sliver is both small in area and narrow in width, so
+    it carries exactly one finding of each kind, never a conflict between
+    them."""
     result = validate_cut_file(_SLIVER_BELOW_THRESHOLD, REFERENCE_SIZE_IN)
 
     assert len(result.findings) == 2
@@ -303,13 +301,13 @@ def test_sliver_below_threshold_is_also_a_narrow_feature() -> None:
 
 
 def test_sliver_sized_piece_above_threshold_is_never_reported_as_tiny() -> None:
-    """Issue #39's "the same shapes above threshold yield none": no
+    """The same shape above threshold yields no
     TINY_ISOLATED_SHAPE (nor ACCIDENTAL_DOT) finding -- reported as a
     disconnected fragment instead, the same reasoning as the dot case
     above. This sliver is still only 5 units tall, under the narrow-feature
     width threshold (10 units), so it also carries a NARROW_FEATURE finding
-    (issue #40: an independent axis, not part of the three-way piece
-    classification the first two assertions describe)."""
+    (an independent axis, not part of the three-way piece classification
+    the first two assertions describe)."""
     result = validate_cut_file(_SLIVER_SIZED_PIECE_ABOVE_THRESHOLD, REFERENCE_SIZE_IN)
 
     kinds = {finding.kind for finding in result.findings}
@@ -345,13 +343,13 @@ def test_hole_above_threshold_yields_no_findings_at_all() -> None:
 
 
 def test_mutual_exclusion_across_dot_tiny_shape_and_disconnected_fragment() -> None:
-    """Issue #39's "one kind per shape": one document carrying a dot, a
+    """One kind per shape: one document carrying a dot, a
     sliver, a genuine extra piece and a small hole all at once reports
     exactly one finding of each of those four kinds, each located at its own
     piece, and no piece's own path reference (element, subpath) appears
     under more than one of the three mutually-exclusive piece-classification
     kinds. The sliver (subpath 3, 50x3) is also narrower than the
-    narrow-feature width threshold (issue #40) -- an independent axis, not
+    narrow-feature width threshold -- an independent axis, not
     part of that three-way exclusion -- so it carries a fifth finding,
     NARROW_FEATURE, on the very same piece as its own TINY_ISOLATED_SHAPE
     finding."""
@@ -389,7 +387,7 @@ def test_mutual_exclusion_across_dot_tiny_shape_and_disconnected_fragment() -> N
     assert len(claimed) == len(set(claimed))
 
 
-# --- cleanup vs. validation: every cleanup threshold is strictly smaller (issue #39) ------
+# --- cleanup vs. validation: every cleanup threshold is strictly smaller ------------------
 
 
 def test_every_cut_svg_cleanup_threshold_is_strictly_below_its_validation_counterpart() -> None:
@@ -397,9 +395,9 @@ def test_every_cut_svg_cleanup_threshold_is_strictly_below_its_validation_counte
     happens; validation flags what is borderline for a human to decide.
     A later tweak to either set must keep cleanup strictly smaller than the
     validation threshold it sits under, or a shape/hole/feature cleanup
-    would have kept could never even reach validation to be flagged (issue
-    #40 extends this to the cut_svg opening width against the
-    narrow-feature minimum width)."""
+    would have kept could never even reach validation to be flagged (this
+    includes the cut_svg opening width against the narrow-feature minimum
+    width)."""
     cleanup_parameters = RECIPES[DerivativeType.CUT_SVG].parameters
 
     island_min_area_in2 = cleanup_parameters["island_min_area_in2"]
@@ -414,7 +412,7 @@ def test_every_cut_svg_cleanup_threshold_is_strictly_below_its_validation_counte
     assert opening_width_in < THRESHOLDS["narrow_feature_min_width_in"]
 
 
-# --- narrow feature: a dumbbell with a below/above-threshold neck (issue #40) -------------
+# --- narrow feature: a dumbbell with a below/above-threshold neck ------------------------
 #
 # Both dumbbells share one viewBox ("0 0 300 100") and REFERENCE_SIZE_IN
 # (3.0in), the same 100-user-units-per-inch scale every test above uses:
@@ -459,8 +457,8 @@ def test_dumbbell_with_a_narrow_neck_yields_one_narrow_feature_finding_at_the_ne
 
 
 def test_dumbbell_with_a_wide_neck_yields_no_narrow_feature_finding() -> None:
-    """The same dumbbell, only the neck widened above the threshold (issue
-    #40's own acceptance criterion): no NARROW_FEATURE finding -- and
+    """The same dumbbell, only the neck widened above the threshold: no
+    NARROW_FEATURE finding -- and
     nothing else either, since this shape trips no other §9 kind."""
     result = validate_cut_file(_DUMBBELL_WIDE_NECK, REFERENCE_SIZE_IN)
 
@@ -468,15 +466,15 @@ def test_dumbbell_with_a_wide_neck_yields_no_narrow_feature_finding() -> None:
     assert result.findings == ()
 
 
-# --- excessive geometric complexity: node density and the absolute cap (issue #40) --------
+# --- excessive geometric complexity: node density and the absolute cap -------------------
 
 
 def test_a_path_with_far_too_many_nodes_for_its_size_yields_one_excessive_complexity() -> None:
     """A jagged sawtooth outline along one edge of a small square: 40 tiny
     (0.05-unit amplitude) zigzag segments -- far more nodes than a nearly
     straight edge this short needs, well above
-    ``excessive_complexity_max_nodes_per_in`` (issue #40's own "nodes per
-    inch of perimeter"). The amplitude is deliberately tiny (unlike
+    ``excessive_complexity_max_nodes_per_in`` (nodes per inch of
+    perimeter). The amplitude is deliberately tiny (unlike
     ``narrow_feature``'s own dumbbell fixture above) so this shape trips
     only excessive_complexity, not narrow_feature too."""
     teeth = 40
@@ -501,9 +499,9 @@ def test_a_path_with_far_too_many_nodes_for_its_size_yields_one_excessive_comple
     assert finding.kind is FindingKind.EXCESSIVE_COMPLEXITY
     assert finding.path_reference.element_index == 0
     assert finding.path_reference.subpath_index == 0
-    # Recorded with the density measure and its own threshold (review fix
-    # round 1, PR #46's "a piece that trips density at its size is recorded
-    # with the density measure and threshold") -- 44 nodes over a perimeter
+    # Recorded with the density measure and its own threshold (a piece that
+    # trips density at its size is recorded with the density measure and
+    # threshold) -- 44 nodes over a perimeter
     # of ~0.8043in (well above ``excessive_complexity_min_perimeter_in``, so
     # density is judged at all) is ~54.7 nodes/in, against the 11.0
     # nodes/in threshold -- never the absolute node-count cap, nowhere near
@@ -529,7 +527,7 @@ def test_a_simple_path_of_the_same_size_yields_no_excessive_complexity_finding()
 def test_a_small_plain_square_below_the_min_perimeter_yields_no_finding_even_though_its_own_density_would_trip() -> (
     None
 ):
-    """Review fix round 1, PR #46: density (nodes per inch of perimeter)
+    """Density (nodes per inch of perimeter)
     grows without bound as a piece shrinks, so a plain 4-node square small
     enough on its own -- 2x2 user units, a perimeter of 8 user units, 0.08in
     at this test's 100-user-units-per-inch scale, far below
@@ -554,9 +552,8 @@ def test_a_small_plain_square_below_the_min_perimeter_yields_no_finding_even_tho
 
 
 def test_the_absolute_node_cap_still_applies_to_a_piece_below_the_min_perimeter() -> None:
-    """Review fix round 2, PR #46: unlike density, the absolute node-count
-    cap is checked regardless of a piece's own size (the module docstring's
-    own correction) -- a piece whose own perimeter sits below
+    """Unlike density, the absolute node-count cap is checked regardless of
+    a piece's own size (see the module docstring) -- a piece whose own perimeter sits below
     ``min_perimeter_in`` (so its own density is never judged at all) still
     trips the cap once its own node count clears it, exactly the same way a
     piece above the minimum perimeter would.

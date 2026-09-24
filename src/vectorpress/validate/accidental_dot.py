@@ -1,4 +1,4 @@
-"""The ``accidental_dot`` detector (§9, §9.1, ADR 0007, issue #39).
+"""The ``accidental_dot`` detector (§9, §9.1, ADR 0007).
 
 An isolated shape (any piece but the document's largest, the same "isolated
 shape" candidate pool :mod:`vectorpress.validate.disconnected_fragments`
@@ -8,10 +8,10 @@ never meant to keep as its own cut piece -- rather than a deliberately kept
 detail, however far it sits from every other piece.
 
 Checked *before* :mod:`vectorpress.validate.tiny_isolated_shape` by
-:mod:`vectorpress.validate.cut_file` (issue #39's "dot and tiny shape are
-mutually exclusive by construction"): a piece compact enough in every
-direction to read as a dot is reported as exactly that, never also
-considered for the area-based tiny-shape check.
+:mod:`vectorpress.validate.cut_file`, so the two are mutually exclusive by
+construction: a piece compact enough in every direction to read as a dot is
+reported as exactly that, never also considered for the area-based
+tiny-shape check.
 """
 
 from vectorpress.domain.finding import (
@@ -21,7 +21,7 @@ from vectorpress.domain.finding import (
     PathReference,
 )
 from vectorpress.domain.numeric_format import round_number
-from vectorpress.validate._svg_geometry import Piece, non_largest_pieces
+from vectorpress.validate._pieces import Piece, non_largest_pieces
 
 _KIND = FindingKind.ACCIDENTAL_DOT
 _CLASSIFICATION = CLASSIFICATION[_KIND]
@@ -34,12 +34,12 @@ def detect(
     below ``max_dimension_in`` physical inches, converted to this document's
     own user units via ``scale_user_units_per_inch`` (§9.1). The document's
     largest piece is never a candidate (:func:`~vectorpress.validate.
-    _svg_geometry.non_largest_pieces`), the same scoping
+    _pieces.non_largest_pieces`), the same scoping
     :mod:`vectorpress.validate.disconnected_fragments` uses.
 
     Findings are returned in a fixed, deterministic order -- by path
     reference (element index, then subpath index) -- matching every other
-    detector in this package (issue #37's own ordering rule).
+    detector in this package.
     """
     max_dimension_user_units = max_dimension_in * scale_user_units_per_inch
     candidates = non_largest_pieces(pieces)
