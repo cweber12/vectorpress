@@ -4,6 +4,15 @@ catalog (§6.1, §6.2, §8, §20, §35, §36, issue #23, issue #24).
 Runs against a temporary copy, never the committed fixture directly: this
 command writes real files under each asset's ``derived/``, and the fixture
 catalog must never contain one (``tests/fixtures/catalog/README.md``).
+
+The fixture also carries a fourth asset, ``acorn_barnacle``, whose only
+source is deliberately truncated (issue #27, §35): every ``generate --all``
+(or ``--force --all``) run below therefore fails two of its derivatives and
+exits 1, even though the three healthy assets named by ``FIXTURE_OUTPUTS``
+etc. below generate normally -- see
+``tests/integration/test_generate_failure_visibility.py`` for the failure
+itself (naming, cleanliness, retry) and ``tests/fixtures/catalog/README.md``
+for why the asset exists.
 """
 
 import re
@@ -77,7 +86,7 @@ def test_generate_all_writes_every_transparent_png_with_provenance(
 
     result = runner.invoke(app, ["generate", "--all"])
 
-    assert result.exit_code == 0, result.output
+    assert result.exit_code == 1, result.output
     for asset_id, filename in FIXTURE_OUTPUTS:
         assert f"{asset_id}\ttransparent_png\tgenerated\t{filename}" in result.stdout
 
@@ -110,7 +119,7 @@ def test_generate_all_writes_every_silhouette_svg_with_provenance(
 
     result = runner.invoke(app, ["generate", "--all"])
 
-    assert result.exit_code == 0, result.output
+    assert result.exit_code == 1, result.output
     assert "no generator" not in result.stdout
     for asset_id, filename in FIXTURE_SILHOUETTE_OUTPUTS:
         assert f"{asset_id}\tsilhouette_svg\tgenerated\t{filename}" in result.stdout
@@ -144,7 +153,7 @@ def test_generate_all_writes_the_flatcolor_svg_with_provenance(
 
     result = runner.invoke(app, ["generate", "--all"])
 
-    assert result.exit_code == 0, result.output
+    assert result.exit_code == 1, result.output
     assert "no generator" not in result.stdout
     for asset_id, filename in FIXTURE_FLATCOLOR_OUTPUTS:
         assert f"{asset_id}\tflatcolor_svg\tgenerated\t{filename}" in result.stdout
@@ -379,7 +388,7 @@ def test_second_generate_all_reports_current_and_changes_nothing(
     changes bytes or mtime (§36) -- the flat-color SVG is idempotent too."""
     monkeypatch.chdir(temp_catalog_root)
     first = runner.invoke(app, ["generate", "--all"])
-    assert first.exit_code == 0, first.output
+    assert first.exit_code == 1, first.output
 
     before: dict[Path, tuple[bytes, int]] = {}
     for derived_dir in sorted(temp_catalog_root.glob("assets/*/derived")):
@@ -389,7 +398,7 @@ def test_second_generate_all_reports_current_and_changes_nothing(
 
     second = runner.invoke(app, ["generate", "--all"])
 
-    assert second.exit_code == 0, second.output
+    assert second.exit_code == 1, second.output
     for asset_id, filename in FIXTURE_OUTPUTS:
         assert f"{asset_id}\ttransparent_png\tcurrent\t{filename}" in second.stdout
     for asset_id, filename in FIXTURE_SILHOUETTE_OUTPUTS:
@@ -441,7 +450,7 @@ def test_generate_all_skips_and_names_an_asset_that_failed_to_load(
 
     result = runner.invoke(app, ["generate", "--all"])
 
-    assert result.exit_code == 0, result.output
+    assert result.exit_code == 1, result.output
     assert "ochre_sea_star\tskipped: failed to load" in result.stdout
     # the broken asset generated nothing
     assert not (temp_catalog_root / "assets" / "ochre_sea_star" / "derived").exists()
@@ -473,22 +482,29 @@ def test_vpress_status_missing_count_drops_after_generation(
     # purple_sea_urchin and giant_green_anemone each contribute 2 missing
     # (transparent_png, silhouette_svg) and 1 impossible (flatcolor_svg);
     # ochre_sea_star has a flatcolor source (issue #25) so all 3 of its
-    # recipe-bearing types are missing instead: 2*2 + 3 = 7.
-    assert "Missing derivatives: 7" in before.stdout
-    assert "Impossible derivatives: 2" in before.stdout
+    # recipe-bearing types are missing instead: 2*2 + 3 = 7. acorn_barnacle
+    # (issue #27) has only a silhouette source: 2 more missing
+    # (transparent_png, silhouette_svg), 1 more impossible (flatcolor_svg)
+    # -- 9 missing, 3 impossible overall.
+    assert "Missing derivatives: 9" in before.stdout
+    assert "Impossible derivatives: 3" in before.stdout
 
     generate_result = runner.invoke(app, ["generate", "--all"])
-    assert generate_result.exit_code == 0, generate_result.output
+    # non-zero: acorn_barnacle's truncated source fails two derivatives
+    # (issue #27) -- the assertions below cover only the other three assets.
+    assert generate_result.exit_code == 1, generate_result.output
 
     after = runner.invoke(app, ["status"])
 
     assert after.exit_code == 0, after.output
-    # Every recipe-bearing type for every asset with an acceptable source
-    # (issue #24, issue #25) moves from missing to current; flatcolor_svg
-    # stays impossible for the two assets with no flatcolor source (counted
-    # separately, not as missing).
-    assert "Missing derivatives: 0" in after.stdout
-    assert "Impossible derivatives: 2" in after.stdout
+    # Every recipe-bearing type for every asset with an acceptable,
+    # decodable source (issue #24, issue #25) moves from missing to
+    # current; flatcolor_svg stays impossible for the two assets with no
+    # flatcolor source (counted separately, not as missing). acorn_barnacle's
+    # two derivatives never generate (its source never decodes), so they
+    # stay missing -- generation failure never counts as "current".
+    assert "Missing derivatives: 2" in after.stdout
+    assert "Impossible derivatives: 3" in after.stdout
 
 
 @pytest.mark.integration
@@ -561,7 +577,7 @@ def test_overwriting_a_source_marks_exactly_its_derivatives_stale(
     ``current``."""
     monkeypatch.chdir(temp_catalog_root)
     generate_result = runner.invoke(app, ["generate", "--all"])
-    assert generate_result.exit_code == 0, generate_result.output
+    assert generate_result.exit_code == 1, generate_result.output
 
     source_path = temp_catalog_root / "assets" / "purple_sea_urchin" / "sources" / "silhouette.png"
     _overwrite_with_a_different_valid_source_png(source_path)
@@ -610,7 +626,7 @@ def test_generate_stale_regenerates_only_stale_and_a_second_run_regenerates_noth
     nothing stale."""
     monkeypatch.chdir(temp_catalog_root)
     first = runner.invoke(app, ["generate", "--all"])
-    assert first.exit_code == 0, first.output
+    assert first.exit_code == 1, first.output
 
     source_path = temp_catalog_root / "assets" / "purple_sea_urchin" / "sources" / "silhouette.png"
     _overwrite_with_a_different_valid_source_png(source_path)
@@ -676,7 +692,7 @@ def test_recipe_parameter_change_marks_every_derivative_of_that_type_stale(
     identity hash)."""
     monkeypatch.chdir(temp_catalog_root)
     first = runner.invoke(app, ["generate", "--all"])
-    assert first.exit_code == 0, first.output
+    assert first.exit_code == 1, first.output
 
     original = recipe_module.RECIPES[DerivativeType.SILHOUETTE_SVG]
     changed = Recipe(
@@ -768,7 +784,7 @@ def test_force_regenerates_current_derivatives_without_rewriting_unchanged_bytes
     rewritten (bytes and mtime unchanged)."""
     monkeypatch.chdir(temp_catalog_root)
     first = runner.invoke(app, ["generate", "--all"])
-    assert first.exit_code == 0, first.output
+    assert first.exit_code == 1, first.output
 
     before: dict[Path, tuple[bytes, int]] = {}
     for derived_dir in sorted(temp_catalog_root.glob("assets/*/derived")):
@@ -778,7 +794,7 @@ def test_force_regenerates_current_derivatives_without_rewriting_unchanged_bytes
 
     forced = runner.invoke(app, ["generate", "--force", "--all"])
 
-    assert forced.exit_code == 0, forced.output
+    assert forced.exit_code == 1, forced.output
     for asset_id, filename in FIXTURE_OUTPUTS:
         assert f"{asset_id}\ttransparent_png\tgenerated\t{filename}" in forced.stdout
     for asset_id, filename in FIXTURE_SILHOUETTE_OUTPUTS:

@@ -142,26 +142,36 @@ class GenerationOutcome(StrEnum):
 class GenerationResult:
     """One reported line of a ``vpress generate`` run: which asset, which
     derivative type, what happened, and the filename (generated/current),
-    reason (impossible/failed) -- empty for ``no generator``."""
+    reason (impossible/failed) -- empty for ``no generator``.
+
+    ``source_file`` is the source that was (or would have been) read for
+    this derivative -- set whenever a source was selected, which is every
+    outcome except ``IMPOSSIBLE`` (no source qualifies at all -- see
+    :func:`~vectorpress.catalog.derivatives.select_source`) (issue #27,
+    §35: a failed derivative's stderr diagnostic names the source file the
+    same way it names the asset and type)."""
 
     asset_id: str
     derivative_type: DerivativeType
     outcome: GenerationOutcome
     detail: str
+    source_file: str | None = None
 
 
 class GeneratorError(Exception):
-    """A generator raised while producing one derivative (issue #24 review
-    fix round 1: e.g. a fully transparent silhouette source, or one made
-    only of specks below ``speckle_size``, leaves ``silhouette_svg`` with no
-    geometry to render).
+    """One derivative's generation failed -- the generator itself raised
+    (issue #24 review fix round 1: e.g. a fully transparent silhouette
+    source, or one made only of specks below ``speckle_size``, leaves
+    ``silhouette_svg`` with no geometry to render), or reading its source or
+    writing its output did (issue #27, §35: an undecodable source, or a
+    write that fails partway through).
 
-    Deliberately wraps only a failure from the generator call itself, never
-    from reading the source or writing the output: this is CONTEXT.md's
-    "a derivative that exists" case gone wrong at generation time, not the
-    "no acceptable source" case (``impossible``) -- §35's broader failure
-    handling (undecodable sources, cleanup) is a later slice's job, not
-    widened here.
+    Wraps every failure that can happen between reading the source and
+    writing the derivative -- the whole of :func:`_generate_one`'s body --
+    so :func:`generate_asset` catches exactly one exception type and one
+    failing derivative never stops generation for the rest of the asset or
+    catalog. This is CONTEXT.md's "a derivative that exists" case gone wrong
+    at generation time, not the "no acceptable source" case (``impossible``).
     """
 
 
@@ -173,33 +183,43 @@ def _generate_one(asset: Asset, recipe: Recipe, source: Source, asset_dir_path: 
     generator itself takes those bytes and never touches the filesystem
     (ADR 0006).
 
-    Raises :class:`GeneratorError` if the generator itself raises --
-    caught by :func:`generate_asset` so one failing derivative does not stop
+    Every step -- reading the source, running the generator, and writing
+    the result -- is wrapped in one :class:`GeneratorError` (issue #27,
+    §35): an undecodable source fails the same way a raising generator or a
+    failed write does, and in every case nothing is written for this
+    derivative (:func:`~vectorpress.catalog.provenance.write_derivative`
+    itself writes the output before the provenance record, so a failure
+    partway through a write leaves, at worst, an output file with no
+    provenance yet -- reported ``missing``, never ``current``, by
+    :func:`~vectorpress.catalog.provenance.derivative_currency`). Caught by
+    :func:`generate_asset` so one failing derivative does not stop
     generation for the rest of the asset or catalog.
     """
     assert recipe.generator is not None
     generator = get_generator(recipe.generator)
     assert generator is not None, f"recipe names an unregistered generator: {recipe.generator!r}"
 
-    source_bytes = read_source_bytes(asset_dir_path, source.file)
     try:
+        source_bytes = read_source_bytes(asset_dir_path, source.file)
         output = generator(source_bytes, recipe.parameters)
+        filename = derivative_filename(asset.display_name, recipe.derivative_type)
+
+        provenance = Provenance(
+            source_file=source.file,
+            source_hash=sha256_bytes(source_bytes),
+            derivative_type=recipe.derivative_type.value,
+            generator=recipe.generator,
+            parameters=dict(recipe.parameters),
+            recipe_hash=recipe_identity_hash(recipe),
+            generator_versions={"vectorpress": __version__, **output.library_versions},
+            output_file=filename,
+            output_hash=sha256_bytes(output.output_bytes),
+        )
+        write_derivative(
+            asset_dir_path / DERIVED_DIRNAME, filename, output.output_bytes, provenance
+        )
     except Exception as exc:
         raise GeneratorError(str(exc)) from exc
-    filename = derivative_filename(asset.display_name, recipe.derivative_type)
-
-    provenance = Provenance(
-        source_file=source.file,
-        source_hash=sha256_bytes(source_bytes),
-        derivative_type=recipe.derivative_type.value,
-        generator=recipe.generator,
-        parameters=dict(recipe.parameters),
-        recipe_hash=recipe_identity_hash(recipe),
-        generator_versions={"vectorpress": __version__, **output.library_versions},
-        output_file=filename,
-        output_hash=sha256_bytes(output.output_bytes),
-    )
-    write_derivative(asset_dir_path / DERIVED_DIRNAME, filename, output.output_bytes, provenance)
     return filename
 
 
@@ -230,12 +250,13 @@ def generate_asset(
     per :func:`~vectorpress.catalog.provenance.write_derivative`'s
     idempotence).
 
-    A generator that raises (issue #24 review fix round 1) is reported
-    ``failed`` with the exception's message, nothing is written for that
-    derivative, and the loop continues with the next derivative type --
-    one failing derivative never stops the rest of this asset, and (since
-    ``cli.app.generate`` calls this per asset) never stops the rest of
-    ``--all``/``--stale`` either.
+    A failure reading the source, running the generator, or writing the
+    result (issue #24 review fix round 1, widened by issue #27, §35) is
+    reported ``failed`` with the exception's message, nothing is written
+    for that derivative, and the loop continues with the next derivative
+    type -- one failing derivative never stops the rest of this asset, and
+    (since ``cli.app.generate`` calls this per asset) never stops the rest
+    of ``--all``/``--stale`` either.
     """
     results: list[GenerationResult] = []
     for status in asset_derivative_statuses(asset, asset_dir_path):
@@ -269,6 +290,7 @@ def generate_asset(
                 derivative_type=status.derivative_type,
                 outcome=outcome,
                 detail=detail,
+                source_file=status.source.file if status.source is not None else None,
             )
         )
     return results
