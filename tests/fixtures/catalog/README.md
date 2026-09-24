@@ -10,7 +10,8 @@ Rules:
 - Include subjects that deliberately trip each cut-file finding type (PRD 3, §9):
   `owl_limpet`/`giant_green_anemone` for disconnected fragments (issue #36, issue
   #37), `gumboot_chiton`/`bat_star`/`keyhole_limpet` for the three area-based kinds
-  (issue #39) -- see "Assets" below for which subject trips which kind.
+  (issue #39), `nudibranch`/`coralline_algae` for the two shape-based kinds (issue
+  #40) -- see "Assets" below for which subject trips which kind.
 - Never point the tool's tests at a real catalog.
 
 ## Layout
@@ -40,7 +41,7 @@ committed fixture never contains `derived/`. Later slices add `overrides/`
 
 ## Assets
 
-Nine tide-pool subjects from §30, each with valid metadata and one or more source
+Eleven tide-pool subjects from §30, each with valid metadata and one or more source
 images tagged with a role (§4.1, ADR 0003):
 
 - `ochre_sea_star` — `silhouette` (a solid blob), `lineart` (a plain placeholder), and
@@ -94,6 +95,35 @@ images tagged with a role (§4.1, ADR 0003):
   membership (issue #38), so no collection or product needs to reference this
   asset for the demonstration to work. Its `ecosystems` deliberately match
   neither fixture collection.
+- `nudibranch` — a `silhouette` source only, on its own larger (300x300) canvas:
+  the `narrow_feature` fixture (issue #40). Two round lobes -- a head and a tail
+  -- joined by a single straight neck, 7px tall: wide enough to survive
+  `cut_svg`'s own morphological-opening cleanup (about 0.06in at this fixture's
+  own scale) yet narrower than `validate.cut_file`'s own narrow-feature width
+  threshold (0.1in) -- about 0.09in measured once traced. Its cut file's
+  findings report holds exactly one finding: `narrow_feature`, located at the
+  neck. Its `ecosystems` deliberately match neither fixture collection.
+- `coralline_algae` — a `silhouette` source only, on its own larger (300x300)
+  canvas: the `excessive_complexity` fixture (issue #40; retuned in review fix
+  round 1, PR #46). A disk whose own radius wobbles sinusoidally around its
+  full perimeter -- 400 fine ripples, each one requiring potrace to fit its
+  own curve segments no matter how coarse `cut_svg`'s own `curve_tolerance`
+  is, so this shape's own node count (127) packs to about 13.4 nodes per inch
+  of its own perimeter at the catalog default -- above `validate.cut_file`'s
+  own excessive-complexity **density** threshold (11.0 nodes/in, the
+  size-aware measure §9.1 names), not the absolute node-count backstop (127
+  is nowhere near it). Every ripple's own amplitude is small relative to its
+  own tight spacing, so no local width anywhere on this outline drops below
+  the narrow-feature threshold. Its cut file's findings report holds exactly
+  one finding: `excessive_complexity`, nothing else, at the catalog default.
+  Its `ecosystems` deliberately match neither fixture collection.
+  (A first version of this fixture used a coarser, larger-amplitude,
+  lower-frequency ripple that tripped the node-count cap instead of density,
+  and a small dot/sliver piece elsewhere in this catalog could trip density
+  purely from having a tiny perimeter -- both fixed in review fix round 1:
+  density is now judged only above a minimum physical perimeter
+  (`excessive_complexity_min_perimeter_in`), and the cap is a generous
+  backstop, not the primary measure.)
 - `acorn_barnacle` — a `silhouette` source that is a **deliberately truncated PNG**
   (issue #27, §35): valid metadata, valid PNG signature and header, cut off partway
   through the image data. It loads without a metadata problem (source validation
@@ -114,15 +144,17 @@ background, not a solid-color square (issue #23): the transparent PNG generator'
 crop-to-content and hole-preserving behaviour need actual content to crop and an
 actual hole to preserve. `ochre_sea_star`, `purple_sea_urchin` and
 `giant_green_anemone` stay tiny (16x16); `owl_limpet`'s is 96x96 (issue #36), and
-`gumboot_chiton`/`bat_star`/`keyhole_limpet`/`turban_snail`'s are each 300x300
-(issue #39) -- large enough for `cut_svg`'s physical-unit cleanup thresholds,
-and `validate.cut_file`'s own validation thresholds, to mean something at the
-catalog's default 3-inch reference size. Every one of these four larger
-subjects' geometry was tuned empirically against the real `cut_svg.generate` +
+`gumboot_chiton`/`bat_star`/`keyhole_limpet`/`turban_snail`/`nudibranch`/
+`coralline_algae`'s are each 300x300 (issue #39, issue #40) -- large enough for
+`cut_svg`'s physical-unit cleanup thresholds, and `validate.cut_file`'s own
+validation thresholds, to mean something at the catalog's default 3-inch
+reference size. Every one of these six larger subjects' geometry was tuned
+empirically against the real `cut_svg.generate` +
 `validate.cut_file.validate_cut_file` pipeline (see
 `generate_source_pngs.py`'s own module docstring), not hand-derived, since a
-morphological opening's effect on a shape's surviving extent is not a simple,
-predictable subtraction. Regenerated deterministically with
+morphological opening's effect on a shape's surviving extent -- and how many
+curve segments potrace fits to an outline -- is not simple, predictable
+arithmetic. Regenerated deterministically with
 `uv run python tests/fixtures/catalog/generate_source_pngs.py`.
 
 `ochre_sea_star`'s `flatcolor.png` is the only flatcolor source in the fixture

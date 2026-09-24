@@ -26,10 +26,51 @@
     'result': 'needs_review',
     'thresholds': dict({
       'accidental_dot_max_dimension_in': 0.2,
+      'excessive_complexity_max_node_count': 300.0,
+      'excessive_complexity_max_nodes_per_in': 11.0,
+      'excessive_complexity_min_perimeter_in': 0.75,
+      'narrow_feature_min_width_in': 0.1,
       'small_hole_min_area_in2': 0.02,
       'tiny_isolated_shape_min_area_in2': 0.02,
     }),
     'validated_file': 'bat-star-cut.svg',
+  })
+# ---
+# name: test_findings_json_is_locked_by_snapshot[coralline_algae-coralline-algae-cut.svg]
+  dict({
+    'content_hash': 'c9e729d1088e93b96c4537130286c6d85e44898daf3e929e559f90cd23791acf',
+    'findings': list([
+      dict({
+        'classification': 'needs_review',
+        'kind': 'excessive_complexity',
+        'location': dict({
+          'max_x': 280.1764,
+          'max_y': 280.5131,
+          'min_x': 20.8288,
+          'min_y': 20.8236,
+        }),
+        'measured_value': 13.4014,
+        'message': 'excessive geometric complexity: path element 0, subpath 0 has 13.4014 nodes/in, above the 11.0 nodes/in threshold',
+        'path_reference': dict({
+          'element_index': 0,
+          'id': None,
+          'subpath_index': 0,
+        }),
+        'threshold': 11.0,
+      }),
+    ]),
+    'reference_size_in': 3.0,
+    'result': 'needs_review',
+    'thresholds': dict({
+      'accidental_dot_max_dimension_in': 0.2,
+      'excessive_complexity_max_node_count': 300.0,
+      'excessive_complexity_max_nodes_per_in': 11.0,
+      'excessive_complexity_min_perimeter_in': 0.75,
+      'narrow_feature_min_width_in': 0.1,
+      'small_hole_min_area_in2': 0.02,
+      'tiny_isolated_shape_min_area_in2': 0.02,
+    }),
+    'validated_file': 'coralline-algae-cut.svg',
   })
 # ---
 # name: test_findings_json_is_locked_by_snapshot[giant_green_anemone-giant-green-anemone-cut.svg]
@@ -59,6 +100,10 @@
     'result': 'needs_review',
     'thresholds': dict({
       'accidental_dot_max_dimension_in': 0.2,
+      'excessive_complexity_max_node_count': 300.0,
+      'excessive_complexity_max_nodes_per_in': 11.0,
+      'excessive_complexity_min_perimeter_in': 0.75,
+      'narrow_feature_min_width_in': 0.1,
       'small_hole_min_area_in2': 0.02,
       'tiny_isolated_shape_min_area_in2': 0.02,
     }),
@@ -92,6 +137,10 @@
     'result': 'needs_review',
     'thresholds': dict({
       'accidental_dot_max_dimension_in': 0.2,
+      'excessive_complexity_max_node_count': 300.0,
+      'excessive_complexity_max_nodes_per_in': 11.0,
+      'excessive_complexity_min_perimeter_in': 0.75,
+      'narrow_feature_min_width_in': 0.1,
       'small_hole_min_area_in2': 0.02,
       'tiny_isolated_shape_min_area_in2': 0.02,
     }),
@@ -125,10 +174,51 @@
     'result': 'needs_review',
     'thresholds': dict({
       'accidental_dot_max_dimension_in': 0.2,
+      'excessive_complexity_max_node_count': 300.0,
+      'excessive_complexity_max_nodes_per_in': 11.0,
+      'excessive_complexity_min_perimeter_in': 0.75,
+      'narrow_feature_min_width_in': 0.1,
       'small_hole_min_area_in2': 0.02,
       'tiny_isolated_shape_min_area_in2': 0.02,
     }),
     'validated_file': 'keyhole-limpet-cut.svg',
+  })
+# ---
+# name: test_findings_json_is_locked_by_snapshot[nudibranch-nudibranch-cut.svg]
+  dict({
+    'content_hash': '19b302fcd300549d6ec0a6046cb855bb107e4cefe52189c0979b0daf1140bdc1',
+    'findings': list([
+      dict({
+        'classification': 'needs_review',
+        'kind': 'narrow_feature',
+        'location': dict({
+          'max_x': 174.9315,
+          'max_y': 153.7995,
+          'min_x': 126.1223,
+          'min_y': 147.0494,
+        }),
+        'measured_value': 0.0875,
+        'message': 'narrow feature: path element 0, subpath 0 narrows to 0.0875in wide, below the 0.1in minimum feature width',
+        'path_reference': dict({
+          'element_index': 0,
+          'id': None,
+          'subpath_index': 0,
+        }),
+        'threshold': 0.1,
+      }),
+    ]),
+    'reference_size_in': 3.0,
+    'result': 'needs_review',
+    'thresholds': dict({
+      'accidental_dot_max_dimension_in': 0.2,
+      'excessive_complexity_max_node_count': 300.0,
+      'excessive_complexity_max_nodes_per_in': 11.0,
+      'excessive_complexity_min_perimeter_in': 0.75,
+      'narrow_feature_min_width_in': 0.1,
+      'small_hole_min_area_in2': 0.02,
+      'tiny_isolated_shape_min_area_in2': 0.02,
+    }),
+    'validated_file': 'nudibranch-cut.svg',
   })
 # ---
 # name: test_findings_json_is_locked_by_snapshot[ochre_sea_star-ochre-sea-star-cut.svg]
@@ -140,6 +230,10 @@
     'result': 'pass',
     'thresholds': dict({
       'accidental_dot_max_dimension_in': 0.2,
+      'excessive_complexity_max_node_count': 300.0,
+      'excessive_complexity_max_nodes_per_in': 11.0,
+      'excessive_complexity_min_perimeter_in': 0.75,
+      'narrow_feature_min_width_in': 0.1,
       'small_hole_min_area_in2': 0.02,
       'tiny_isolated_shape_min_area_in2': 0.02,
     }),
@@ -173,6 +267,10 @@
     'result': 'needs_review',
     'thresholds': dict({
       'accidental_dot_max_dimension_in': 0.2,
+      'excessive_complexity_max_node_count': 300.0,
+      'excessive_complexity_max_nodes_per_in': 11.0,
+      'excessive_complexity_min_perimeter_in': 0.75,
+      'narrow_feature_min_width_in': 0.1,
       'small_hole_min_area_in2': 0.02,
       'tiny_isolated_shape_min_area_in2': 0.02,
     }),
@@ -188,6 +286,10 @@
     'result': 'pass',
     'thresholds': dict({
       'accidental_dot_max_dimension_in': 0.2,
+      'excessive_complexity_max_node_count': 300.0,
+      'excessive_complexity_max_nodes_per_in': 11.0,
+      'excessive_complexity_min_perimeter_in': 0.75,
+      'narrow_feature_min_width_in': 0.1,
       'small_hole_min_area_in2': 0.02,
       'tiny_isolated_shape_min_area_in2': 0.02,
     }),
@@ -203,6 +305,10 @@
     'result': 'pass',
     'thresholds': dict({
       'accidental_dot_max_dimension_in': 0.2,
+      'excessive_complexity_max_node_count': 300.0,
+      'excessive_complexity_max_nodes_per_in': 11.0,
+      'excessive_complexity_min_perimeter_in': 0.75,
+      'narrow_feature_min_width_in': 0.1,
       'small_hole_min_area_in2': 0.02,
       'tiny_isolated_shape_min_area_in2': 0.02,
     }),
@@ -236,10 +342,51 @@
     'result': 'needs_review',
     'thresholds': dict({
       'accidental_dot_max_dimension_in': 0.2,
+      'excessive_complexity_max_node_count': 300.0,
+      'excessive_complexity_max_nodes_per_in': 11.0,
+      'excessive_complexity_min_perimeter_in': 0.75,
+      'narrow_feature_min_width_in': 0.1,
       'small_hole_min_area_in2': 0.02,
       'tiny_isolated_shape_min_area_in2': 0.02,
     }),
     'validated_file': 'bat-star-cut.svg',
+  })
+# ---
+# name: test_product_size_findings_json_is_locked_by_snapshot[coralline_algae-coralline-algae-cut.svg]
+  dict({
+    'content_hash': 'c9e729d1088e93b96c4537130286c6d85e44898daf3e929e559f90cd23791acf',
+    'findings': list([
+      dict({
+        'classification': 'needs_review',
+        'kind': 'excessive_complexity',
+        'location': dict({
+          'max_x': 280.1764,
+          'max_y': 280.5131,
+          'min_x': 20.8288,
+          'min_y': 20.8236,
+        }),
+        'measured_value': 40.2041,
+        'message': 'excessive geometric complexity: path element 0, subpath 0 has 40.2041 nodes/in, above the 11.0 nodes/in threshold',
+        'path_reference': dict({
+          'element_index': 0,
+          'id': None,
+          'subpath_index': 0,
+        }),
+        'threshold': 11.0,
+      }),
+    ]),
+    'reference_size_in': 1.0,
+    'result': 'needs_review',
+    'thresholds': dict({
+      'accidental_dot_max_dimension_in': 0.2,
+      'excessive_complexity_max_node_count': 300.0,
+      'excessive_complexity_max_nodes_per_in': 11.0,
+      'excessive_complexity_min_perimeter_in': 0.75,
+      'narrow_feature_min_width_in': 0.1,
+      'small_hole_min_area_in2': 0.02,
+      'tiny_isolated_shape_min_area_in2': 0.02,
+    }),
+    'validated_file': 'coralline-algae-cut.svg',
   })
 # ---
 # name: test_product_size_findings_json_is_locked_by_snapshot[giant_green_anemone-giant-green-anemone-cut.svg]
@@ -269,6 +416,10 @@
     'result': 'needs_review',
     'thresholds': dict({
       'accidental_dot_max_dimension_in': 0.2,
+      'excessive_complexity_max_node_count': 300.0,
+      'excessive_complexity_max_nodes_per_in': 11.0,
+      'excessive_complexity_min_perimeter_in': 0.75,
+      'narrow_feature_min_width_in': 0.1,
       'small_hole_min_area_in2': 0.02,
       'tiny_isolated_shape_min_area_in2': 0.02,
     }),
@@ -302,6 +453,10 @@
     'result': 'needs_review',
     'thresholds': dict({
       'accidental_dot_max_dimension_in': 0.2,
+      'excessive_complexity_max_node_count': 300.0,
+      'excessive_complexity_max_nodes_per_in': 11.0,
+      'excessive_complexity_min_perimeter_in': 0.75,
+      'narrow_feature_min_width_in': 0.1,
       'small_hole_min_area_in2': 0.02,
       'tiny_isolated_shape_min_area_in2': 0.02,
     }),
@@ -335,10 +490,51 @@
     'result': 'needs_review',
     'thresholds': dict({
       'accidental_dot_max_dimension_in': 0.2,
+      'excessive_complexity_max_node_count': 300.0,
+      'excessive_complexity_max_nodes_per_in': 11.0,
+      'excessive_complexity_min_perimeter_in': 0.75,
+      'narrow_feature_min_width_in': 0.1,
       'small_hole_min_area_in2': 0.02,
       'tiny_isolated_shape_min_area_in2': 0.02,
     }),
     'validated_file': 'keyhole-limpet-cut.svg',
+  })
+# ---
+# name: test_product_size_findings_json_is_locked_by_snapshot[nudibranch-nudibranch-cut.svg]
+  dict({
+    'content_hash': '19b302fcd300549d6ec0a6046cb855bb107e4cefe52189c0979b0daf1140bdc1',
+    'findings': list([
+      dict({
+        'classification': 'needs_review',
+        'kind': 'narrow_feature',
+        'location': dict({
+          'max_x': 175.4507,
+          'max_y': 153.7995,
+          'min_x': 125.6031,
+          'min_y': 147.5686,
+        }),
+        'measured_value': 0.025,
+        'message': 'narrow feature: path element 0, subpath 0 narrows to 0.025in wide, below the 0.1in minimum feature width',
+        'path_reference': dict({
+          'element_index': 0,
+          'id': None,
+          'subpath_index': 0,
+        }),
+        'threshold': 0.1,
+      }),
+    ]),
+    'reference_size_in': 1.0,
+    'result': 'needs_review',
+    'thresholds': dict({
+      'accidental_dot_max_dimension_in': 0.2,
+      'excessive_complexity_max_node_count': 300.0,
+      'excessive_complexity_max_nodes_per_in': 11.0,
+      'excessive_complexity_min_perimeter_in': 0.75,
+      'narrow_feature_min_width_in': 0.1,
+      'small_hole_min_area_in2': 0.02,
+      'tiny_isolated_shape_min_area_in2': 0.02,
+    }),
+    'validated_file': 'nudibranch-cut.svg',
   })
 # ---
 # name: test_product_size_findings_json_is_locked_by_snapshot[ochre_sea_star-ochre-sea-star-cut.svg]
@@ -350,6 +546,10 @@
     'result': 'pass',
     'thresholds': dict({
       'accidental_dot_max_dimension_in': 0.2,
+      'excessive_complexity_max_node_count': 300.0,
+      'excessive_complexity_max_nodes_per_in': 11.0,
+      'excessive_complexity_min_perimeter_in': 0.75,
+      'narrow_feature_min_width_in': 0.1,
       'small_hole_min_area_in2': 0.02,
       'tiny_isolated_shape_min_area_in2': 0.02,
     }),
@@ -383,6 +583,10 @@
     'result': 'needs_review',
     'thresholds': dict({
       'accidental_dot_max_dimension_in': 0.2,
+      'excessive_complexity_max_node_count': 300.0,
+      'excessive_complexity_max_nodes_per_in': 11.0,
+      'excessive_complexity_min_perimeter_in': 0.75,
+      'narrow_feature_min_width_in': 0.1,
       'small_hole_min_area_in2': 0.02,
       'tiny_isolated_shape_min_area_in2': 0.02,
     }),
@@ -398,6 +602,10 @@
     'result': 'pass',
     'thresholds': dict({
       'accidental_dot_max_dimension_in': 0.2,
+      'excessive_complexity_max_node_count': 300.0,
+      'excessive_complexity_max_nodes_per_in': 11.0,
+      'excessive_complexity_min_perimeter_in': 0.75,
+      'narrow_feature_min_width_in': 0.1,
       'small_hole_min_area_in2': 0.02,
       'tiny_isolated_shape_min_area_in2': 0.02,
     }),
@@ -431,6 +639,10 @@
     'result': 'needs_review',
     'thresholds': dict({
       'accidental_dot_max_dimension_in': 0.2,
+      'excessive_complexity_max_node_count': 300.0,
+      'excessive_complexity_max_nodes_per_in': 11.0,
+      'excessive_complexity_min_perimeter_in': 0.75,
+      'narrow_feature_min_width_in': 0.1,
       'small_hole_min_area_in2': 0.02,
       'tiny_isolated_shape_min_area_in2': 0.02,
     }),
