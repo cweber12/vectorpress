@@ -204,19 +204,23 @@ def test_write_derivative_rewrites_provenance_when_the_payload_differs(tmp_path:
     """A provenance record that differs -- even only in
     ``generator_versions``, e.g. a library upgrade -- is still written: the
     idempotence check compares the whole serialized payload, not just the
-    hashes it is built from."""
+    hashes it is built from.
+
+    Asserted through content, not mtime: on some filesystems two writes this
+    close together can land in the same mtime tick, so an unchanged mtime
+    would not reliably distinguish "rewritten with new content" from "write
+    skipped" -- the content itself does that unambiguously.
+    """
     output_bytes = b"fake png bytes"
     provenance = _provenance(output_hash=sha256_bytes(output_bytes))
     write_derivative(tmp_path, provenance.output_file, output_bytes, provenance)
     record_path = provenance_path(tmp_path, provenance.output_file)
-    mtime_before = record_path.stat().st_mtime_ns
 
     upgraded = replace(
         provenance, generator_versions={**provenance.generator_versions, "Pillow": "99.0.0"}
     )
     write_derivative(tmp_path, provenance.output_file, output_bytes, upgraded)
 
-    assert record_path.stat().st_mtime_ns != mtime_before
     assert json.loads(record_path.read_text(encoding="utf-8"))["generator_versions"]["Pillow"] == (
         "99.0.0"
     )

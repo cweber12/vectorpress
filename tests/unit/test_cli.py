@@ -13,15 +13,19 @@ runner = CliRunner()
 FIXTURE_CATALOG_ROOT = Path(__file__).parents[1] / "fixtures" / "catalog"
 
 #: Rich (via typer's usage-error rendering) wraps a long message across
-#: several lines inside a bordered panel, box-drawing characters and all.
-#: Stripping those characters and collapsing whitespace before asserting on
-#: the message text makes the check robust to exactly where the wrap falls
-#: (issue #26 review fix round 1).
+#: several lines inside a bordered panel, box-drawing characters and all,
+#: and -- on a runner that detects color support, e.g. CI (issue #26 review
+#: fix round 2: local runs here are uncolored, so this only showed up on
+#: CI) -- wraps individual words in ANSI SGR escape sequences too. Stripping
+#: both, then collapsing whitespace, before asserting on the message text
+#: makes the check robust to exactly where the wrap falls and to whether
+#: the runner colors its output (issue #26 review fix round 1, round 2).
+_ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
 _BOX_DRAWING_RE = re.compile(r"[─-╿]")
 
 
 def _normalized_output(output: str) -> str:
-    return " ".join(_BOX_DRAWING_RE.sub(" ", output).split())
+    return " ".join(_BOX_DRAWING_RE.sub(" ", _ANSI_RE.sub("", output)).split())
 
 
 def test_version_flag_prints_version() -> None:
