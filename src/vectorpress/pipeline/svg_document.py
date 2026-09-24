@@ -12,7 +12,11 @@ module writes already satisfies §8 by construction --
 - no empty groups (this module never writes a ``<g>`` at all)
 - root ``viewBox`` tight to the geometry's own bounding box, so nothing is
   ever outside it and proportions hold (``width``/``height`` match the
-  ``viewBox`` size exactly, a 1:1 mapping)
+  ``viewBox`` size exactly, a 1:1 mapping) -- computed from each Bézier
+  curve's true extrema, not its control polygon (a cubic Bézier lies inside
+  its control points' convex hull, but a control point is not generally on
+  the curve itself, so using control points directly overshoots the actual
+  bounds; review fix round 1, issue #24)
 - no invisible elements: the one path this module writes always has a
   concrete fill and ``stroke="none"``, and degenerate (zero-area) subpaths
   are dropped before the bounding box is even computed
@@ -22,6 +26,7 @@ a later derivative type (``flatcolor_svg``) has one place to call for the
 same guarantees instead of re-deriving them (:func:`render_svg`).
 """
 
+import math
 from collections.abc import Sequence
 from dataclasses import dataclass
 
@@ -62,20 +67,77 @@ class Subpath:
     segments: tuple[Segment, ...]
 
 
-def _subpath_points(subpath: Subpath) -> list[Point]:
-    """Every point (start, end, and Bézier control points) a subpath
-    touches -- enough to compute a bounding box that is guaranteed to
-    contain the rendered geometry (a Bézier curve never leaves its control
-    polygon's convex hull)."""
+def _quadratic_roots_in_unit_interval(a: float, b: float, c: float) -> list[float]:
+    """Real roots of ``a*t**2 + b*t + c = 0`` strictly inside ``(0, 1)``
+    (the open interval: ``t=0``/``t=1`` are a curve's own endpoints, always
+    included in a bbox separately, so a root landing exactly on one adds
+    nothing new)."""
+    if abs(a) < 1e-12:
+        if abs(b) < 1e-12:
+            return []
+        t = -c / b
+        return [t] if 0.0 < t < 1.0 else []
+
+    discriminant = b * b - 4 * a * c
+    if discriminant < 0:
+        return []
+    sqrt_discriminant = math.sqrt(discriminant)
+    roots = [(-b + sqrt_discriminant) / (2 * a), (-b - sqrt_discriminant) / (2 * a)]
+    return [t for t in roots if 0.0 < t < 1.0]
+
+
+def _bezier_axis_extrema_ts(p0: float, p1: float, p2: float, p3: float) -> list[float]:
+    """The parameter values in ``(0, 1)`` where one axis of a cubic Bézier
+    curve (control coordinates ``p0..p3`` on that axis) has a local
+    extremum: the roots of its derivative, itself a quadratic in ``t``."""
+    d0 = p1 - p0
+    d1 = p2 - p1
+    d2 = p3 - p2
+    a = d0 - 2 * d1 + d2
+    b = 2 * (d1 - d0)
+    c = d0
+    return _quadratic_roots_in_unit_interval(a, b, c)
+
+
+def _bezier_point(t: float, p0: Point, p1: Point, p2: Point, p3: Point) -> Point:
+    """The cubic Bézier curve's own position at ``t`` -- not a control
+    point, which generally lies off the curve entirely."""
+    mt = 1.0 - t
+    x = mt**3 * p0[0] + 3 * mt**2 * t * p1[0] + 3 * mt * t**2 * p2[0] + t**3 * p3[0]
+    y = mt**3 * p0[1] + 3 * mt**2 * t * p1[1] + 3 * mt * t**2 * p2[1] + t**3 * p3[1]
+    return (x, y)
+
+
+def _curve_bbox_points(start: Point, segment: CurveSegment) -> list[Point]:
+    """Every point needed for a tight bounding box of one cubic Bézier
+    segment: both endpoints, plus the curve's actual position at each
+    axis's extremum parameter (review fix round 1, issue #24: a control
+    point like ``c1``/``c2`` is generally not on the curve at all, so using
+    control points directly for the bbox overshoots the true bounds)."""
+    p0, p1, p2, p3 = start, segment.c1, segment.c2, segment.end
+    points = [start, segment.end]
+    for t in _bezier_axis_extrema_ts(p0[0], p1[0], p2[0], p3[0]):
+        points.append(_bezier_point(t, p0, p1, p2, p3))
+    for t in _bezier_axis_extrema_ts(p0[1], p1[1], p2[1], p3[1]):
+        points.append(_bezier_point(t, p0, p1, p2, p3))
+    return points
+
+
+def _subpath_bbox_points(subpath: Subpath) -> list[Point]:
+    """Every point needed for a tight bounding box of a subpath: corner
+    vertices and endpoints directly (straight lines have no interior
+    extrema beyond their own endpoints), and each Bézier segment's true
+    curve extrema (:func:`_curve_bbox_points`) -- never a raw control
+    point on its own."""
     points = [subpath.start]
+    pos = subpath.start
     for segment in subpath.segments:
         if isinstance(segment, CornerSegment):
             points.append(segment.through)
             points.append(segment.end)
         else:
-            points.append(segment.c1)
-            points.append(segment.c2)
-            points.append(segment.end)
+            points.extend(_curve_bbox_points(pos, segment))
+        pos = segment.end
     return points
 
 
@@ -93,15 +155,16 @@ def _is_degenerate(subpath: Subpath) -> bool:
     ``speckle_size``) already discards small specks by pixel area; this is
     a cheap, independent backstop against a genuinely degenerate subpath
     slipping through."""
-    min_x, min_y, max_x, max_y = _bbox(_subpath_points(subpath))
+    min_x, min_y, max_x, max_y = _bbox(_subpath_bbox_points(subpath))
     return max_x <= min_x or max_y <= min_y
 
 
 def tight_viewbox(subpaths: Sequence[Subpath]) -> tuple[float, float, float, float]:
-    """``(min_x, min_y, width, height)`` tight to every subpath's geometry
-    (§8: "use clean document bounds") -- the smallest box containing all of
-    it, not the tracer's source canvas size."""
-    min_x, min_y, max_x, max_y = _bbox([p for sp in subpaths for p in _subpath_points(sp)])
+    """``(min_x, min_y, width, height)`` tight to every subpath's true
+    curve geometry (§8: "use clean document bounds") -- the smallest box
+    containing all of it, not the tracer's source canvas size and not the
+    (looser) control-point polygon."""
+    min_x, min_y, max_x, max_y = _bbox([p for sp in subpaths for p in _subpath_bbox_points(sp)])
     return min_x, min_y, max_x - min_x, max_y - min_y
 
 

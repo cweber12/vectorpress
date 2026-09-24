@@ -16,6 +16,7 @@ assertions and the fixture-catalog snapshots describe the same geometry.
 import re
 from io import BytesIO
 
+import pytest
 from PIL import Image
 
 from vectorpress.pipeline.silhouette_svg import generate
@@ -114,11 +115,14 @@ def _flatten_cubic(
 _COMMAND_RE = re.compile(r"([MLCZ])([^MLCZ]*)")
 
 
-def _parse_polygons(path_d: str) -> list[list[tuple[float, float]]]:
+def _parse_polygons(path_d: str, *, curve_steps: int = 24) -> list[list[tuple[float, float]]]:
     """Flatten a ``d`` string of only ``M``/``L``/``C``/``Z`` absolute
     commands (what :mod:`vectorpress.pipeline.svg_document` ever writes)
     into one polygon per subpath, Bézier curves sampled into line segments,
-    for point-in-fill testing below."""
+    for point-in-fill testing below. ``curve_steps`` controls sampling
+    resolution: the low default is plenty for point-in-fill topology, but
+    the tight-viewBox check below asks for many more steps so its "sampled
+    curve" comparison is accurate to well under its own tolerance."""
     polygons: list[list[tuple[float, float]]] = []
     current: list[tuple[float, float]] = []
     pos = (0.0, 0.0)
@@ -138,7 +142,7 @@ def _parse_polygons(path_d: str) -> list[list[tuple[float, float]]]:
                 (numbers[2], numbers[3]),
                 (numbers[4], numbers[5]),
             )
-            current.extend(_flatten_cubic(pos, p1, p2, p3))
+            current.extend(_flatten_cubic(pos, p1, p2, p3, steps=curve_steps))
             pos = p3
         elif command == "Z":
             pass
@@ -245,6 +249,35 @@ def test_view_box_is_tight_to_the_geometry_not_the_full_source_canvas() -> None:
     _min_x, _min_y, width, height = _view_box(result.output_bytes)
     assert width < SIZE
     assert height < SIZE
+
+
+def test_view_box_matches_the_curve_geometry_not_its_control_points() -> None:
+    """Review fix round 1 (issue #24): the viewBox must be tight to the
+    *curve* potrace actually draws, not to its (generally looser) Bézier
+    control points -- a control point is usually not a point the curve
+    itself ever passes through. Sampling the emitted path data very
+    finely (2000 steps per curve segment) approximates the curve's true
+    analytic bounds far more closely than this test's own 1e-4 tolerance,
+    so this is a black-box check of ``svg_document``'s bbox math, not a
+    restatement of it."""
+    result = generate(_blob_bytes(), {})
+
+    min_x, min_y, width, height = _view_box(result.output_bytes)
+    max_x, max_y = min_x + width, min_y + height
+
+    sampled_points = [
+        point
+        for polygon in _parse_polygons(_path_d(result.output_bytes), curve_steps=2000)
+        for point in polygon
+    ]
+    sampled_xs = [x for x, _y in sampled_points]
+    sampled_ys = [y for _x, y in sampled_points]
+
+    tolerance = 1e-4
+    assert min(sampled_xs) == pytest.approx(min_x, abs=tolerance)
+    assert max(sampled_xs) == pytest.approx(max_x, abs=tolerance)
+    assert min(sampled_ys) == pytest.approx(min_y, abs=tolerance)
+    assert max(sampled_ys) == pytest.approx(max_y, abs=tolerance)
 
 
 def test_nothing_is_outside_the_view_box() -> None:
