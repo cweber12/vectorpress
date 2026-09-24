@@ -5,6 +5,7 @@ catalog: this module's job is the generator's pixel behaviour, not catalog
 wiring (that is ``tests/integration/test_generate.py``'s job).
 """
 
+import struct
 from io import BytesIO
 from pathlib import Path
 
@@ -101,7 +102,12 @@ def test_generation_is_byte_deterministic(tmp_path: Path) -> None:
     assert first.output_bytes == second.output_bytes
 
 
-def test_reports_the_pillow_version_it_used(tmp_path: Path) -> None:
+def test_reports_the_pillow_and_zlib_versions_it_used(tmp_path: Path) -> None:
+    """Pillow decodes and crops; the encoder is our own, over the stdlib
+    ``zlib`` (fix round 1) -- provenance's generator_versions must name both,
+    since both actually produced the output bytes."""
+    import zlib
+
     import PIL
 
     source_path = tmp_path / "source.png"
@@ -109,4 +115,29 @@ def test_reports_the_pillow_version_it_used(tmp_path: Path) -> None:
 
     result = generate(source_path, {})
 
-    assert result.library_versions == {"Pillow": PIL.__version__}
+    assert result.library_versions == {"Pillow": PIL.__version__, "zlib": zlib.ZLIB_VERSION}
+
+
+def _chunk_types(png_bytes: bytes) -> list[bytes]:
+    """Every chunk type tag in a PNG, in order, by walking its length-
+    prefixed chunk stream (a minimal, test-only PNG chunk walker)."""
+    types: list[bytes] = []
+    offset = 8  # skip the 8-byte PNG signature
+    while offset < len(png_bytes):
+        (length,) = struct.unpack(">I", png_bytes[offset : offset + 4])
+        chunk_type = png_bytes[offset + 4 : offset + 8]
+        types.append(chunk_type)
+        offset += 4 + 4 + length + 4  # length + type + data + CRC
+    return types
+
+
+def test_writes_no_ancillary_chunks(tmp_path: Path) -> None:
+    """§6.1, §20's "predictable naming" cousin for bytes: only the three
+    critical chunks every PNG needs, no tEXt/tIME/pHYs/iCCP carried over
+    from the source or added by the encoder."""
+    source_path = tmp_path / "source.png"
+    _write_source(source_path, [[OPAQUE, OPAQUE], [OPAQUE, OPAQUE]])
+
+    result = generate(source_path, {})
+
+    assert _chunk_types(result.output_bytes) == [b"IHDR", b"IDAT", b"IEND"]
