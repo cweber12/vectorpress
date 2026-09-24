@@ -16,14 +16,13 @@ an override's bytes exactly the same way, ADR 0007).
 """
 
 import json
-import os
-import tempfile
 from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
 from typing import cast
 
+from vectorpress.catalog.atomic_write import atomic_write_bytes
 from vectorpress.catalog.provenance import sha256_bytes
 from vectorpress.domain.finding import (
     BoundingBox,
@@ -226,25 +225,6 @@ def _report_payload(report: FindingsReport) -> bytes:
     return json.dumps(payload, sort_keys=True, indent=2).encode("utf-8")
 
 
-def _atomic_write_bytes(path: Path, data: bytes) -> None:
-    """Write ``data`` to ``path`` without ever leaving a half-written file
-    observable (§35) -- a self-contained copy of
-    :mod:`vectorpress.catalog.provenance`'s own private helper, matching
-    this codebase's existing convention of duplicating a small boundary
-    helper into each module that needs it rather than importing another
-    module's private symbol (e.g. ``pipeline.silhouette_svg`` /
-    ``pipeline.flatcolor_svg``'s own ``_ink_mask`` copies)."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp_name = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")
-    try:
-        with os.fdopen(fd, "wb") as tmp_file:
-            tmp_file.write(data)
-        Path(tmp_name).replace(path)
-    except BaseException:
-        Path(tmp_name).unlink(missing_ok=True)
-        raise
-
-
 def read_findings_report(
     derived_dir: Path, validated_filename: str, *, at_size: float | None = None
 ) -> FindingsReport | None:
@@ -283,7 +263,7 @@ def write_findings_report(
     path = findings_path(derived_dir, report.validated_file, at_size=at_size)
     payload = _report_payload(report)
     if not (path.is_file() and path.read_bytes() == payload):
-        _atomic_write_bytes(path, payload)
+        atomic_write_bytes(path, payload)
 
 
 class FindingsCurrencyState(StrEnum):

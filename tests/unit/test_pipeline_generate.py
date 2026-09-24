@@ -552,7 +552,7 @@ def test_generate_asset_leaves_no_temp_file_when_the_real_write_fails_to_rename(
     ``catalog.provenance.write_derivative`` entirely (it is replaced with a
     fake), so it never exercises that module's own atomic-write cleanup.
     This one drives a write failure through the *real* ``write_derivative``
-    -- ``_atomic_write_bytes``'s rename step (``Path.replace``) is made to
+    -- ``catalog.atomic_write.atomic_write_bytes``'s rename step (``Path.replace``) is made to
     raise, so its own ``except BaseException: ... unlink(missing_ok=True);
     raise`` cleanup runs for real, not a stand-in for it.
 
