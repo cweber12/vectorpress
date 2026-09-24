@@ -22,13 +22,22 @@ def test_flatcolor_svg_accepts_only_flatcolor() -> None:
     assert recipe.accepted_roles == ("flatcolor",)
 
 
-def test_only_the_three_initial_derivative_types_have_a_recipe() -> None:
-    """The other four derivative types (cut_svg, outline_svg,
-    detailed_mono_svg, layered_svg) are PRD 3 / PRD 10 work and have no
-    recipe yet (issue #22's "What to build")."""
+def test_cut_svg_accepts_only_silhouette() -> None:
+    """Issue #36: built from the silhouette role, not detailed art (ADR
+    0003)."""
+    recipe = RECIPES[DerivativeType.CUT_SVG]
+
+    assert recipe.accepted_roles == ("silhouette",)
+
+
+def test_only_the_four_landed_derivative_types_have_a_recipe() -> None:
+    """The other three derivative types (outline_svg, detailed_mono_svg,
+    layered_svg) are PRD 3's remaining slices / PRD 10 work and have no
+    recipe yet (issue #22's "What to build", issue #36)."""
     assert set(RECIPES) == {
         DerivativeType.TRANSPARENT_PNG,
         DerivativeType.SILHOUETTE_SVG,
+        DerivativeType.CUT_SVG,
         DerivativeType.FLATCOLOR_SVG,
     }
 
@@ -41,7 +50,7 @@ def test_recipe_for_returns_the_recipe_for_a_known_type() -> None:
 
 
 def test_recipe_for_returns_none_for_a_real_type_with_no_recipe_yet() -> None:
-    assert recipe_for("cut_svg") is None
+    assert recipe_for("outline_svg") is None
 
 
 def test_recipe_for_returns_none_for_a_name_that_is_not_a_derivative_type() -> None:
@@ -87,3 +96,25 @@ def test_flatcolor_svg_has_a_landed_generator_with_its_parameters() -> None:
         "max_colors": 16,
         "min_color_share": 0.01,
     }
+
+
+def test_cut_svg_has_a_landed_generator_with_its_physical_cleanup_parameters() -> None:
+    """Issue #36: the cut-file SVG generator, with its physical (not pixel)
+    cleanup thresholds -- island area, hole area, opening width -- plus its
+    own alpha threshold and a coarser curve tolerance than
+    ``silhouette_svg``'s, all part of the recipe identity (ADR 0004, §9.1).
+    ``reference_size_in`` is deliberately absent here: it is a catalog-level
+    setting merged in at generation time as an effective parameter
+    (:func:`vectorpress.pipeline.generate._effective_parameters`), not part
+    of this static declaration."""
+    recipe = RECIPES[DerivativeType.CUT_SVG]
+
+    assert recipe.generator == "cut_svg"
+    assert recipe.parameters == {
+        "alpha_threshold": 127,
+        "island_min_area_in2": 0.01,
+        "hole_min_area_in2": 0.01,
+        "opening_width_in": 0.06,
+        "curve_tolerance": 0.5,
+    }
+    assert "reference_size_in" not in recipe.parameters

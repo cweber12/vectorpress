@@ -1,0 +1,38 @@
+# Hand-authored asset metadata (ADR 0005). The asset ID is this folder's name.
+#
+# The cut_svg cleanup fixture (issue #36, §30): its silhouette.png is a
+# larger, purpose-built source (see
+# tests/fixtures/catalog/generate_source_pngs.py) carrying exactly one
+# noise feature of each kind cut_svg's deterministic cleanup removes -- a
+# speck below the island threshold, a pinhole below the hole threshold, a
+# hairline spur narrower than the opening width -- plus one detached piece
+# large enough to survive, proving no automatic bridging (ADR 0007).
+#
+# ecosystems deliberately match no rule-based fixture collection: neither
+# "Kelp forest" (kelp_forest_ecosystem's rule) nor pacific_coast_tide_pool
+# (an explicit, hand-picked asset list this asset was never added to).
+
+common_name = "Owl limpet"
+display_name = "Owl Limpet"
+scientific_name = "Lottia gigantea"
+description = """
+A large limpet found on exposed rocky shores in the mid intertidal, grazing
+a visible "garden" territory of algae that it defends from other grazers.
+"""
+subject_category = "Mollusk"
+tags = ["limpet", "tide pool", "rocky intertidal"]
+regions = ["California", "Oregon", "Pacific Coast"]
+ecosystems = ["Rocky intertidal", "Exposed shore"]
+taxonomic_group = "Mollusk"
+product_use_categories = ["apparel", "stickers", "wall art"]
+notes = "Silhouette source purpose-built to exercise cut_svg cleanup (issue #36): a speck, a pinhole, a hairline spur, and a surviving detached piece."
+
+rights_status = "original_artwork"
+licensing_notes = "Original illustration commissioned for this catalog; no external license required."
+
+accuracy_status = "not_reviewed"
+
+# Source images: file is relative to this asset's sources/ directory (ADR 0003).
+[[sources]]
+role = "silhouette"
+file = "silhouette.png"

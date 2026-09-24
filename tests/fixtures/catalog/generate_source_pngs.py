@@ -212,6 +212,92 @@ TRUNCATED_SOURCE_IMAGES: list[tuple[str, str, str, Grid, Rgba, int]] = [
     ),
 ]
 
+# --- owl_limpet: the cut_svg cleanup fixture (issue #36) --------------------------
+#
+# 16x16 is too coarse for cut_svg's physical thresholds to mean anything (a
+# single pixel is already a large fraction of the whole canvas), so this
+# subject gets its own larger canvas -- big enough that a "noise" feature
+# a few pixels across is convincingly smaller than the catalog's 3-inch
+# reference size would make it look, and a "real" detached piece is
+# convincingly bigger.
+CUT_FILE_FIXTURE_SIZE = 96
+
+
+def _owl_limpet_silhouette_with_cleanup_noise(size: int) -> Grid:
+    """A silhouette carrying exactly one noise feature of each kind
+    ``cut_svg``'s deterministic cleanup removes (issue #36 acceptance
+    criterion 3), plus one piece large enough to survive -- so a test can
+    show the cut file drops the first three while ``silhouette_svg`` (no
+    cleanup at all) keeps them, and that the surviving piece stays its own
+    disconnected subpath (ADR 0007: "no automatic bridging or joining").
+
+    At this fixture's size, the recipe's default parameters
+    (``island_min_area_in2``/``hole_min_area_in2`` 0.01, ``opening_width_in``
+    0.06) and the catalog's default 3-inch reference size resolve to
+    roughly 31 pixels per inch (the ink mask's own bounding box is 93px on
+    its longest side) -- an island/hole threshold of about 9.6px^2 and an
+    opening radius of 1px:
+
+    - a main body (a solid disk) big enough to anchor the piece's overall
+      bounding box and survive the opening untouched
+    - a **speck**: a 2x2 (4px^2) island nowhere near either piece -- below
+      the island threshold, so it disappears
+    - a **pinhole**: a 2x2 (4px^2) hole carved out of the main body's own
+      interior -- below the hole threshold, so it gets filled in
+    - a **hairline spur**: a 1px-tall, 7px-long line off the main body's
+      edge -- narrower than the opening's width, so it gets erased, while
+      the main body itself (far wider than 2px) survives the same opening
+      essentially unchanged
+    - a **detached piece**: a second, smaller solid disk, positioned so nothing
+      above ever touches it -- its own area (over 250px^2) clears the
+      island threshold by more than an order of magnitude, so it survives
+      as its own separate subpath, never bridged to the main body
+    """
+
+    def _blob(cx: float, cy: float, radius: float) -> Grid:
+        return [
+            [(x - cx) ** 2 + (y - cy) ** 2 <= radius**2 for x in range(size)] for y in range(size)
+        ]
+
+    main_body = _blob(cx=34, cy=48, radius=33)
+    detached_piece = _blob(cx=84, cy=48, radius=9)
+
+    speck_cells = {(70, 20), (71, 20), (70, 21), (71, 21)}
+    pinhole_cells = {(33, 47), (34, 47), (33, 48), (34, 48)}
+    # Stops at x=73: the detached piece's own leftmost ink pixel (at y=48)
+    # is x=75, so the spur never touches it -- a bridge here would silently
+    # turn "two pieces" into "one", defeating the fixture's own point.
+    spur_cells = {(x, 48) for x in range(67, 74)}
+
+    grid: Grid = []
+    for y in range(size):
+        row: list[bool] = []
+        for x in range(size):
+            ink = main_body[y][x] or detached_piece[y][x]
+            if (x, y) in speck_cells or (x, y) in spur_cells:
+                ink = True
+            if (x, y) in pinhole_cells:
+                ink = False
+            row.append(ink)
+        grid.append(row)
+    return grid
+
+
+# (asset ID, filename, role, canvas size, mask, RGBA fill color): owl_limpet's
+# own, larger silhouette source -- a distinct tuple shape from
+# SHAPED_SOURCE_IMAGES above (which hardcodes the shared 16x16 ``SIZE``)
+# since this one needs its own, bigger canvas.
+CUT_FILE_FIXTURE_SOURCE_IMAGES: list[tuple[str, str, str, int, Grid, Rgba]] = [
+    (
+        "owl_limpet",
+        "silhouette.png",
+        "silhouette",
+        CUT_FILE_FIXTURE_SIZE,
+        _owl_limpet_silhouette_with_cleanup_noise(CUT_FILE_FIXTURE_SIZE),
+        (110, 90, 60, 255),
+    ),
+]
+
 # (filename under the catalog root, RGBA fill color). The placeholder brand
 # mark that tests/fixtures/catalog/brand.toml's mark_file points at (issue #3).
 MARK_IMAGE = ("mark.png", (28, 74, 122, 255))
@@ -245,6 +331,13 @@ def main() -> None:
         out_path = out_dir / filename
         out_path.write_bytes(make_shaped_png(SIZE, mask, rgba)[:truncate_to])
         print(f"wrote {out_path} (truncated to {truncate_to} bytes)")
+
+    for asset_id, filename, _role, size, mask, rgba in CUT_FILE_FIXTURE_SOURCE_IMAGES:
+        out_dir = FIXTURE_ASSETS_DIR / asset_id / "sources"
+        out_dir.mkdir(parents=True, exist_ok=True)
+        out_path = out_dir / filename
+        out_path.write_bytes(make_shaped_png(size, mask, rgba))
+        print(f"wrote {out_path}")
 
     mark_filename, mark_rgba = MARK_IMAGE
     mark_path = FIXTURE_CATALOG_ROOT / mark_filename

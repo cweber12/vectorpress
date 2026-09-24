@@ -42,6 +42,13 @@ def test_derivative_filename_uses_the_flatcolor_svg_suffix() -> None:
     assert filename == "purple-sea-urchin-color.svg"
 
 
+def test_derivative_filename_uses_the_cut_svg_suffix() -> None:
+    """§20, issue #36: the cut-file SVG's customer-facing filename."""
+    filename = derivative_filename("Purple Sea Urchin", DerivativeType.CUT_SVG)
+
+    assert filename == "purple-sea-urchin-cut.svg"
+
+
 def test_derivative_filename_raises_for_a_type_with_no_suffix_yet() -> None:
     with pytest.raises(KeyError):
-        derivative_filename("Purple Sea Urchin", DerivativeType.CUT_SVG)
+        derivative_filename("Purple Sea Urchin", DerivativeType.OUTLINE_SVG)

@@ -30,7 +30,7 @@ runner = CliRunner()
 
 FIXTURE_CATALOG_ROOT = Path(__file__).parents[1] / "fixtures" / "catalog"
 
-FIXTURE_ASSET_IDS = ["ochre_sea_star", "purple_sea_urchin", "giant_green_anemone"]
+FIXTURE_ASSET_IDS = ["ochre_sea_star", "purple_sea_urchin", "giant_green_anemone", "owl_limpet"]
 
 
 def _hash_all_sources(root: Path) -> dict[Path, str]:

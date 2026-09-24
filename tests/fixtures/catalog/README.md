@@ -37,13 +37,25 @@ committed fixture never contains `derived/`. Later slices add `overrides/`
 
 ## Assets
 
-Four tide-pool subjects from §30, each with valid metadata and one or more source
+Five tide-pool subjects from §30, each with valid metadata and one or more source
 images tagged with a role (§4.1, ADR 0003):
 
 - `ochre_sea_star` — `silhouette` (a solid blob), `lineart` (a plain placeholder), and
   `flatcolor` (three concentric rings plus a detached island, four flat colors) sources
 - `purple_sea_urchin` — a `silhouette` source (a ring: a solid shape with a hole)
 - `giant_green_anemone` — a `silhouette` source (a blob plus a detached island)
+- `owl_limpet` — a `silhouette` source only, on its own larger (96x96, not the shared
+  16x16) canvas: the `cut_svg` cleanup fixture (issue #36). It carries exactly one
+  noise feature of each kind `cut_svg`'s deterministic cleanup removes -- a speck
+  below the island-area threshold, a pinhole below the hole-area threshold, a
+  hairline spur narrower than the opening width -- plus one detached piece large
+  enough to survive, so a test can show the cut file drops the first three while
+  `silhouette_svg` (no cleanup at all) keeps them, and that the surviving piece
+  stays its own disconnected subpath, never bridged to the main body (ADR 0007).
+  Its `ecosystems` deliberately match neither fixture collection, the same as
+  `acorn_barnacle` below. See `generate_source_pngs.py`'s
+  `_owl_limpet_silhouette_with_cleanup_noise` for the exact geometry and the
+  pixels-per-inch arithmetic behind it.
 - `acorn_barnacle` — a `silhouette` source that is a **deliberately truncated PNG**
   (issue #27, §35): valid metadata, valid PNG signature and header, cut off partway
   through the image data. It loads without a metadata problem (source validation
@@ -62,7 +74,10 @@ images tagged with a role (§4.1, ADR 0003):
 Populated by PRD 1. Each `silhouette.png` is a real shape on a transparent
 background, not a solid-color square (issue #23): the transparent PNG generator's
 crop-to-content and hole-preserving behaviour need actual content to crop and an
-actual hole to preserve. Still tiny (16x16), and regenerated deterministically with
+actual hole to preserve. Every one but `owl_limpet`'s is still tiny (16x16);
+`owl_limpet`'s is 96x96 (issue #36), large enough for `cut_svg`'s physical-unit
+cleanup thresholds to mean something at the catalog's default 3-inch reference
+size. Regenerated deterministically with
 `uv run python tests/fixtures/catalog/generate_source_pngs.py`.
 
 `ochre_sea_star`'s `flatcolor.png` is the only flatcolor source in the fixture

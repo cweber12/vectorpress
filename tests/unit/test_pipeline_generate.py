@@ -16,6 +16,7 @@ from PIL import Image
 
 from vectorpress.catalog.provenance import DERIVED_DIRNAME, read_provenance, sha256_bytes
 from vectorpress.domain.asset import AccuracyStatus, Asset, RightsStatus, Source
+from vectorpress.domain.catalog_config import CatalogConfig
 from vectorpress.domain.derivative_state import DerivativeState
 from vectorpress.domain.derivative_type import DerivativeType
 from vectorpress.pipeline import generate as generate_module
@@ -80,6 +81,24 @@ def test_status_is_impossible_for_flatcolor_svg_with_only_a_silhouette_source(
 
     assert statuses[DerivativeType.FLATCOLOR_SVG].state is DerivativeState.IMPOSSIBLE
     assert statuses[DerivativeType.FLATCOLOR_SVG].output_filename is None
+
+
+def test_status_is_impossible_for_cut_svg_with_no_silhouette_source(tmp_path: Path) -> None:
+    """Acceptance criterion 2 (issue #36): ``cut_svg`` accepts only the
+    ``silhouette`` role (ADR 0003), so an asset declaring some other role
+    but no silhouette source can never produce one -- a constructed asset,
+    per the issue's own acceptance criterion."""
+    asset_dir = tmp_path / "ochre_sea_star"
+    _write_source_png(asset_dir / SOURCES_DIRNAME / "flatcolor.png")
+    asset = _asset(sources=[Source(role="flatcolor", file="flatcolor.png")])
+
+    statuses = {s.derivative_type: s for s in asset_derivative_statuses(asset, asset_dir)}
+    cut_svg_status = statuses[DerivativeType.CUT_SVG]
+
+    assert cut_svg_status.state is DerivativeState.IMPOSSIBLE
+    assert cut_svg_status.output_filename is None
+    assert cut_svg_status.reason is not None
+    assert "silhouette" in cut_svg_status.reason
 
 
 def test_status_is_missing_before_anything_is_generated(tmp_path: Path) -> None:
@@ -156,6 +175,49 @@ def test_generate_asset_generates_silhouette_svg_with_customer_facing_filename(
     output_path = asset_dir / DERIVED_DIRNAME / "ochre-sea-star-silhouette.svg"
     assert output_path.is_file()
     assert b"<image" not in output_path.read_bytes()
+
+
+def test_generate_asset_generates_cut_svg_with_customer_facing_filename(tmp_path: Path) -> None:
+    """Issue #36: ``cut_svg`` now has a landed generator."""
+    asset_dir = _make_asset_dir(tmp_path)
+
+    results = {r.derivative_type: r for r in generate_asset(_asset(), asset_dir)}
+
+    result = results[DerivativeType.CUT_SVG]
+    assert result.outcome is GenerationOutcome.GENERATED
+    assert result.detail == "ochre-sea-star-cut.svg"
+
+    output_path = asset_dir / DERIVED_DIRNAME / "ochre-sea-star-cut.svg"
+    assert output_path.is_file()
+    assert b"<image" not in output_path.read_bytes()
+
+
+def test_generate_asset_records_the_effective_reference_size_in_provenance(
+    tmp_path: Path,
+) -> None:
+    """Issue #36's "reference size in the recipe identity": the catalog's
+    ``reference_size_in`` -- not part of ``RECIPES``' own static
+    declaration -- is merged into ``cut_svg``'s recorded parameters and
+    recipe hash. With no config at all (as every other test in this file
+    calls ``generate_asset``), it falls back to the documented catalog
+    default."""
+    asset_dir = _make_asset_dir(tmp_path)
+
+    generate_asset(_asset(), asset_dir)
+
+    provenance = read_provenance(asset_dir / DERIVED_DIRNAME, "ochre-sea-star-cut.svg")
+    assert provenance is not None
+    assert provenance.parameters["reference_size_in"] == 3.0
+
+    config = CatalogConfig(name="Test Catalog", reference_size_in=5.0)
+    other_asset_dir = tmp_path / "other_asset"
+    _write_source_png(other_asset_dir / SOURCES_DIRNAME / "silhouette.png")
+    generate_asset(_asset(), other_asset_dir, config=config)
+
+    other_provenance = read_provenance(other_asset_dir / DERIVED_DIRNAME, "ochre-sea-star-cut.svg")
+    assert other_provenance is not None
+    assert other_provenance.parameters["reference_size_in"] == 5.0
+    assert other_provenance.recipe_hash != provenance.recipe_hash
 
 
 def test_generate_asset_generates_transparent_png_with_customer_facing_filename(

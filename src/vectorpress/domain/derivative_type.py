@@ -32,6 +32,7 @@ class DerivativeType(StrEnum):
 _FILENAME_SUFFIXES: dict[DerivativeType, str] = {
     DerivativeType.TRANSPARENT_PNG: "-color.png",
     DerivativeType.SILHOUETTE_SVG: "-silhouette.svg",
+    DerivativeType.CUT_SVG: "-cut.svg",
     DerivativeType.FLATCOLOR_SVG: "-color.svg",
 }
 
