@@ -96,7 +96,24 @@ class FindingsReport:
     findings: tuple[Finding, ...]
 
 
-def _finding_to_dict(finding: Finding) -> dict[str, object]:
+def _bounding_box_to_dict(location: BoundingBox) -> dict[str, object]:
+    return {
+        "min_x": round_number(location.min_x),
+        "min_y": round_number(location.min_y),
+        "max_x": round_number(location.max_x),
+        "max_y": round_number(location.max_y),
+    }
+
+
+def _path_reference_to_dict(reference: PathReference) -> dict[str, object]:
+    return {
+        "element_index": reference.element_index,
+        "subpath_index": reference.subpath_index,
+        "id": reference.id,
+    }
+
+
+def finding_to_dict(finding: Finding) -> dict[str, object]:
     """``finding`` as a JSON-ready dict, every number rounded to
     :data:`~vectorpress.domain.numeric_format.DECIMAL_PLACES` (issue #37 fix
     round 1's "every number written to findings" rule) -- a second,
@@ -107,27 +124,35 @@ def _finding_to_dict(finding: Finding) -> dict[str, object]:
     idempotent on an already-rounded number, so this holds the invariant
     even for a future detector kind that forgets to round its own
     ``measured_value``/``threshold`` before building a :class:`~vectorpress.
-    domain.finding.Finding`."""
-    return {
+    domain.finding.Finding`.
+
+    ``related_path_reference`` (issue #41, :attr:`FindingKind.OVERLAP` only)
+    is written as a key only when it is set, and ``location`` as JSON
+    ``null`` when there is no geometry to draw -- every finding kind that
+    predates issue #41 always sets both, so this stays byte-identical to
+    what it wrote before issue #41 for every one of those (locked by
+    ``tests/integration/test_validate.py``'s own findings-JSON snapshots).
+
+    Public (no leading underscore, issue #41) so a trip SVG validated
+    through ``vpress validate --file`` -- never written to any catalog, so
+    never passing through :class:`FindingsReport`/:func:`write_findings_report`
+    at all -- can still be snapshotted in exactly the same JSON shape a
+    catalog asset's own findings report uses (``tests/unit/
+    test_validate_open_path.py`` and its four sibling test modules)."""
+    data: dict[str, object] = {
         "kind": finding.kind.value,
         "classification": finding.classification.value,
         "message": finding.message,
-        "location": {
-            "min_x": round_number(finding.location.min_x),
-            "min_y": round_number(finding.location.min_y),
-            "max_x": round_number(finding.location.max_x),
-            "max_y": round_number(finding.location.max_y),
-        },
-        "path_reference": {
-            "element_index": finding.path_reference.element_index,
-            "subpath_index": finding.path_reference.subpath_index,
-            "id": finding.path_reference.id,
-        },
+        "location": (None if finding.location is None else _bounding_box_to_dict(finding.location)),
+        "path_reference": _path_reference_to_dict(finding.path_reference),
         "measured_value": (
             None if finding.measured_value is None else round_number(finding.measured_value)
         ),
         "threshold": None if finding.threshold is None else round_number(finding.threshold),
     }
+    if finding.related_path_reference is not None:
+        data["related_path_reference"] = _path_reference_to_dict(finding.related_path_reference)
+    return data
 
 
 def _bounding_box_from_dict(data: Mapping[str, object]) -> BoundingBox:
@@ -142,9 +167,11 @@ def _bounding_box_from_dict(data: Mapping[str, object]) -> BoundingBox:
 def _path_reference_from_dict(data: Mapping[str, object]) -> PathReference:
     element_id = data["id"]
     assert element_id is None or isinstance(element_id, str)
+    subpath_index_raw = data["subpath_index"]
+    subpath_index = None if subpath_index_raw is None else int(subpath_index_raw)  # type: ignore[arg-type]
     return PathReference(
         element_index=int(data["element_index"]),  # type: ignore[arg-type]
-        subpath_index=int(data["subpath_index"]),  # type: ignore[arg-type]
+        subpath_index=subpath_index,
         id=element_id,
     )
 
@@ -156,16 +183,29 @@ def _optional_float(value: object) -> float | None:
 def _finding_from_dict(data: Mapping[str, object]) -> Finding:
     location = data["location"]
     path_reference = data["path_reference"]
-    assert isinstance(location, dict)
+    assert location is None or isinstance(location, dict)
     assert isinstance(path_reference, dict)
+    related_path_reference_data = data.get("related_path_reference")
+    assert related_path_reference_data is None or isinstance(related_path_reference_data, dict)
     return Finding(
         kind=FindingKind(data["kind"]),  # type: ignore[arg-type]
         classification=FindingClassification(data["classification"]),  # type: ignore[arg-type]
         message=str(data["message"]),
-        location=_bounding_box_from_dict(cast("Mapping[str, object]", location)),
+        location=(
+            None
+            if location is None
+            else _bounding_box_from_dict(cast("Mapping[str, object]", location))
+        ),
         path_reference=_path_reference_from_dict(cast("Mapping[str, object]", path_reference)),
         measured_value=_optional_float(data.get("measured_value")),
         threshold=_optional_float(data.get("threshold")),
+        related_path_reference=(
+            None
+            if related_path_reference_data is None
+            else _path_reference_from_dict(
+                cast("Mapping[str, object]", related_path_reference_data)
+            )
+        ),
     )
 
 
@@ -181,7 +221,7 @@ def _report_payload(report: FindingsReport) -> bytes:
         "reference_size_in": report.reference_size_in,
         "thresholds": report.thresholds,
         "result": report.result.value,
-        "findings": [_finding_to_dict(finding) for finding in report.findings],
+        "findings": [finding_to_dict(finding) for finding in report.findings],
     }
     return json.dumps(payload, sort_keys=True, indent=2).encode("utf-8")
 

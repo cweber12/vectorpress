@@ -85,12 +85,23 @@ class BoundingBox:
 @dataclass(frozen=True)
 class PathReference:
     """Where in the SVG document a finding's geometry came from, so an
-    editor can navigate to it (issue #37): the ``<path>`` element's index in
-    document order, the offending subpath's index within that element, and
-    that element's ``id`` attribute when it has one (``None`` otherwise)."""
+    editor can navigate to it (issue #37): the element's index (document
+    order, in whatever index space the detector that built this reference
+    uses -- a ``<path>``-only index for every piece/hole-based detector, the
+    same as before issue #41), the offending subpath's index within that
+    element, and that element's ``id`` attribute when it has one (``None``
+    otherwise).
+
+    ``subpath_index`` is ``None`` (issue #41) for a finding located by
+    *element* reference alone -- a non-``<path>`` element with no subpath of
+    its own, such as a stray ``<image>`` or an empty ``<g>`` (§9's "stray
+    object", "raster content"). Every finding from before issue #41 always
+    sets a concrete ``subpath_index``, so this stays additive: reading or
+    writing one of those findings is unaffected (:mod:`vectorpress.catalog.
+    findings`)."""
 
     element_index: int
-    subpath_index: int
+    subpath_index: int | None
     id: str | None = None
 
 
@@ -102,15 +113,31 @@ class Finding:
     whose detection compares a measurement against a threshold; both are
     ``None`` for a kind with no such threshold (:attr:`FindingKind.
     DISCONNECTED_FRAGMENTS`: "more than one piece" has no size threshold to
-    record)."""
+    record).
+
+    ``location`` is ``None`` (issue #41) for a finding with no geometry to
+    draw a bounding box around -- an empty group, say -- rather than a
+    made-up box; :attr:`path_reference` still names the element so the
+    finding stays navigable (§9's "so it can be drawn over the SVG",
+    relaxed to "or navigated to" when there is nothing to draw). Every
+    finding from before issue #41 always sets a concrete ``location``.
+
+    ``related_path_reference`` is set only for :attr:`FindingKind.OVERLAP`
+    (issue #41): "reported per overlapping pair, located by the
+    intersection's bbox plus both path references" -- :attr:`path_reference`
+    names the first shape of the pair, ``related_path_reference`` the
+    second. ``None`` for every other kind, including a *self*-intersecting
+    subpath (both edges of the crossing belong to the one subpath
+    :attr:`path_reference` already names)."""
 
     kind: FindingKind
     classification: FindingClassification
     message: str
-    location: BoundingBox
+    location: BoundingBox | None
     path_reference: PathReference
     measured_value: float | None = None
     threshold: float | None = None
+    related_path_reference: PathReference | None = None
 
 
 class ValidationOutcome(StrEnum):

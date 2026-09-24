@@ -22,7 +22,7 @@ from vectorpress.catalog.provenance import DERIVED_DIRNAME, read_derivative_byte
 from vectorpress.domain.catalog_config import CatalogConfig
 from vectorpress.domain.derivative_state import DerivativeState
 from vectorpress.domain.derivative_type import DerivativeType
-from vectorpress.domain.finding import ValidationOutcome
+from vectorpress.domain.finding import Finding, ValidationOutcome
 from vectorpress.domain.numeric_format import format_number
 from vectorpress.domain.product import Product
 from vectorpress.domain.reference_size import resolve_reference_size_in
@@ -33,7 +33,7 @@ from vectorpress.pipeline.generate import (
     count_derivative_states,
     generate_asset,
 )
-from vectorpress.validate.cut_file import THRESHOLDS
+from vectorpress.validate.cut_file import THRESHOLDS, validate_cut_file
 from vectorpress.validate.validate_asset import AssetValidationOutcome, validate_asset_cut_file
 
 app = typer.Typer(
@@ -370,6 +370,62 @@ def generate(
         raise typer.Exit(code=1)
 
 
+def _optional_catalog_config(ctx: typer.Context) -> CatalogConfig | None:
+    """The catalog config for the catalog containing the current directory,
+    or ``None`` when none is found or it fails to load (issue #41's
+    ``vpress validate --file``): unlike every other command, running
+    outside a catalog is a normal, supported case here, not a hard error --
+    ``--file`` validates "any SVG on disk", catalog or not (§9's own scope
+    bullet 5)."""
+    explicit = ctx.obj.get("catalog") if ctx.obj else None
+    try:
+        root = locate_catalog_root(Path.cwd(), explicit=explicit)
+    except CatalogNotFoundError:
+        return None
+    try:
+        return load_catalog_config(root)
+    except CatalogConfigError:
+        return None
+
+
+def _format_location(finding: Finding) -> str:
+    """``finding``'s own location as CLI text -- its bbox when it has one,
+    or a plain marker when it does not (issue #41: a finding with no
+    geometry, such as an empty group, is still located by element reference
+    alone, never a made-up bbox)."""
+    location = finding.location
+    if location is None:
+        return "(no bbox)"
+    return f"({location.min_x},{location.min_y})-({location.max_x},{location.max_y})"
+
+
+def _echo_finding(finding: Finding) -> None:
+    typer.echo(f"  {finding.kind.value}\t{_format_location(finding)}\t{finding.message}")
+
+
+def _validate_file(file: Path, reference_size_in: float) -> None:
+    """``vpress validate --file`` (issue #41): validate any SVG on disk
+    against the same pure :func:`~vectorpress.validate.cut_file.
+    validate_cut_file` catalog validation uses, print the same report and
+    result, and write nothing -- no findings report, no provenance, no
+    asset involved at all."""
+    if not file.is_file():
+        typer.echo(f"validate: {file} failed: no such file", err=True)
+        raise typer.Exit(code=1)
+
+    svg_bytes = file.read_bytes()
+    try:
+        validation = validate_cut_file(svg_bytes, reference_size_in)
+    except Exception as exc:  # any parse failure is a reported §35 validation failure
+        typer.echo(f"validate: {file} failed: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+
+    result_text = "pass" if validation.outcome is ValidationOutcome.PASS else "needs review"
+    typer.echo(f"{file}\tcut_svg\t{result_text}")
+    for finding in validation.findings:
+        _echo_finding(finding)
+
+
 @app.command()
 def validate(
     ctx: typer.Context,
@@ -381,6 +437,23 @@ def validate(
         "--all",
         help="Validate every loaded asset's cut file.",
     ),
+    file: Path | None = typer.Option(
+        None,
+        "--file",
+        help=(
+            "Validate this SVG file on disk instead of a catalog asset. "
+            "Prints the same report and result; writes nothing."
+        ),
+    ),
+    reference_size: float | None = typer.Option(
+        None,
+        "--reference-size",
+        help=(
+            "Physical reference size in inches, for --file only (§9.1). "
+            "Defaults to the catalog default when run inside a catalog; "
+            "required otherwise."
+        ),
+    ),
     product: str | None = typer.Option(
         None,
         "--product",
@@ -388,23 +461,37 @@ def validate(
             "Validate at this product's resolved reference size (its own "
             "override if it has one, else the catalog default) instead of "
             "the catalog default alone. Only resolves the size -- it does "
-            "not check that an asset belongs to the product."
+            "not check that an asset belongs to the product. Not supported "
+            "with --file."
         ),
     ),
 ) -> None:
-    """Validate one asset's ``cut_svg``, or every loaded asset's with
-    ``--all``, against every landed §9 detector (§9, §9.1, §9.2, ADR 0007,
-    ADR 0008, issue #37, issue #38), writing a findings report beside the
-    file (through ``catalog.findings``) and printing pass / needs review with
+    """Validate one asset's ``cut_svg``, every loaded asset's with
+    ``--all``, or an arbitrary SVG on disk with ``--file`` (issue #41),
+    against every landed §9 detector (§9, §9.1, §9.2, ADR 0007, ADR 0008,
+    issue #37, issue #38), writing a findings report beside the file
+    (through ``catalog.findings``) and printing pass / needs review with
     each finding's kind and location.
 
-    Exactly one of ``asset_id`` or ``--all`` selects which assets are
-    checked; providing both, or neither, is a usage error. An asset whose
-    cut file is ``missing`` or ``impossible`` is reported as such and not
-    validated (there is no file to check yet); an asset that failed to load
-    is skipped and named (§35), the same as ``vpress generate --all``.
+    Exactly one of ``asset_id``, ``--all`` or ``--file`` selects what is
+    checked; providing more than one, or none, is a usage error. An asset
+    whose cut file is ``missing`` or ``impossible`` is reported as such and
+    not validated (there is no file to check yet); an asset that failed to
+    load is skipped and named (§35), the same as ``vpress generate --all``.
     ``vpress generate`` itself never calls this -- a findings report only
     ever exists because ``validate`` was run.
+
+    ``--file`` (issue #41) validates any SVG on disk -- an override, a
+    stray file, anything -- through the exact same pure :func:`~
+    vectorpress.validate.cut_file.validate_cut_file` an asset's own
+    validation calls, never a duplicate. It writes nothing (no findings
+    report, no provenance) and does not accept ``--product``. Its
+    reference size (§9.1) is ``--reference-size`` when given, else the
+    catalog default when the current directory is inside a catalog, else a
+    usage error -- ``--file`` works outside a catalog entirely, the one
+    case in this command where that is not itself an error. It exits 0 for
+    ``pass`` or ``needs review``, 1 for a file it cannot read or parse
+    (§35).
 
     ``--product`` combines with either ``asset_id`` or ``--all`` (issue
     #38): it resolves the reference size to validate at from the named
@@ -426,12 +513,31 @@ def validate(
     the command exits 0 as long as every asset it attempted to validate
     parsed successfully.
     """
-    selectors = [asset_id is not None, all_assets]
+    selectors = [asset_id is not None, all_assets, file is not None]
     if sum(selectors) != 1:
         raise typer.BadParameter(
-            "Provide exactly one of: an asset ID, --all.",
-            param_hint="asset_id / --all",
+            "Provide exactly one of: an asset ID, --all, --file.",
+            param_hint="asset_id / --all / --file",
         )
+
+    if file is not None:
+        if product is not None:
+            raise typer.BadParameter(
+                "--product is not supported with --file.", param_hint="--product"
+            )
+        if reference_size is not None:
+            file_reference_size_in = reference_size
+        else:
+            file_config = _optional_catalog_config(ctx)
+            if file_config is None:
+                raise typer.BadParameter(
+                    "No catalog found here; --reference-size is required for "
+                    "--file outside a catalog.",
+                    param_hint="--reference-size",
+                )
+            file_reference_size_in = file_config.reference_size_in
+        _validate_file(file, file_reference_size_in)
+        return
 
     root, config = _locate_and_load_config(ctx)
     inventory = load_assets(root, config)
@@ -502,12 +608,7 @@ def validate(
         )
         typer.echo(f"{target.id}\tcut_svg\t{outcome.filename}\t{result_text}{size_note}")
         for finding in outcome.validation.findings:
-            location = finding.location
-            typer.echo(
-                f"  {finding.kind.value}\t"
-                f"({location.min_x},{location.min_y})-({location.max_x},{location.max_y})\t"
-                f"{finding.message}"
-            )
+            _echo_finding(finding)
 
     if failure_count:
         typer.echo(f"validate: {failure_count} asset(s) failed", err=True)

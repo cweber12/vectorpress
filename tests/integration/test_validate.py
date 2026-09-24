@@ -29,6 +29,15 @@ finding kind: ``nudibranch`` (two lobes joined by a neck narrower than the
 narrow-feature width threshold) and ``coralline_algae`` (a finely rippled
 outline with far more curve nodes per inch of perimeter than the
 excessive-complexity density threshold allows).
+
+Issue #41 adds the remaining five §9 kinds (open path, raster content,
+stray object, duplicate geometry, unintended overlap) -- these can only
+appear in a hand-edited SVG, so this file also proves the §8 builder's own
+tracer never trips any of them on a *generated* fixture cut file
+(``test_every_generated_fixture_cut_file_trips_none_of_issue_41s_five_kinds``),
+and exercises ``vpress validate --file`` against ``tests/fixtures/findings/``'s
+own hand-authored trip SVGs (outside the fixture catalog entirely -- see
+that directory's own README for which SVG trips which kind).
 """
 
 import json
@@ -41,7 +50,7 @@ from syrupy.assertion import SnapshotAssertion
 from typer.testing import CliRunner
 
 from vectorpress.catalog.findings import findings_path, read_findings_report
-from vectorpress.catalog.provenance import DERIVED_DIRNAME, sha256_bytes
+from vectorpress.catalog.provenance import DERIVED_DIRNAME, read_derivative_bytes, sha256_bytes
 from vectorpress.cli.app import app
 from vectorpress.domain import recipe as recipe_module
 from vectorpress.domain.derivative_type import DerivativeType
@@ -174,6 +183,7 @@ def test_owl_limpets_detached_piece_is_flagged_at_its_own_real_bbox(
     expected = validate_cut_file(svg_path.read_bytes(), 3.0)
     assert len(expected.findings) == 1  # sanity: the fixture really has one extra piece
     expected_bbox = expected.findings[0].location
+    assert expected_bbox is not None
 
     result = runner.invoke(app, ["validate", "owl_limpet"])
 
@@ -842,3 +852,220 @@ def test_generate_still_never_validates(
         assert not findings_path(_derived_dir(temp_catalog_root, asset_id), filename).exists()
     asset_result = runner.invoke(app, ["asset", "ochre_sea_star"])
     assert "cut_svg\tcurrent\tochre-sea-star-cut.svg\tnot validated" in asset_result.stdout
+
+
+# --- issue #41: none of the five new kinds ever trips on a generated cut file --------------
+
+FINDINGS_FIXTURES_DIR = Path(__file__).parents[1] / "fixtures" / "findings"
+
+#: Every §9 kind only a hand-edited SVG can trip (issue #41's own "can only
+#: ever appear in a hand-edited override"): the §8 builder's own tracer
+#: always emits closed, filled, non-overlapping, non-duplicated paths with
+#: no raster content and no stray elements.
+ISSUE_41_KINDS = {
+    FindingKind.OPEN_PATH,
+    FindingKind.RASTER_CONTENT,
+    FindingKind.STRAY_OBJECT,
+    FindingKind.DUPLICATE_GEOMETRY,
+    FindingKind.OVERLAP,
+}
+
+
+@pytest.mark.integration
+def test_every_generated_fixture_cut_file_trips_none_of_issue_41s_five_kinds(
+    monkeypatch: pytest.MonkeyPatch, temp_catalog_root: Path
+) -> None:
+    """Issue #41 acceptance criterion 3: proven against every fixture
+    asset's own real, generated cut file (not a hand-written stand-in) --
+    the §8 builder rules these five out by construction, and this keeps it
+    true."""
+    monkeypatch.chdir(temp_catalog_root)
+    runner.invoke(app, ["generate", "--all"])
+
+    for asset_id, filename in FIXTURE_CUT_FILES:
+        svg_bytes = read_derivative_bytes(_derived_dir(temp_catalog_root, asset_id), filename)
+        assert svg_bytes is not None, asset_id
+        result = validate_cut_file(svg_bytes, 3.0)
+        tripped = {finding.kind for finding in result.findings} & ISSUE_41_KINDS
+        assert not tripped, (asset_id, tripped)
+
+
+# --- issue #41: vpress validate --file --------------------------------------------------------
+
+#: (trip SVG name, the one §9 kind it trips) -- ``tests/fixtures/findings/
+#: README.md`` documents each in full.
+TRIP_SVG_KINDS = [
+    ("open_path", FindingKind.OPEN_PATH),
+    ("raster_content", FindingKind.RASTER_CONTENT),
+    ("stray_object", FindingKind.STRAY_OBJECT),
+    ("duplicate_geometry", FindingKind.DUPLICATE_GEOMETRY),
+    ("overlap", FindingKind.OVERLAP),
+]
+
+
+def _all_files(root: Path) -> set[Path]:
+    return {path.relative_to(root) for path in root.rglob("*") if path.is_file()}
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("name,expected_kind", TRIP_SVG_KINDS)
+def test_validate_file_reports_exactly_the_trip_svgs_own_kind(
+    monkeypatch: pytest.MonkeyPatch,
+    temp_catalog_root: Path,
+    name: str,
+    expected_kind: FindingKind,
+) -> None:
+    """Issue #41's own acceptance criterion: ``vpress validate --file
+    <trip svg> --reference-size 3`` reports exactly that kind with a
+    location and ``needs review``, and writes nothing anywhere."""
+    monkeypatch.chdir(temp_catalog_root)
+    svg_path = FINDINGS_FIXTURES_DIR / f"{name}.svg"
+    before = _all_files(temp_catalog_root)
+
+    result = runner.invoke(app, ["validate", "--file", str(svg_path), "--reference-size", "3"])
+
+    assert result.exit_code == 0, result.output
+    assert "needs review" in result.stdout
+    finding_lines = [line for line in result.stdout.splitlines() if line.startswith("  ")]
+    assert len(finding_lines) == 1
+    assert finding_lines[0].startswith(f"  {expected_kind.value}\t")
+    assert re.search(r"\(-?[\d.]+,-?[\d.]+\)-\(-?[\d.]+,-?[\d.]+\)|\(no bbox\)", finding_lines[0])
+    assert _all_files(temp_catalog_root) == before  # writes nothing anywhere
+
+
+@pytest.mark.integration
+def test_validate_file_on_the_clean_svg_passes(
+    monkeypatch: pytest.MonkeyPatch, temp_catalog_root: Path
+) -> None:
+    monkeypatch.chdir(temp_catalog_root)
+    svg_path = FINDINGS_FIXTURES_DIR / "clean.svg"
+    before = _all_files(temp_catalog_root)
+
+    result = runner.invoke(app, ["validate", "--file", str(svg_path), "--reference-size", "3"])
+
+    assert result.exit_code == 0, result.output
+    assert "\tpass" in result.stdout
+    assert "needs review" not in result.stdout
+    assert _all_files(temp_catalog_root) == before
+
+
+@pytest.mark.integration
+def test_validate_file_defaults_the_reference_size_from_the_catalog(
+    monkeypatch: pytest.MonkeyPatch, temp_catalog_root: Path
+) -> None:
+    """Inside a catalog, ``--file`` falls back to the catalog default
+    reference size (3.0in here) when ``--reference-size`` is not given."""
+    monkeypatch.chdir(temp_catalog_root)
+    svg_path = FINDINGS_FIXTURES_DIR / "open_path.svg"
+
+    result = runner.invoke(app, ["validate", "--file", str(svg_path)])
+
+    assert result.exit_code == 0, result.output
+    assert "open_path" in result.stdout
+
+
+@pytest.mark.integration
+def test_validate_file_outside_any_catalog_requires_reference_size(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.chdir(tmp_path)  # no catalog.toml anywhere above this
+    svg_path = FINDINGS_FIXTURES_DIR / "clean.svg"
+
+    result = runner.invoke(app, ["validate", "--file", str(svg_path)])
+
+    assert result.exit_code != 0
+    assert "--reference-size" in result.output
+
+
+@pytest.mark.integration
+def test_validate_file_outside_any_catalog_works_when_reference_size_is_given(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    svg_path = FINDINGS_FIXTURES_DIR / "clean.svg"
+
+    result = runner.invoke(app, ["validate", "--file", str(svg_path), "--reference-size", "3"])
+
+    assert result.exit_code == 0, result.output
+    assert "\tpass" in result.stdout
+
+
+@pytest.mark.integration
+def test_validate_file_on_an_unparseable_svg_exits_1_and_writes_nothing(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    bad_svg = tmp_path / "bad.svg"
+    bad_svg.write_bytes(b"not an svg document at all")
+    before = _all_files(tmp_path)
+
+    result = runner.invoke(app, ["validate", "--file", str(bad_svg), "--reference-size", "3"])
+
+    assert result.exit_code == 1
+    assert "bad.svg" in result.output
+    assert _all_files(tmp_path) == before
+
+
+@pytest.mark.integration
+def test_validate_file_on_a_missing_file_exits_1(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.chdir(tmp_path)
+
+    result = runner.invoke(
+        app, ["validate", "--file", str(tmp_path / "nope.svg"), "--reference-size", "3"]
+    )
+
+    assert result.exit_code == 1
+    assert "no such file" in result.output
+
+
+@pytest.mark.integration
+def test_validate_file_rejects_combination_with_asset_id(
+    monkeypatch: pytest.MonkeyPatch, temp_catalog_root: Path
+) -> None:
+    monkeypatch.chdir(temp_catalog_root)
+    svg_path = FINDINGS_FIXTURES_DIR / "clean.svg"
+
+    result = runner.invoke(
+        app, ["validate", "ochre_sea_star", "--file", str(svg_path), "--reference-size", "3"]
+    )
+
+    assert result.exit_code != 0
+
+
+@pytest.mark.integration
+def test_validate_file_rejects_all_assets_option(
+    monkeypatch: pytest.MonkeyPatch, temp_catalog_root: Path
+) -> None:
+    monkeypatch.chdir(temp_catalog_root)
+    svg_path = FINDINGS_FIXTURES_DIR / "clean.svg"
+
+    result = runner.invoke(
+        app, ["validate", "--all", "--file", str(svg_path), "--reference-size", "3"]
+    )
+
+    assert result.exit_code != 0
+
+
+@pytest.mark.integration
+def test_validate_file_rejects_product_option(
+    monkeypatch: pytest.MonkeyPatch, temp_catalog_root: Path
+) -> None:
+    monkeypatch.chdir(temp_catalog_root)
+    svg_path = FINDINGS_FIXTURES_DIR / "clean.svg"
+
+    result = runner.invoke(
+        app,
+        [
+            "validate",
+            "--file",
+            str(svg_path),
+            "--reference-size",
+            "3",
+            "--product",
+            "kelp_forest_mini_pack",
+        ],
+    )
+
+    assert result.exit_code != 0

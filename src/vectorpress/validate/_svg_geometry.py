@@ -39,9 +39,13 @@ by :mod:`vectorpress.pipeline.svg_document`'s own Bézier-extrema bounding
 box. Reaching for a GEOS-backed library like ``shapely`` for this would add a
 second native dependency and a second thing to keep identical across
 ``ubuntu-latest``/``windows-latest`` for no behavior this module cannot
-already express directly. A later issue that needs true general polygon
-boolean operations (§9's overlap/duplicate-geometry kinds, say) can revisit
-this.
+already express directly. Issue #41's overlap and self-intersection
+detectors are the "later issue that needs... polygon boolean operations"
+this paragraph once deferred -- they turn out not to need a general boolean
+library either: "do two rings' boundaries cross at all" is a segment-
+intersection test (:func:`find_ring_intersections`/
+:func:`find_self_intersections`), the same plain, deterministic arithmetic
+style as everything else here, not an area/union/difference computation.
 
 **A scoped simplification, not a full nonzero-winding implementation.**
 Whether a subpath is a hole of its immediate parent is decided by
@@ -60,6 +64,7 @@ can extend this if a real cut file ever needs it.
 
 import re
 import xml.etree.ElementTree as ET
+from collections.abc import Mapping
 from dataclasses import dataclass
 
 import svgelements as se
@@ -443,3 +448,498 @@ def parse_cut_file(svg_bytes: bytes, reference_size_in: float) -> ParsedCutFile:
         )
 
     return ParsedCutFile(pieces=pieces, holes=holes, scale_user_units_per_inch=scale)
+
+
+# ---------------------------------------------------------------------------
+# Raw subpaths, document elements and segment intersection (issue #41)
+#
+# Everything below serves the five §9 kinds only a hand-edited SVG can trip
+# (open path, raster content, stray object, duplicate geometry, unintended
+# overlap): :mod:`vectorpress.validate.open_path`, :mod:`vectorpress.
+# validate.raster_content`, :mod:`vectorpress.validate.stray_object`,
+# :mod:`vectorpress.validate.duplicate_geometry` and :mod:`vectorpress.
+# validate.overlap`. Unlike :class:`Piece`/:class:`Hole` above, none of this
+# groups a subpath by containment parity: :func:`parse_subpaths` returns
+# every subpath exactly as authored, and :func:`parse_document_elements`
+# every element exactly as it sits in the document -- the "well-nested,
+# non-overlapping" simplification this module's own docstring draws around
+# piece/hole grouping does not hold for a document that is, by definition,
+# possibly malformed.
+# ---------------------------------------------------------------------------
+
+#: A subpath's own end point landing on its own start within this many user
+#: units still counts as closed (issue #41's :mod:`vectorpress.validate.
+#: open_path`) even without an explicit ``Z`` -- a hand-authored override
+#: might close a shape by repeating the start coordinate as its last ``L``
+#: instead. Deliberately tiny: this is a tolerance for "the same point
+#: written twice", not a snapping distance.
+_CLOSE_TOLERANCE = 1e-6
+
+#: The fixed epsilon a signed area (twice a triangle's own area, in squared
+#: user units) must clear before :func:`_segments_properly_intersect`
+#: treats it as a genuine, non-collinear side -- absorbs the same kind of
+#: last-bit floating-point noise :data:`~vectorpress.domain.numeric_format.
+#: DECIMAL_PLACES` exists to absorb elsewhere in this module, without being
+#: anywhere close to a real crossing's own signed area for any shape this
+#: tool's fixtures or a plausible hand-edited override would produce.
+_INTERSECTION_EPS = 1e-6
+
+#: Tags this module computes a definite bounding box for (issue #41) --
+#: every other tag (``g``, ``text``, ``pattern``, ``foreignObject``, …) gets
+#: ``bbox=None`` from :func:`_generic_element_bbox`: no made-up box, only a
+#: real one when the shape's own geometry is simple, closed-form arithmetic
+#: (this module's own "plain, deterministic arithmetic... no shapely"
+#: choice, applied here to a handful of common shape elements rather than
+#: just ``<path>``).
+_BBOX_TAGS = frozenset(
+    {"path", "rect", "circle", "ellipse", "line", "polyline", "polygon", "image"}
+)
+
+#: Tags whose own subtree is never rendered directly -- only ever
+#: *referenced* (a gradient, a clip path, a pattern tile, a reusable
+#: symbol) -- so an element inside one is never itself a stray object
+#: (issue #41's :mod:`vectorpress.validate.stray_object`): an off-canvas or
+#: seemingly invisible shape *inside a ``<pattern>``'s own tile*, for
+#: example, is exactly how a legitimate pattern is defined, not a mistake.
+#: :mod:`vectorpress.validate.raster_content` does not consult this --
+#: exactly the opposite case, a ``<pattern>`` carrying raster content, is
+#: still a real problem regardless of never being rendered on its own.
+_NON_RENDERING_CONTAINER_TAGS = frozenset(
+    {"defs", "symbol", "clipPath", "mask", "marker", "pattern"}
+)
+
+
+def _element_has_fill(attrib: Mapping[str, str]) -> bool:
+    """Whether a ``<path>`` element's own attributes paint a fill at all
+    (§9's "a path with no fill, where a closed filled path is expected") --
+    SVG's own default (no ``fill`` attribute, no ``style`` override) is a
+    *filled* black shape, so only an explicit ``none`` (the ``fill``
+    attribute, or a ``fill`` declaration inside ``style``) counts as "no
+    fill". A ``style`` declaration wins over the plain attribute, the same
+    precedence SVG itself gives it."""
+    style = attrib.get("style", "")
+    style_fill: str | None = None
+    for declaration in style.split(";"):
+        name, _sep, value = declaration.partition(":")
+        if name.strip() == "fill":
+            style_fill = value.strip()
+    effective = style_fill if style_fill is not None else attrib.get("fill")
+    return effective is None or effective.strip().lower() != "none"
+
+
+def _subpath_is_closed(subpath: se.Subpath, points: list[Point]) -> bool:
+    """Whether ``subpath`` is closed (§9's "a subpath that is not closed --
+    no Z and its end is not its start"): an explicit ``Close`` segment, or
+    its own flattened end point landing back on its own start point within
+    :data:`_CLOSE_TOLERANCE`."""
+    if any(isinstance(segment, se.Close) for segment in subpath):
+        return True
+    if len(points) < 2:
+        return False
+    (start_x, start_y), (end_x, end_y) = points[0], points[-1]
+    return abs(start_x - end_x) < _CLOSE_TOLERANCE and abs(start_y - end_y) < _CLOSE_TOLERANCE
+
+
+@dataclass(frozen=True)
+class Subpath:
+    """One subpath's own raw geometry (issue #41): every subpath any
+    ``<path>`` element in the document has, independent of the piece/hole
+    containment-parity grouping :class:`Piece`/:class:`Hole` compute above
+    -- :mod:`vectorpress.validate.open_path`, :mod:`vectorpress.validate.
+    duplicate_geometry` and :mod:`vectorpress.validate.overlap` all need
+    every subpath exactly as authored: the last two by design (their own
+    module docstrings say why grouping is the wrong basis for them), the
+    first because a genuinely unclosed subpath cannot be reliably
+    classified as a piece or a hole to begin with."""
+
+    element_index: int
+    subpath_index: int
+    element_id: str | None
+    points: tuple[Point, ...]
+    bbox: BoundingBox
+    closed: bool
+    has_fill: bool
+
+
+def parse_subpaths(svg_bytes: bytes) -> list[Subpath]:
+    """Every subpath in the document, in document order, exactly as
+    authored (issue #41) -- unlike :func:`parse_cut_file`, this never
+    groups a subpath into a piece or a hole.
+
+    Raises :class:`ValueError` the same way :func:`parse_cut_file` does,
+    for unparseable XML or path data (§35)."""
+    root = ET.fromstring(svg_bytes)
+    path_elements = [element for element in root.iter() if _local_name(element.tag) == "path"]
+
+    subpaths: list[Subpath] = []
+    for element_index, element in enumerate(path_elements):
+        d = element.attrib.get("d", "")
+        element_id = element.attrib.get("id")
+        has_fill = _element_has_fill(element.attrib)
+        for subpath_index, subpath in enumerate(se.Path(d).as_subpaths()):
+            points = _flatten_subpath(subpath)
+            if len(points) < 3:
+                continue  # not a real polygon: an empty or degenerate subpath
+            subpaths.append(
+                Subpath(
+                    element_index=element_index,
+                    subpath_index=subpath_index,
+                    element_id=element_id,
+                    points=tuple(points),
+                    bbox=_polygon_bbox(points),
+                    closed=_subpath_is_closed(subpath, points),
+                    has_fill=has_fill,
+                )
+            )
+    return subpaths
+
+
+def _root_bbox(root: ET.Element) -> BoundingBox:
+    """The root ``<svg>``'s own bounding box, from its ``viewBox`` (its own
+    ``min-x``/``min-y``/width/height, so an offset viewBox is honored, not
+    assumed to start at the origin) or, failing that, ``width``/``height``
+    starting at the origin (issue #41) -- a separate, small function from
+    :func:`svg_viewbox_longest_side` (which only ever needs one number, and
+    tolerates a single ``width`` *or* ``height`` alone): the actual 2-D box
+    :func:`parse_document_elements` needs to test an element's own bbox
+    against for "off canvas" has no single-sided equivalent, so this
+    requires both ``width`` and ``height`` together when there is no
+    ``viewBox``.
+
+    Raises :class:`ValueError` for a root with neither (§35)."""
+    view_box = root.attrib.get("viewBox")
+    if view_box is not None:
+        parts = [p for p in _VIEWBOX_SPLIT_RE.split(view_box.strip()) if p]
+        if len(parts) == 4:
+            min_x, min_y, width, height = (float(p) for p in parts)
+            return BoundingBox(min_x=min_x, min_y=min_y, max_x=min_x + width, max_y=min_y + height)
+
+    width_attr = root.attrib.get("width")
+    height_attr = root.attrib.get("height")
+    if width_attr is not None and height_attr is not None:
+        width = _parse_length(width_attr)
+        height = _parse_length(height_attr)
+        return BoundingBox(min_x=0.0, min_y=0.0, max_x=width, max_y=height)
+
+    raise ValueError("SVG has neither a viewBox nor width/height to establish a scale from")
+
+
+def _parse_points_attr(value: str) -> list[Point]:
+    """A ``points`` attribute (``<polyline>``/``<polygon>``) as ``(x, y)``
+    pairs, tolerating either comma or whitespace separators the same way
+    SVG itself does."""
+    numbers = [float(match) for match in _LENGTH_RE.findall(value)]
+    return list(zip(numbers[0::2], numbers[1::2], strict=False))
+
+
+def _bbox(min_x: float, min_y: float, max_x: float, max_y: float) -> BoundingBox:
+    """A :class:`~vectorpress.domain.finding.BoundingBox` with every
+    coordinate rounded (:func:`~vectorpress.domain.numeric_format.
+    round_number`) -- the same "rounded at the point a finding's location
+    is actually built" rule :func:`_polygon_bbox` already applies, kept
+    here too so every bbox this module ever produces, path-flattened or a
+    plain shape element's own attributes alike, is rounded the same way."""
+    return BoundingBox(
+        min_x=round_number(min_x),
+        min_y=round_number(min_y),
+        max_x=round_number(max_x),
+        max_y=round_number(max_y),
+    )
+
+
+def _generic_element_bbox(tag: str, attrib: Mapping[str, str]) -> BoundingBox | None:
+    """``tag``'s own bounding box computed from its own attributes alone
+    (issue #41's :mod:`vectorpress.validate.stray_object`) -- deliberately
+    narrow: only the handful of shape elements a hand-edited cut-file
+    override plausibly contains (:data:`_BBOX_TAGS`), each a closed-form
+    read of its own geometry attributes (no ``transform`` resolution -- the
+    same plain-user-unit-coordinates scope :func:`svg_viewbox_longest_side`'s
+    own docstring already draws for this module). Returns ``None`` for any
+    tag not in that set, or one whose own attributes do not parse (a
+    malformed override, or a required attribute simply absent) -- never a
+    made-up box."""
+    try:
+        if tag == "rect":
+            x = _parse_length(attrib.get("x", "0"))
+            y = _parse_length(attrib.get("y", "0"))
+            width = _parse_length(attrib["width"])
+            height = _parse_length(attrib["height"])
+            return _bbox(x, y, x + width, y + height)
+        if tag == "circle":
+            cx = _parse_length(attrib.get("cx", "0"))
+            cy = _parse_length(attrib.get("cy", "0"))
+            r = _parse_length(attrib["r"])
+            return _bbox(cx - r, cy - r, cx + r, cy + r)
+        if tag == "ellipse":
+            cx = _parse_length(attrib.get("cx", "0"))
+            cy = _parse_length(attrib.get("cy", "0"))
+            rx = _parse_length(attrib["rx"])
+            ry = _parse_length(attrib["ry"])
+            return _bbox(cx - rx, cy - ry, cx + rx, cy + ry)
+        if tag == "line":
+            x1 = _parse_length(attrib["x1"])
+            y1 = _parse_length(attrib["y1"])
+            x2 = _parse_length(attrib["x2"])
+            y2 = _parse_length(attrib["y2"])
+            return _bbox(min(x1, x2), min(y1, y2), max(x1, x2), max(y1, y2))
+        if tag in ("polyline", "polygon"):
+            points = _parse_points_attr(attrib.get("points", ""))
+            if not points:
+                return None
+            xs = [x for x, _y in points]
+            ys = [y for _x, y in points]
+            return _bbox(min(xs), min(ys), max(xs), max(ys))
+        if tag == "image":
+            x = _parse_length(attrib.get("x", "0"))
+            y = _parse_length(attrib.get("y", "0"))
+            width = _parse_length(attrib["width"])
+            height = _parse_length(attrib["height"])
+            return _bbox(x, y, x + width, y + height)
+        if tag == "path":
+            all_points: list[Point] = []
+            for subpath in se.Path(attrib.get("d", "")).as_subpaths():
+                all_points.extend(_flatten_subpath(subpath))
+            if not all_points:
+                return None
+            return _polygon_bbox(all_points)
+    except (KeyError, ValueError):
+        return None
+    return None
+
+
+def _has_own_data_uri(attrib: Mapping[str, str]) -> bool:
+    """Whether any of ``attrib``'s own values contains a ``data:`` URI (§9's
+    "a ``data:`` image URI anywhere") -- checked against every attribute,
+    not just ``href``/``xlink:href``, since a raster image can just as well
+    be smuggled in through a ``style`` declaration (``fill:url(data:...)``)."""
+    return any("data:" in value for value in attrib.values())
+
+
+def _subtree_has_raster(element: ET.Element) -> bool:
+    """Whether ``element`` or any of its descendants is an ``<image>``, or
+    carries a ``data:`` URI of its own (issue #41's :mod:`vectorpress.
+    validate.raster_content`) -- the basis for "a pattern/foreignObject
+    carrying raster content": a ``<pattern>`` or ``<foreignObject>`` is
+    flagged when its own subtree contains either, not only when the
+    element itself does."""
+    for descendant in element.iter():
+        if _local_name(descendant.tag) == "image":
+            return True
+        if _has_own_data_uri(descendant.attrib):
+            return True
+    return False
+
+
+def _build_parent_map(root: ET.Element) -> dict[ET.Element, ET.Element]:
+    """``{child: parent}`` for every element under ``root`` -- ``ElementTree``
+    keeps no parent pointers of its own, so this is built once per document
+    (issue #41's :func:`_is_rendered`)."""
+    return {child: parent for parent in root.iter() for child in parent}
+
+
+def _is_rendered(element: ET.Element, parent_map: Mapping[ET.Element, ET.Element]) -> bool:
+    """Whether ``element`` is ever actually drawn -- ``False`` when any
+    ancestor is a non-rendering container (:data:`_NON_RENDERING_CONTAINER_TAGS`,
+    issue #41's :mod:`vectorpress.validate.stray_object`)."""
+    current = parent_map.get(element)
+    while current is not None:
+        if _local_name(current.tag) in _NON_RENDERING_CONTAINER_TAGS:
+            return False
+        current = parent_map.get(current)
+    return True
+
+
+#: Tags :func:`_inside_raster_container` walks up looking for -- the same
+#: two tags :mod:`vectorpress.validate.raster_content` itself flags as
+#: "carrying raster content" when their own subtree has any.
+_RASTER_CONTAINER_TAGS = frozenset({"pattern", "foreignObject"})
+
+
+def _inside_raster_container(
+    element: ET.Element, parent_map: Mapping[ET.Element, ET.Element]
+) -> bool:
+    """Whether some ancestor of ``element`` is itself a ``<pattern>`` or
+    ``<foreignObject>`` (issue #41's :mod:`vectorpress.validate.
+    raster_content`): that ancestor's own subtree scan (:func:`_subtree_has_raster`)
+    already finds and reports whatever raster content ``element`` itself
+    might be or carry, so ``element`` is never *also* independently
+    flagged -- one finding for the container, not one for the container
+    and a second for each raster descendant inside it."""
+    current = parent_map.get(element)
+    while current is not None:
+        if _local_name(current.tag) in _RASTER_CONTAINER_TAGS:
+            return True
+        current = parent_map.get(current)
+    return False
+
+
+@dataclass(frozen=True)
+class DocumentElement:
+    """One element in the document, document order, root ``<svg>`` excluded
+    (issue #41) -- the basis for :mod:`vectorpress.validate.raster_content`
+    and :mod:`vectorpress.validate.stray_object`, which reason about whole
+    elements (a stray ``<image>``, an empty ``<g>``, off-canvas geometry)
+    rather than a ``<path>``'s own subpaths.
+
+    ``bbox`` is ``None`` for a tag this module has no simple, closed-form
+    geometry for, or one whose own attributes did not parse
+    (:func:`_generic_element_bbox`) -- never a made-up box (Finding's own
+    "no geometry, no bbox" rule). ``has_own_data_uri`` and
+    ``subtree_has_raster`` are :func:`_has_own_data_uri`/
+    :func:`_subtree_has_raster`'s own results, computed once here rather
+    than re-walked per detector. ``rendered`` is :func:`_is_rendered`'s own
+    result -- :mod:`vectorpress.validate.stray_object` only ever judges a
+    rendered element a stray object; :mod:`vectorpress.validate.
+    raster_content` ignores this field, since a pattern tile or a clip path
+    can still carry raster content worth flagging even though it is never
+    rendered on its own. ``inside_raster_container`` is :func:`_inside_raster_container`'s
+    own result -- :mod:`vectorpress.validate.raster_content` skips an
+    element inside a ``<pattern>``/``<foreignObject>`` it already reports
+    on its own, so raster content nested inside one is never
+    double-counted."""
+
+    element_index: int
+    tag: str
+    element_id: str | None
+    bbox: BoundingBox | None
+    has_own_data_uri: bool
+    subtree_has_raster: bool
+    has_children: bool
+    attrib: Mapping[str, str]
+    rendered: bool
+    inside_raster_container: bool
+
+
+def parse_document_elements(svg_bytes: bytes) -> tuple[BoundingBox, list[DocumentElement]]:
+    """The document's own bounding box (:func:`_root_bbox`), plus every
+    element in it excluding the root ``<svg>`` (issue #41) -- the shared
+    parse :mod:`vectorpress.validate.raster_content` and
+    :mod:`vectorpress.validate.stray_object` both work from.
+
+    Raises :class:`ValueError` the same way :func:`_root_bbox` does, for a
+    root with neither a ``viewBox`` nor ``width``/``height`` (§35)."""
+    root = ET.fromstring(svg_bytes)
+    view_box = _root_bbox(root)
+    parent_map = _build_parent_map(root)
+
+    elements: list[DocumentElement] = []
+    for element_index, element in enumerate(child for child in root.iter() if child is not root):
+        tag = _local_name(element.tag)
+        elements.append(
+            DocumentElement(
+                element_index=element_index,
+                tag=tag,
+                element_id=element.attrib.get("id"),
+                bbox=_generic_element_bbox(tag, element.attrib),
+                has_own_data_uri=_has_own_data_uri(element.attrib),
+                subtree_has_raster=_subtree_has_raster(element),
+                has_children=len(list(element)) > 0,
+                attrib=dict(element.attrib),
+                rendered=_is_rendered(element, parent_map),
+                inside_raster_container=_inside_raster_container(element, parent_map),
+            )
+        )
+    return view_box, elements
+
+
+def _strict_sign(value: float) -> int:
+    """-1/0/1, with anything inside :data:`_INTERSECTION_EPS` of zero
+    treated as exactly zero (collinear) -- :func:`_segments_properly_intersect`'s
+    own tolerance for floating-point noise."""
+    if value > _INTERSECTION_EPS:
+        return 1
+    if value < -_INTERSECTION_EPS:
+        return -1
+    return 0
+
+
+def _orientation(a: Point, b: Point, c: Point) -> float:
+    """Twice the signed area of triangle ``abc`` -- positive when ``c`` is
+    left of ray ``a->b``, negative when right, (near) zero when collinear.
+    The one primitive :func:`_segments_properly_intersect` builds on."""
+    return (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0])
+
+
+def _segments_properly_intersect(p1: Point, p2: Point, p3: Point, p4: Point) -> Point | None:
+    """The point where segments ``p1p2`` and ``p3p4`` cross *transversally*
+    -- each segment's own two endpoints strictly on opposite sides of the
+    other -- or ``None`` when they do not (issue #41's overlap/self-
+    intersection detectors): two segments that only touch at a shared
+    endpoint, or run collinear along a shared edge (two identical, stacked
+    subpaths' own coincident edges, say), are deliberately **not** a
+    crossing -- that is :mod:`vectorpress.validate.duplicate_geometry`'s
+    concern, not :mod:`vectorpress.validate.overlap`'s.
+
+    A cheap bounding-box rejection runs first: the dominant cost for a
+    finely traced outline's own self-intersection scan (hundreds of
+    flattened points, an edge pair for every non-adjacent pair) is the
+    sheer number of pairs, not the handful of multiplications the full test
+    itself needs, so rejecting spatially-disjoint pairs cheaply first is
+    the one optimization worth making here."""
+    if max(p1[0], p2[0]) < min(p3[0], p4[0]) or max(p3[0], p4[0]) < min(p1[0], p2[0]):
+        return None
+    if max(p1[1], p2[1]) < min(p3[1], p4[1]) or max(p3[1], p4[1]) < min(p1[1], p2[1]):
+        return None
+
+    s1 = _strict_sign(_orientation(p3, p4, p1))
+    s2 = _strict_sign(_orientation(p3, p4, p2))
+    s3 = _strict_sign(_orientation(p1, p2, p3))
+    s4 = _strict_sign(_orientation(p1, p2, p4))
+    if s1 == 0 or s2 == 0 or s3 == 0 or s4 == 0:
+        return None  # touching or collinear -- not a proper crossing
+    if s1 == s2 or s3 == s4:
+        return None
+
+    x1, y1 = p1
+    x2, y2 = p2
+    x3, y3 = p3
+    x4, y4 = p4
+    denominator = (x1 - x2) * (y3 - y4) - (y1 - y2) * (x3 - x4)
+    if abs(denominator) < 1e-12:
+        return None  # parallel -- the sign test above should already exclude this
+    px = ((x1 * y2 - y1 * x2) * (x3 - x4) - (x1 - x2) * (x3 * y4 - y3 * x4)) / denominator
+    py = ((x1 * y2 - y1 * x2) * (y3 - y4) - (y1 - y2) * (x3 * y4 - y3 * x4)) / denominator
+    return (px, py)
+
+
+def find_self_intersections(points: tuple[Point, ...]) -> list[Point]:
+    """Every point where two non-adjacent edges of the one closed ring
+    ``points`` (already implicitly closed, like every other polygon helper
+    in this module) cross transversally (§9's "a self-intersecting
+    subpath", issue #41) -- a bowtie is the simplest case: two edges on
+    opposite sides of the ring crossing each other. Adjacent edges (sharing
+    a vertex, including the wrap-around pair) are never tested against each
+    other -- they always share exactly one point by construction, never a
+    genuine crossing."""
+    n = len(points)
+    hits: list[Point] = []
+    for i in range(n):
+        a1, a2 = points[i], points[(i + 1) % n]
+        for j in range(i + 1, n):
+            if j == i + 1 or (i == 0 and j == n - 1):
+                continue
+            b1, b2 = points[j], points[(j + 1) % n]
+            hit = _segments_properly_intersect(a1, a2, b1, b2)
+            if hit is not None:
+                hits.append(hit)
+    return hits
+
+
+def find_ring_intersections(ring_a: tuple[Point, ...], ring_b: tuple[Point, ...]) -> list[Point]:
+    """Every point where an edge of ``ring_a`` crosses an edge of
+    ``ring_b`` transversally (§9's "unintended overlap", issue #41) -- two
+    rings that do not cross at all are either disjoint or one fully
+    contains the other (a legitimate hole, say); this is deliberately blind
+    to which of those two it is, since telling them apart is exactly the
+    "well-nested" assumption this module's own docstring says overlap
+    detection must not rely on."""
+    hits: list[Point] = []
+    na, nb = len(ring_a), len(ring_b)
+    for i in range(na):
+        a1, a2 = ring_a[i], ring_a[(i + 1) % na]
+        for j in range(nb):
+            b1, b2 = ring_b[j], ring_b[(j + 1) % nb]
+            hit = _segments_properly_intersect(a1, a2, b1, b2)
+            if hit is not None:
+                hits.append(hit)
+    return hits

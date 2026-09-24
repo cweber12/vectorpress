@@ -40,6 +40,23 @@ _KIND = FindingKind.NARROW_FEATURE
 _CLASSIFICATION = CLASSIFICATION[_KIND]
 
 
+def _sort_key(finding: Finding) -> tuple[int, int | None, float, float]:
+    """This module's own finding order (element, subpath, then the narrow
+    region's own top-left corner) -- a small named function rather than an
+    inline lambda so it can assert ``location`` is set, which it always is
+    for every finding this module's own :func:`detect` builds (issue #41
+    widened :class:`~vectorpress.domain.finding.Finding.location` to
+    ``BoundingBox | None`` for kinds with no geometry; this one always has
+    some)."""
+    assert finding.location is not None
+    return (
+        finding.path_reference.element_index,
+        finding.path_reference.subpath_index,
+        finding.location.min_y,
+        finding.location.min_x,
+    )
+
+
 def detect(
     pieces: list[Piece], scale_user_units_per_inch: float, min_width_in: float
 ) -> list[Finding]:
@@ -89,12 +106,5 @@ def detect(
                 )
             )
 
-    findings.sort(
-        key=lambda finding: (
-            finding.path_reference.element_index,
-            finding.path_reference.subpath_index,
-            finding.location.min_y,
-            finding.location.min_x,
-        )
-    )
+    findings.sort(key=_sort_key)
     return findings
