@@ -22,6 +22,17 @@ a transparent background, with the innermost ring fully enclosed by the one
 around it -- exactly what ``flatcolor_svg``'s quantize-then-trace-per-color
 generator needs to exercise both nesting (a hole in one color's region where
 another color's region sits) and a disjoint extra region.
+
+Four more subjects (issue #39, §9, §9.1) each carry exactly one area-based
+finding kind: ``gumboot_chiton`` (an accidental dot), ``bat_star`` (a tiny
+isolated shape -- a thin sliver), ``keyhole_limpet`` (a very small hole), and
+``turban_snail`` (a hole sized to pass at the catalog's default 3in
+reference size but need review at a smaller product override -- §9.1's own
+point that a threshold is only meaningful at a known output size). Every one
+of these gets its own larger canvas, the same reasoning as ``owl_limpet``'s
+below: a feature a handful of pixels across needs real room to place
+precisely relative to both ``cut_svg``'s cleanup thresholds and
+``validate.cut_file``'s own validation thresholds.
 """
 
 from __future__ import annotations
@@ -283,11 +294,102 @@ def _owl_limpet_silhouette_with_cleanup_noise(size: int) -> Grid:
     return grid
 
 
-# (asset ID, filename, role, canvas size, mask, RGBA fill color): owl_limpet's
-# own, larger silhouette source -- a distinct tuple shape from
-# SHAPED_SOURCE_IMAGES above (which hardcodes the shared 16x16 ``SIZE``)
-# since this one needs its own, bigger canvas.
-CUT_FILE_FIXTURE_SOURCE_IMAGES: list[tuple[str, str, str, int, Grid, Rgba]] = [
+# --- gumboot_chiton, bat_star, keyhole_limpet, turban_snail: issue #39's --
+# area-finding fixtures -----------------------------------------------------
+#
+# Every one of these shares the same 300x300 canvas and the same main-body
+# disk (radius 130px, centered at (150,150)) -- big enough, relative to each
+# subject's own small extra feature, that the feature never changes the ink
+# mask's own bounding box (``cut_svg``'s own module docstring: "the two
+# bounding boxes coincide in every case this generator is meant for"), so
+# every physical-unit measurement below is against a stable ~31px/in --
+# actually 260px / 3in =~ 86.67px/in -- pixels-per-inch scale. Geometry was
+# tuned empirically against the real ``cut_svg.generate`` +
+# ``validate.cut_file.validate_cut_file`` pipeline (not hand-derived), since
+# a morphological opening's effect on a shape's surviving extent is not a
+# simple, predictable subtraction.
+AREA_FINDING_FIXTURE_SIZE = 300
+_AREA_FINDING_MAIN_BODY_CENTER = 150.0
+_AREA_FINDING_MAIN_BODY_RADIUS = 130.0
+
+
+def _area_finding_main_body(size: int) -> Grid:
+    """The shared main body every fixture below anchors its own extra
+    feature to -- always the document's largest piece by a wide margin, so
+    it is never itself a dot/tiny-shape/hole candidate (ADR 0007, issue
+    #37, issue #39)."""
+    return _solid_blob(
+        size,
+        cx=_AREA_FINDING_MAIN_BODY_CENTER,
+        cy=_AREA_FINDING_MAIN_BODY_CENTER,
+        radius=_AREA_FINDING_MAIN_BODY_RADIUS,
+    )
+
+
+def _gumboot_chiton_silhouette_with_a_dot(size: int) -> Grid:
+    """The main body plus one small, detached circular eye-spot (issue
+    #39's own example): 14px across (radius 7, centered at (280,20), far
+    outside the main body's own disk despite sharing its bounding square) --
+    comfortably above ``cut_svg``'s own island-area cleanup floor (about
+    double it, so it survives cleanup as a real piece) yet comfortably under
+    ``validate.cut_file``'s accidental-dot dimension threshold (about
+    0.15in at the catalog's default 3in reference size, against a 0.2in
+    threshold): an accidental dot, and nothing else."""
+    main_body = _area_finding_main_body(size)
+    dot = _solid_blob(size, cx=280.0, cy=20.0, radius=7.0)
+    return [[main_body[y][x] or dot[y][x] for x in range(size)] for y in range(size)]
+
+
+def _bat_star_silhouette_with_a_sliver(size: int) -> Grid:
+    """The main body plus one small, detached rectangle -- a broken-off arm
+    tip -- 7px wide (just past the width a morphological opening this
+    fixture's ``opening_width_in`` erases entirely, so it survives cleanup
+    as a real piece) by 20px long (comfortably over the accidental-dot
+    dimension threshold, so it is never mistaken for a dot), with a total
+    area comfortably under the tiny-isolated-shape area threshold: a thin
+    sliver, and nothing else."""
+    main_body = _area_finding_main_body(size)
+    sliver_cells = {(x, y) for x in range(250, 270) for y in range(20, 27)}
+    return [[main_body[y][x] or (x, y) in sliver_cells for x in range(size)] for y in range(size)]
+
+
+def _keyhole_limpet_silhouette_with_a_small_hole(size: int) -> Grid:
+    """The main body with one small hole cut from its own center: 6px in
+    radius -- comfortably above ``cut_svg``'s own hole-area cleanup floor
+    (survives cleanup as a real hole) yet comfortably under
+    ``validate.cut_file``'s small-hole area threshold at the catalog's
+    default 3in reference size: a very small hole, and nothing else."""
+    return _ring(
+        size,
+        cx=_AREA_FINDING_MAIN_BODY_CENTER,
+        cy=_AREA_FINDING_MAIN_BODY_CENTER,
+        outer=_AREA_FINDING_MAIN_BODY_RADIUS,
+        inner=6.0,
+    )
+
+
+def _turban_snail_silhouette_with_a_borderline_hole(size: int) -> Grid:
+    """The main body with one hole cut from its own center, 13px in radius
+    -- sized so its *physical* area passes at the catalog's default 3in
+    reference size (about 0.069in^2, well clear of the 0.02in^2 small-hole
+    threshold) but needs review at a smaller product override (about
+    0.008in^2 at 1in): §9.1's own point that a threshold is only meaningful
+    at a known output size, and the extra acceptance criterion reassigned
+    to issue #39 by controller ruling (issue #38's `kelp_forest_mini_pack`
+    `reference_size_in` override)."""
+    return _ring(
+        size,
+        cx=_AREA_FINDING_MAIN_BODY_CENTER,
+        cy=_AREA_FINDING_MAIN_BODY_CENTER,
+        outer=_AREA_FINDING_MAIN_BODY_RADIUS,
+        inner=13.0,
+    )
+
+
+# (asset ID, filename, role, canvas size, mask, RGBA fill color): every
+# source needing its own, larger canvas -- a distinct tuple shape from
+# SHAPED_SOURCE_IMAGES above (which hardcodes the shared 16x16 ``SIZE``).
+LARGE_CANVAS_SOURCE_IMAGES: list[tuple[str, str, str, int, Grid, Rgba]] = [
     (
         "owl_limpet",
         "silhouette.png",
@@ -295,6 +397,38 @@ CUT_FILE_FIXTURE_SOURCE_IMAGES: list[tuple[str, str, str, int, Grid, Rgba]] = [
         CUT_FILE_FIXTURE_SIZE,
         _owl_limpet_silhouette_with_cleanup_noise(CUT_FILE_FIXTURE_SIZE),
         (110, 90, 60, 255),
+    ),
+    (
+        "gumboot_chiton",
+        "silhouette.png",
+        "silhouette",
+        AREA_FINDING_FIXTURE_SIZE,
+        _gumboot_chiton_silhouette_with_a_dot(AREA_FINDING_FIXTURE_SIZE),
+        (120, 80, 50, 255),
+    ),
+    (
+        "bat_star",
+        "silhouette.png",
+        "silhouette",
+        AREA_FINDING_FIXTURE_SIZE,
+        _bat_star_silhouette_with_a_sliver(AREA_FINDING_FIXTURE_SIZE),
+        (200, 120, 60, 255),
+    ),
+    (
+        "keyhole_limpet",
+        "silhouette.png",
+        "silhouette",
+        AREA_FINDING_FIXTURE_SIZE,
+        _keyhole_limpet_silhouette_with_a_small_hole(AREA_FINDING_FIXTURE_SIZE),
+        (140, 130, 110, 255),
+    ),
+    (
+        "turban_snail",
+        "silhouette.png",
+        "silhouette",
+        AREA_FINDING_FIXTURE_SIZE,
+        _turban_snail_silhouette_with_a_borderline_hole(AREA_FINDING_FIXTURE_SIZE),
+        (90, 110, 70, 255),
     ),
 ]
 
@@ -332,7 +466,7 @@ def main() -> None:
         out_path.write_bytes(make_shaped_png(SIZE, mask, rgba)[:truncate_to])
         print(f"wrote {out_path} (truncated to {truncate_to} bytes)")
 
-    for asset_id, filename, _role, size, mask, rgba in CUT_FILE_FIXTURE_SOURCE_IMAGES:
+    for asset_id, filename, _role, size, mask, rgba in LARGE_CANVAS_SOURCE_IMAGES:
         out_dir = FIXTURE_ASSETS_DIR / asset_id / "sources"
         out_dir.mkdir(parents=True, exist_ok=True)
         out_path = out_dir / filename

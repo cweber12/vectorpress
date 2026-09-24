@@ -36,6 +36,18 @@ class FindingKind(StrEnum):
     DISCONNECTED_FRAGMENTS = "disconnected_fragments"
     RASTER_CONTENT = "raster_content"
 
+    # One kind per shape (issue #39): a cut piece (one candidate cut-file
+    # subpath, :class:`~vectorpress.validate._svg_geometry.Piece`) is
+    # reported as at most one of :attr:`ACCIDENTAL_DOT`,
+    # :attr:`TINY_ISOLATED_SHAPE` or :attr:`DISCONNECTED_FRAGMENTS`, never
+    # more than one -- these three are the only kinds that classify a
+    # *piece* rather than a hole or the document as a whole, and
+    # :mod:`vectorpress.validate.cut_file` checks a piece against them in
+    # that fixed order (dot, then tiny shape, then disconnected fragment),
+    # removing whichever piece a detector already claimed before offering
+    # what remains to the next one. :attr:`SMALL_HOLE` classifies holes, an
+    # independent axis that never competes with a piece's own kind.
+
 
 class FindingClassification(StrEnum):
     """How one :class:`FindingKind` rolls up into a file's pass/needs-review

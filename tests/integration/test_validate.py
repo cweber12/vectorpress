@@ -1,5 +1,5 @@
 """``vpress validate`` end to end against a temporary copy of the fixture
-catalog (§9, §9.1, §9.2, §35, §36, ADR 0004, ADR 0007, issue #37).
+catalog (§9, §9.1, §9.2, §35, §36, ADR 0004, ADR 0007, issue #37, issue #39).
 
 Runs against a temporary copy, never the committed fixture directly -- same
 reason as ``tests/integration/test_generate.py``: this command writes real
@@ -7,15 +7,26 @@ findings JSON files under each asset's ``derived/``, and the fixture catalog
 must never contain one.
 
 The fixture's cut-file subjects (``tests/fixtures/catalog/generate_source_pngs.py``,
-issue #36): ``ochre_sea_star`` (a single blob, one piece), ``purple_sea_urchin``
-(a ring -- one piece with a hole, not two pieces), ``giant_green_anemone``
-(a blob plus a detached island -- two pieces), and ``owl_limpet`` (a larger
-canvas with cleanup noise plus a detached piece that survives cleanup -- two
-pieces). ``acorn_barnacle``'s only source is truncated (issue #27), so its
-``cut_svg`` never generates at all -- it stays ``missing``, never validated.
+issue #36, issue #39): ``ochre_sea_star`` (a single blob, one piece),
+``purple_sea_urchin`` (a ring -- one piece with a hole, not two pieces),
+``giant_green_anemone`` (a blob plus a detached island -- two pieces), and
+``owl_limpet`` (a larger canvas with cleanup noise plus a detached piece
+that survives cleanup -- two pieces). ``acorn_barnacle``'s only source is
+truncated (issue #27), so its ``cut_svg`` never generates at all -- it
+stays ``missing``, never validated.
+
+Issue #39 adds four more subjects, each carrying exactly one area-based
+finding kind: ``gumboot_chiton`` (an accidental dot), ``bat_star`` (a tiny
+isolated shape -- a sliver), ``keyhole_limpet`` (a very small hole), and
+``turban_snail`` (a hole sized to pass at the catalog default but need
+review at ``kelp_forest_mini_pack``'s smaller reference-size override --
+see ``test_turban_snail_passes_at_the_catalog_default_and_needs_review_at_the_product_override``
+below, the extra acceptance criterion reassigned to this issue by
+controller ruling).
 """
 
 import json
+import re
 import shutil
 from pathlib import Path
 
@@ -28,6 +39,7 @@ from vectorpress.catalog.provenance import DERIVED_DIRNAME, sha256_bytes
 from vectorpress.cli.app import app
 from vectorpress.domain import recipe as recipe_module
 from vectorpress.domain.derivative_type import DerivativeType
+from vectorpress.domain.finding import FindingKind, ValidationOutcome
 from vectorpress.domain.recipe import Recipe
 from vectorpress.validate.cut_file import validate_cut_file
 
@@ -37,20 +49,38 @@ FIXTURE_CATALOG_ROOT = Path(__file__).parents[1] / "fixtures" / "catalog"
 
 # (asset ID, cut-file filename) -- every fixture asset with a decodable
 # silhouette source, the same set ``test_generate.py``'s own
-# ``FIXTURE_CUT_SVG_OUTPUTS`` validates a cut file exists for (issue #36).
+# ``FIXTURE_CUT_SVG_OUTPUTS`` validates a cut file exists for (issue #36,
+# issue #39).
 FIXTURE_CUT_FILES = [
     ("ochre_sea_star", "ochre-sea-star-cut.svg"),
     ("purple_sea_urchin", "purple-sea-urchin-cut.svg"),
     ("giant_green_anemone", "giant-green-anemone-cut.svg"),
     ("owl_limpet", "owl-limpet-cut.svg"),
+    ("gumboot_chiton", "gumboot-chiton-cut.svg"),
+    ("bat_star", "bat-star-cut.svg"),
+    ("keyhole_limpet", "keyhole-limpet-cut.svg"),
+    ("turban_snail", "turban-snail-cut.svg"),
 ]
 
 # Subjects whose cut file is a single physical piece -- pass, no findings.
-FIXTURE_PASS_ASSETS = ["ochre_sea_star", "purple_sea_urchin"]
+# turban_snail's one hole is sized to pass at the catalog default too
+# (issue #39's own extra acceptance criterion) -- see the dedicated test
+# below for its own, smaller product-size behavior.
+FIXTURE_PASS_ASSETS = ["ochre_sea_star", "purple_sea_urchin", "turban_snail"]
 
 # Subjects whose cut file has a genuinely separate second piece -- needs
 # review, one disconnected_fragments finding each.
 FIXTURE_NEEDS_REVIEW_ASSETS = ["giant_green_anemone", "owl_limpet"]
+
+# (asset ID, expected FindingKind value) -- issue #39's three area-finding
+# fixtures, each tripping exactly the kind it is named for at the catalog
+# default reference size (3.0in). Checked by
+# ``test_area_finding_fixtures_need_review_with_their_intended_kind`` below.
+FIXTURE_AREA_FINDING_ASSETS = [
+    ("gumboot_chiton", "accidental_dot"),
+    ("bat_star", "tiny_isolated_shape"),
+    ("keyhole_limpet", "small_hole"),
+]
 
 
 @pytest.fixture
@@ -157,6 +187,92 @@ def test_vpress_asset_shows_the_findings_result(
     anemone = runner.invoke(app, ["asset", "giant_green_anemone"])
     assert anemone.exit_code == 0, anemone.output
     assert "cut_svg\tcurrent\tgiant-green-anemone-cut.svg\tneeds review" in anemone.stdout
+
+
+# --- issue #39: area-based findings (accidental dot, tiny isolated shape, small hole) -----
+
+
+@pytest.mark.integration
+def test_area_finding_fixtures_need_review_with_their_intended_kind(
+    monkeypatch: pytest.MonkeyPatch, temp_catalog_root: Path
+) -> None:
+    """Issue #39 acceptance criterion 1: on a temp fixture copy, ``vpress
+    generate --all`` then ``vpress validate --all`` shows each new subject
+    (``gumboot_chiton``, ``bat_star``, ``keyhole_limpet``) as ``needs
+    review``, with its intended finding kind and a location -- and with no
+    other finding kind mixed in, since each fixture was built to trip
+    exactly one (``tests/fixtures/catalog/README.md``)."""
+    monkeypatch.chdir(temp_catalog_root)
+    generate_result = runner.invoke(app, ["generate", "--all"])
+    assert generate_result.exit_code == 1, generate_result.output  # acorn_barnacle still fails
+
+    result = runner.invoke(app, ["validate", "--all"])
+
+    assert result.exit_code == 0, result.output
+    lines = result.stdout.splitlines()
+    for asset_id, expected_kind in FIXTURE_AREA_FINDING_ASSETS:
+        _, filename = next(f for f in FIXTURE_CUT_FILES if f[0] == asset_id)
+        assert f"{asset_id}\tcut_svg\t{filename}\tneeds review" in result.stdout
+
+        header_index = next(i for i, line in enumerate(lines) if line.startswith(f"{asset_id}\t"))
+        finding_line = lines[header_index + 1].strip()
+        assert finding_line.startswith(expected_kind), finding_line
+        # a location: an "(x,y)-(x,y)" bbox, the same shape every other
+        # detector's finding already carries (issue #37).
+        assert re.search(r"\(-?[\d.]+,-?[\d.]+\)-\(-?[\d.]+,-?[\d.]+\)", finding_line)
+        # exactly one finding line -- no other kind mixed in for this asset.
+        next_header_index = next(
+            (
+                i
+                for i in range(header_index + 1, len(lines))
+                if "\t" in lines[i] and not lines[i].startswith(" ")
+            ),
+            len(lines),
+        )
+        assert next_header_index == header_index + 2
+
+
+@pytest.mark.integration
+def test_turban_snail_passes_at_the_catalog_default_and_needs_review_at_the_product_override(
+    monkeypatch: pytest.MonkeyPatch, temp_catalog_root: Path
+) -> None:
+    """The extra acceptance criterion reassigned to issue #39 by controller
+    ruling: a fixture cut file that is ``pass`` at the catalog default
+    (3.0in) and ``needs review`` at ``kelp_forest_mini_pack``'s override
+    size (1.0in) -- §9.1's own point that a threshold is only meaningful at
+    a known output size. ``turban_snail``'s one hole (about 0.069in^2 at
+    3in, about 0.008in^2 at 1in) is sized exactly for this, using the real
+    small_hole detector, not a synthetic one."""
+    monkeypatch.chdir(temp_catalog_root)
+    runner.invoke(app, ["generate", "--all"])
+
+    at_default = runner.invoke(app, ["validate", "turban_snail"])
+    assert at_default.exit_code == 0, at_default.output
+    assert "turban_snail\tcut_svg\tturban-snail-cut.svg\tpass" in at_default.stdout
+
+    at_product_size = runner.invoke(
+        app, ["validate", "turban_snail", "--product", "kelp_forest_mini_pack"]
+    )
+    assert at_product_size.exit_code == 0, at_product_size.output
+    assert (
+        "turban_snail\tcut_svg\tturban-snail-cut.svg\tneeds review\t"
+        "(at 1in, product kelp_forest_mini_pack)" in at_product_size.stdout
+    )
+    assert "small_hole" in at_product_size.stdout
+
+    default_report = read_findings_report(
+        _derived_dir(temp_catalog_root, "turban_snail"), "turban-snail-cut.svg"
+    )
+    assert default_report is not None
+    assert default_report.result is ValidationOutcome.PASS
+
+    sized_report = read_findings_report(
+        _derived_dir(temp_catalog_root, "turban_snail"), "turban-snail-cut.svg", at_size=1.0
+    )
+    assert sized_report is not None
+    assert sized_report.result is ValidationOutcome.NEEDS_REVIEW
+    assert len(sized_report.findings) == 1
+    assert sized_report.findings[0].kind is FindingKind.SMALL_HOLE
 
 
 # --- acceptance criterion 2: findings JSON, nothing written inside the SVG or TOML --------

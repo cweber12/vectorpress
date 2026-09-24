@@ -80,10 +80,14 @@ def test_load_catalog_on_the_clean_fixture_has_no_problems() -> None:
     assert catalog.config.name == "Tide Pool Studio"
     assert [asset.id for asset in catalog.assets] == [
         "acorn_barnacle",
+        "bat_star",
         "giant_green_anemone",
+        "gumboot_chiton",
+        "keyhole_limpet",
         "ochre_sea_star",
         "owl_limpet",
         "purple_sea_urchin",
+        "turban_snail",
     ]
     assert [c.slug for c in catalog.collections] == [
         "kelp_forest_ecosystem",
@@ -106,10 +110,14 @@ def test_load_catalog_without_brand_toml_reports_its_absence(catalog_copy: Path)
     assert catalog.config is not None
     assert [asset.id for asset in catalog.assets] == [
         "acorn_barnacle",
+        "bat_star",
         "giant_green_anemone",
+        "gumboot_chiton",
+        "keyhole_limpet",
         "ochre_sea_star",
         "owl_limpet",
         "purple_sea_urchin",
+        "turban_snail",
     ]
     assert catalog.brand is None
     assert len(catalog.problems) == 1
@@ -170,9 +178,13 @@ def test_load_catalog_aggregates_asset_problems_and_keeps_the_valid_assets(
     loaded_ids = {asset.id for asset in catalog.assets}
     assert loaded_ids == {
         "acorn_barnacle",
+        "bat_star",
         "giant_green_anemone",
+        "gumboot_chiton",
+        "keyhole_limpet",
         "owl_limpet",
         "purple_sea_urchin",
+        "turban_snail",
     }
     assert len(catalog.problems) == 1
     assert "ochre_sea_star" in str(catalog.problems[0].path)

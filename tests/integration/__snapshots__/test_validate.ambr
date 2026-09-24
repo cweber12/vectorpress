@@ -1,4 +1,37 @@
 # serializer version: 1
+# name: test_findings_json_is_locked_by_snapshot[bat_star-bat-star-cut.svg]
+  dict({
+    'content_hash': '0f7a670a7aeb86ed02766a0f4b387d7fd5663043ab1c12b4d015aaa64be00186',
+    'findings': list([
+      dict({
+        'classification': 'needs_review',
+        'kind': 'tiny_isolated_shape',
+        'location': dict({
+          'max_x': 270.0,
+          'max_y': 27.0,
+          'min_x': 250.0,
+          'min_y': 19.8524,
+        }),
+        'measured_value': 0.015,
+        'message': 'tiny isolated shape: path element 0, subpath 1 has area 0.015in², below the 0.02in² minimum shape area',
+        'path_reference': dict({
+          'element_index': 0,
+          'id': None,
+          'subpath_index': 1,
+        }),
+        'threshold': 0.02,
+      }),
+    ]),
+    'reference_size_in': 3.0,
+    'result': 'needs_review',
+    'thresholds': dict({
+      'accidental_dot_max_dimension_in': 0.2,
+      'small_hole_min_area_in2': 0.02,
+      'tiny_isolated_shape_min_area_in2': 0.02,
+    }),
+    'validated_file': 'bat-star-cut.svg',
+  })
+# ---
 # name: test_findings_json_is_locked_by_snapshot[giant_green_anemone-giant-green-anemone-cut.svg]
   dict({
     'content_hash': 'c58ffd518711eb2289911355f1f94015a13da48765fa24b2a2fc17025a7c554d',
@@ -25,8 +58,77 @@
     'reference_size_in': 3.0,
     'result': 'needs_review',
     'thresholds': dict({
+      'accidental_dot_max_dimension_in': 0.2,
+      'small_hole_min_area_in2': 0.02,
+      'tiny_isolated_shape_min_area_in2': 0.02,
     }),
     'validated_file': 'giant-green-anemone-cut.svg',
+  })
+# ---
+# name: test_findings_json_is_locked_by_snapshot[gumboot_chiton-gumboot-chiton-cut.svg]
+  dict({
+    'content_hash': '526771f6aafe457dae0a8f5775938aefdfb540aedff07f4c6cec496a257cee48',
+    'findings': list([
+      dict({
+        'classification': 'needs_review',
+        'kind': 'accidental_dot',
+        'location': dict({
+          'max_x': 287.1629,
+          'max_y': 27.1499,
+          'min_x': 273.8683,
+          'min_y': 13.9002,
+        }),
+        'measured_value': 0.1496,
+        'message': 'accidental dot: path element 0, subpath 1 is only 0.1496in across, below the 0.2in dot threshold',
+        'path_reference': dict({
+          'element_index': 0,
+          'id': None,
+          'subpath_index': 1,
+        }),
+        'threshold': 0.2,
+      }),
+    ]),
+    'reference_size_in': 3.0,
+    'result': 'needs_review',
+    'thresholds': dict({
+      'accidental_dot_max_dimension_in': 0.2,
+      'small_hole_min_area_in2': 0.02,
+      'tiny_isolated_shape_min_area_in2': 0.02,
+    }),
+    'validated_file': 'gumboot-chiton-cut.svg',
+  })
+# ---
+# name: test_findings_json_is_locked_by_snapshot[keyhole_limpet-keyhole-limpet-cut.svg]
+  dict({
+    'content_hash': '8e507d53b4799d2e88e5e4fad7971d2a5c2072c8da88a0aa59073bac14734ae4',
+    'findings': list([
+      dict({
+        'classification': 'needs_review',
+        'kind': 'small_hole',
+        'location': dict({
+          'max_x': 156.0,
+          'max_y': 156.0,
+          'min_x': 145.0,
+          'min_y': 145.0,
+        }),
+        'measured_value': 0.0137,
+        'message': 'very small hole: path element 0, subpath 1 has area 0.0137in², below the 0.02in² minimum hole area',
+        'path_reference': dict({
+          'element_index': 0,
+          'id': None,
+          'subpath_index': 1,
+        }),
+        'threshold': 0.02,
+      }),
+    ]),
+    'reference_size_in': 3.0,
+    'result': 'needs_review',
+    'thresholds': dict({
+      'accidental_dot_max_dimension_in': 0.2,
+      'small_hole_min_area_in2': 0.02,
+      'tiny_isolated_shape_min_area_in2': 0.02,
+    }),
+    'validated_file': 'keyhole-limpet-cut.svg',
   })
 # ---
 # name: test_findings_json_is_locked_by_snapshot[ochre_sea_star-ochre-sea-star-cut.svg]
@@ -37,6 +139,9 @@
     'reference_size_in': 3.0,
     'result': 'pass',
     'thresholds': dict({
+      'accidental_dot_max_dimension_in': 0.2,
+      'small_hole_min_area_in2': 0.02,
+      'tiny_isolated_shape_min_area_in2': 0.02,
     }),
     'validated_file': 'ochre-sea-star-cut.svg',
   })
@@ -67,6 +172,9 @@
     'reference_size_in': 3.0,
     'result': 'needs_review',
     'thresholds': dict({
+      'accidental_dot_max_dimension_in': 0.2,
+      'small_hole_min_area_in2': 0.02,
+      'tiny_isolated_shape_min_area_in2': 0.02,
     }),
     'validated_file': 'owl-limpet-cut.svg',
   })
@@ -79,8 +187,59 @@
     'reference_size_in': 3.0,
     'result': 'pass',
     'thresholds': dict({
+      'accidental_dot_max_dimension_in': 0.2,
+      'small_hole_min_area_in2': 0.02,
+      'tiny_isolated_shape_min_area_in2': 0.02,
     }),
     'validated_file': 'purple-sea-urchin-cut.svg',
+  })
+# ---
+# name: test_findings_json_is_locked_by_snapshot[turban_snail-turban-snail-cut.svg]
+  dict({
+    'content_hash': 'e79374b5b9e4f445ead1200619ac8f3f2754d246373843271840973980bd10a9',
+    'findings': list([
+    ]),
+    'reference_size_in': 3.0,
+    'result': 'pass',
+    'thresholds': dict({
+      'accidental_dot_max_dimension_in': 0.2,
+      'small_hole_min_area_in2': 0.02,
+      'tiny_isolated_shape_min_area_in2': 0.02,
+    }),
+    'validated_file': 'turban-snail-cut.svg',
+  })
+# ---
+# name: test_product_size_findings_json_is_locked_by_snapshot[bat_star-bat-star-cut.svg]
+  dict({
+    'content_hash': '0f7a670a7aeb86ed02766a0f4b387d7fd5663043ab1c12b4d015aaa64be00186',
+    'findings': list([
+      dict({
+        'classification': 'needs_review',
+        'kind': 'accidental_dot',
+        'location': dict({
+          'max_x': 270.0,
+          'max_y': 27.0,
+          'min_x': 250.0,
+          'min_y': 19.8524,
+        }),
+        'measured_value': 0.0768,
+        'message': 'accidental dot: path element 0, subpath 1 is only 0.0768in across, below the 0.2in dot threshold',
+        'path_reference': dict({
+          'element_index': 0,
+          'id': None,
+          'subpath_index': 1,
+        }),
+        'threshold': 0.2,
+      }),
+    ]),
+    'reference_size_in': 1.0,
+    'result': 'needs_review',
+    'thresholds': dict({
+      'accidental_dot_max_dimension_in': 0.2,
+      'small_hole_min_area_in2': 0.02,
+      'tiny_isolated_shape_min_area_in2': 0.02,
+    }),
+    'validated_file': 'bat-star-cut.svg',
   })
 # ---
 # name: test_product_size_findings_json_is_locked_by_snapshot[giant_green_anemone-giant-green-anemone-cut.svg]
@@ -89,28 +248,97 @@
     'findings': list([
       dict({
         'classification': 'needs_review',
-        'kind': 'disconnected_fragments',
+        'kind': 'accidental_dot',
         'location': dict({
           'max_x': 14.0,
           'max_y': 4.0,
           'min_x': 12.0,
           'min_y': 2.0,
         }),
-        'measured_value': None,
-        'message': "disconnected fragment: path element 0, subpath 1 is separate from the design's largest piece",
+        'measured_value': 0.1667,
+        'message': 'accidental dot: path element 0, subpath 1 is only 0.1667in across, below the 0.2in dot threshold',
         'path_reference': dict({
           'element_index': 0,
           'id': None,
           'subpath_index': 1,
         }),
-        'threshold': None,
+        'threshold': 0.2,
       }),
     ]),
     'reference_size_in': 1.0,
     'result': 'needs_review',
     'thresholds': dict({
+      'accidental_dot_max_dimension_in': 0.2,
+      'small_hole_min_area_in2': 0.02,
+      'tiny_isolated_shape_min_area_in2': 0.02,
     }),
     'validated_file': 'giant-green-anemone-cut.svg',
+  })
+# ---
+# name: test_product_size_findings_json_is_locked_by_snapshot[gumboot_chiton-gumboot-chiton-cut.svg]
+  dict({
+    'content_hash': '526771f6aafe457dae0a8f5775938aefdfb540aedff07f4c6cec496a257cee48',
+    'findings': list([
+      dict({
+        'classification': 'needs_review',
+        'kind': 'accidental_dot',
+        'location': dict({
+          'max_x': 287.1629,
+          'max_y': 27.1499,
+          'min_x': 273.8683,
+          'min_y': 13.9002,
+        }),
+        'measured_value': 0.0499,
+        'message': 'accidental dot: path element 0, subpath 1 is only 0.0499in across, below the 0.2in dot threshold',
+        'path_reference': dict({
+          'element_index': 0,
+          'id': None,
+          'subpath_index': 1,
+        }),
+        'threshold': 0.2,
+      }),
+    ]),
+    'reference_size_in': 1.0,
+    'result': 'needs_review',
+    'thresholds': dict({
+      'accidental_dot_max_dimension_in': 0.2,
+      'small_hole_min_area_in2': 0.02,
+      'tiny_isolated_shape_min_area_in2': 0.02,
+    }),
+    'validated_file': 'gumboot-chiton-cut.svg',
+  })
+# ---
+# name: test_product_size_findings_json_is_locked_by_snapshot[keyhole_limpet-keyhole-limpet-cut.svg]
+  dict({
+    'content_hash': '8e507d53b4799d2e88e5e4fad7971d2a5c2072c8da88a0aa59073bac14734ae4',
+    'findings': list([
+      dict({
+        'classification': 'needs_review',
+        'kind': 'small_hole',
+        'location': dict({
+          'max_x': 156.0,
+          'max_y': 156.0,
+          'min_x': 145.0,
+          'min_y': 145.0,
+        }),
+        'measured_value': 0.0015,
+        'message': 'very small hole: path element 0, subpath 1 has area 0.0015in², below the 0.02in² minimum hole area',
+        'path_reference': dict({
+          'element_index': 0,
+          'id': None,
+          'subpath_index': 1,
+        }),
+        'threshold': 0.02,
+      }),
+    ]),
+    'reference_size_in': 1.0,
+    'result': 'needs_review',
+    'thresholds': dict({
+      'accidental_dot_max_dimension_in': 0.2,
+      'small_hole_min_area_in2': 0.02,
+      'tiny_isolated_shape_min_area_in2': 0.02,
+    }),
+    'validated_file': 'keyhole-limpet-cut.svg',
   })
 # ---
 # name: test_product_size_findings_json_is_locked_by_snapshot[ochre_sea_star-ochre-sea-star-cut.svg]
@@ -121,6 +349,9 @@
     'reference_size_in': 1.0,
     'result': 'pass',
     'thresholds': dict({
+      'accidental_dot_max_dimension_in': 0.2,
+      'small_hole_min_area_in2': 0.02,
+      'tiny_isolated_shape_min_area_in2': 0.02,
     }),
     'validated_file': 'ochre-sea-star-cut.svg',
   })
@@ -131,26 +362,29 @@
     'findings': list([
       dict({
         'classification': 'needs_review',
-        'kind': 'disconnected_fragments',
+        'kind': 'accidental_dot',
         'location': dict({
           'max_x': 93.2,
           'max_y': 57.353,
           'min_x': 75.8667,
           'min_y': 39.678,
         }),
-        'measured_value': None,
-        'message': "disconnected fragment: path element 0, subpath 1 is separate from the design's largest piece",
+        'measured_value': 0.1933,
+        'message': 'accidental dot: path element 0, subpath 1 is only 0.1933in across, below the 0.2in dot threshold',
         'path_reference': dict({
           'element_index': 0,
           'id': None,
           'subpath_index': 1,
         }),
-        'threshold': None,
+        'threshold': 0.2,
       }),
     ]),
     'reference_size_in': 1.0,
     'result': 'needs_review',
     'thresholds': dict({
+      'accidental_dot_max_dimension_in': 0.2,
+      'small_hole_min_area_in2': 0.02,
+      'tiny_isolated_shape_min_area_in2': 0.02,
     }),
     'validated_file': 'owl-limpet-cut.svg',
   })
@@ -163,7 +397,43 @@
     'reference_size_in': 1.0,
     'result': 'pass',
     'thresholds': dict({
+      'accidental_dot_max_dimension_in': 0.2,
+      'small_hole_min_area_in2': 0.02,
+      'tiny_isolated_shape_min_area_in2': 0.02,
     }),
     'validated_file': 'purple-sea-urchin-cut.svg',
+  })
+# ---
+# name: test_product_size_findings_json_is_locked_by_snapshot[turban_snail-turban-snail-cut.svg]
+  dict({
+    'content_hash': 'e79374b5b9e4f445ead1200619ac8f3f2754d246373843271840973980bd10a9',
+    'findings': list([
+      dict({
+        'classification': 'needs_review',
+        'kind': 'small_hole',
+        'location': dict({
+          'max_x': 162.9661,
+          'max_y': 162.9915,
+          'min_x': 137.9021,
+          'min_y': 137.9052,
+        }),
+        'measured_value': 0.0074,
+        'message': 'very small hole: path element 0, subpath 1 has area 0.0074in², below the 0.02in² minimum hole area',
+        'path_reference': dict({
+          'element_index': 0,
+          'id': None,
+          'subpath_index': 1,
+        }),
+        'threshold': 0.02,
+      }),
+    ]),
+    'reference_size_in': 1.0,
+    'result': 'needs_review',
+    'thresholds': dict({
+      'accidental_dot_max_dimension_in': 0.2,
+      'small_hole_min_area_in2': 0.02,
+      'tiny_isolated_shape_min_area_in2': 0.02,
+    }),
+    'validated_file': 'turban-snail-cut.svg',
   })
 # ---

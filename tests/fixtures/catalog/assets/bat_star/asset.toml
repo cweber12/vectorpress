@@ -1,0 +1,42 @@
+# Hand-authored asset metadata (ADR 0005). The asset ID is this folder's name.
+#
+# The tiny_isolated_shape fixture (issue #39, §9): its silhouette.png (see
+# tests/fixtures/catalog/generate_source_pngs.py) is a large, purpose-built
+# source carrying a main body plus one small, detached rectangle -- a
+# broken-off arm tip -- on this asset's own 300x300 canvas: 7px wide (just
+# past the width cut_svg's morphological opening erases entirely, so it
+# survives cleanup as a real piece) by 20px long (comfortably over the
+# accidental-dot dimension threshold, so it is never mistaken for a dot),
+# with a total area comfortably under validate.cut_file's tiny-isolated-
+# shape area threshold at the catalog's default 3in reference size. Its cut
+# file's findings report holds exactly one finding: a tiny isolated shape
+# (a sliver), nothing else.
+#
+# ecosystems deliberately match no rule-based fixture collection: neither
+# "Kelp forest" (kelp_forest_ecosystem's rule) nor pacific_coast_tide_pool
+# (an explicit, hand-picked asset list this asset was never added to).
+
+common_name = "Bat star"
+display_name = "Bat Star"
+scientific_name = "Patiria miniata"
+description = """
+A short-armed, webbed sea star found in tide pools and on subtidal rocks
+along the Pacific coast, in shades from orange to purple to mottled red.
+"""
+subject_category = "Echinoderm"
+tags = ["sea star", "tide pool", "rocky intertidal"]
+regions = ["California", "Oregon", "Washington", "Pacific Coast"]
+ecosystems = ["Subtidal", "Rocky reef"]
+taxonomic_group = "Echinoderm"
+product_use_categories = ["apparel", "stickers", "wall art"]
+notes = "Silhouette source purpose-built to trip the tiny_isolated_shape finding kind (issue #39): a detached sliver below the minimum shape area."
+
+rights_status = "original_artwork"
+licensing_notes = "Original illustration commissioned for this catalog; no external license required."
+
+accuracy_status = "not_reviewed"
+
+# Source images: file is relative to this asset's sources/ directory (ADR 0003).
+[[sources]]
+role = "silhouette"
+file = "silhouette.png"
