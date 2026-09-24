@@ -20,3 +20,6 @@ out/
 .idea/
 .DS_Store
 Thumbs.db
+
+# Controller hand-off files and per-issue worktrees (.claude/skills/run-prd)
+.runs/
