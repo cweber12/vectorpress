@@ -323,6 +323,86 @@ def test_catalog_declared_extra_role_is_accepted(catalog_copy: Path) -> None:
     assert "reference_photo" in {source.role for source in urchin.sources}
 
 
+# --- derivative pinning (ADR 0003, issue #22) --------------------------------------
+
+
+def test_pin_to_a_declared_file_with_an_accepted_role_is_accepted(catalog_copy: Path) -> None:
+    """ochre_sea_star has silhouette and lineart sources; transparent_png's
+    default (preference-order) pick is silhouette, so pinning it to lineart
+    is a real override, not a no-op."""
+    path = _asset_toml(catalog_copy, "ochre_sea_star")
+    text = path.read_text(encoding="utf-8")
+    text += '\n[derivatives.transparent_png]\nsource = "lineart.png"\n'
+    path.write_text(text, encoding="utf-8")
+    config = load_catalog_config(catalog_copy)
+
+    inventory = load_assets(catalog_copy, config)
+
+    assert inventory.problems == []
+    ochre = next(a for a in inventory.assets if a.id == "ochre_sea_star")
+    assert ochre.derivatives["transparent_png"].source == "lineart.png"
+
+
+def test_pin_to_an_undeclared_file_is_a_problem_naming_the_file_and_field(
+    catalog_copy: Path,
+) -> None:
+    path = _asset_toml(catalog_copy, "ochre_sea_star")
+    text = path.read_text(encoding="utf-8")
+    text += '\n[derivatives.transparent_png]\nsource = "not_declared.png"\n'
+    path.write_text(text, encoding="utf-8")
+    config = load_catalog_config(catalog_copy)
+
+    inventory = load_assets(catalog_copy, config)
+
+    ids = {asset.id for asset in inventory.assets}
+    assert "ochre_sea_star" not in ids
+    assert len(inventory.assets) == 2
+    assert len(inventory.problems) == 1
+    problem = inventory.problems[0]
+    assert problem.field == "derivatives.transparent_png.source"
+    assert "not_declared.png" in problem.message
+
+
+def test_pin_to_a_file_with_an_unaccepted_role_is_a_problem(catalog_copy: Path) -> None:
+    """flatcolor_svg only accepts the ``flatcolor`` role; pinning it to a
+    declared ``silhouette`` source is invalid."""
+    path = _asset_toml(catalog_copy, "purple_sea_urchin")
+    text = path.read_text(encoding="utf-8")
+    text += '\n[derivatives.flatcolor_svg]\nsource = "silhouette.png"\n'
+    path.write_text(text, encoding="utf-8")
+    config = load_catalog_config(catalog_copy)
+
+    inventory = load_assets(catalog_copy, config)
+
+    ids = {asset.id for asset in inventory.assets}
+    assert "purple_sea_urchin" not in ids
+    assert len(inventory.assets) == 2
+    assert len(inventory.problems) == 1
+    problem = inventory.problems[0]
+    assert problem.field == "derivatives.flatcolor_svg.source"
+    assert "silhouette.png" in problem.message
+    assert "flatcolor_svg" in problem.message
+
+
+def test_pin_for_a_type_with_no_recipe_is_a_problem(catalog_copy: Path) -> None:
+    """cut_svg is a real derivative type but has no recipe yet (PRD 3)."""
+    path = _asset_toml(catalog_copy, "purple_sea_urchin")
+    text = path.read_text(encoding="utf-8")
+    text += '\n[derivatives.cut_svg]\nsource = "silhouette.png"\n'
+    path.write_text(text, encoding="utf-8")
+    config = load_catalog_config(catalog_copy)
+
+    inventory = load_assets(catalog_copy, config)
+
+    ids = {asset.id for asset in inventory.assets}
+    assert "purple_sea_urchin" not in ids
+    assert len(inventory.assets) == 2
+    assert len(inventory.problems) == 1
+    problem = inventory.problems[0]
+    assert problem.field == "derivatives.cut_svg.source"
+    assert "no recipe" in problem.message
+
+
 def test_find_asset_returns_the_matching_loaded_asset() -> None:
     config = load_catalog_config(FIXTURE_CATALOG_ROOT)
     inventory = load_assets(FIXTURE_CATALOG_ROOT, config)

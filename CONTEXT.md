@@ -53,6 +53,12 @@ derivative type: the override if present, else the generated file.
 **Status** — Per (asset, derivative type): `generated`, `needs_review`, `approved`,
 `rejected`, `regenerate`. Lives in tool-owned state.
 
+**Derivative state** — Per (asset, derivative type), whether a derivative can exist
+at all and whether it does yet: `impossible` (no declared source has a role its
+recipe accepts) or `missing` (a source is selectable but no derivative exists);
+later slices add `current` and `stale`. Not "status" — status is about review of a
+derivative that exists, derivative state is about whether one can and does exist.
+
 **Findings** — Structured cut-file quality problems (§9) with locations. A cut file
 resolves to **pass** or **needs review** from its findings.
 

@@ -11,12 +11,14 @@ import typer
 from vectorpress import __version__
 from vectorpress.catalog.assets import load_assets, lookup_asset
 from vectorpress.catalog.collections import load_collections
+from vectorpress.catalog.derivatives import count_derivative_states, select_derivatives
 from vectorpress.catalog.errors import CatalogConfigError, CatalogNotFoundError
 from vectorpress.catalog.load import load_catalog, load_catalog_config
 from vectorpress.catalog.locate import locate_catalog_root
 from vectorpress.catalog.metadata_problem import MetadataProblem
 from vectorpress.catalog.products import load_products
 from vectorpress.domain.catalog_config import CatalogConfig
+from vectorpress.domain.derivative_state import DerivativeState
 
 app = typer.Typer(
     name="vpress",
@@ -106,8 +108,10 @@ def status(ctx: typer.Context) -> None:
 
     The single place that answers "is my catalog metadata sound?" (issue
     #6): aggregates problems from catalog config, assets, collections,
-    products and brand. Exit code is non-zero when any problem exists, so
-    this works as a check in scripts.
+    products and brand. ``Missing derivatives`` and ``Impossible
+    derivatives`` (issue #22, ADR 0003, §34) are inventory counts, not
+    problems, and never affect the exit code. Exit code is non-zero only
+    when a metadata problem exists, so this works as a check in scripts.
     """
     root = _locate_root(ctx)
     catalog = load_catalog(root)
@@ -119,6 +123,9 @@ def status(ctx: typer.Context) -> None:
     typer.echo(f"Assets: {len(catalog.assets)}")
     typer.echo(f"Collections: {len(catalog.collections)}")
     typer.echo(f"Products: {len(catalog.products)}")
+    counts = count_derivative_states(catalog.assets)
+    typer.echo(f"Missing derivatives: {counts.missing}")
+    typer.echo(f"Impossible derivatives: {counts.impossible}")
     _echo_problems(catalog.problems)
 
     if catalog.problems:
@@ -148,7 +155,9 @@ def asset(
     ctx: typer.Context,
     asset_id: str = typer.Argument(help="The asset's ID (its folder name under assets/)."),
 ) -> None:
-    """Show one asset in full: metadata, statuses, and every source with its role.
+    """Show one asset in full: metadata, statuses, every source with its
+    role, and every recipe-bearing derivative type's selected source or
+    impossibility reason (issue #22, ADR 0003).
 
     An ID naming a folder whose ``asset.toml`` failed to load is not the
     same as an ID naming no folder at all (issue #15): the former prints
@@ -174,6 +183,19 @@ def asset(
     typer.echo("Sources:")
     for source in found.sources:
         typer.echo(f"  {source.file}\t{source.role}")
+
+    typer.echo("Derivatives:")
+    for selection in select_derivatives(found):
+        if selection.state is DerivativeState.IMPOSSIBLE:
+            typer.echo(
+                f"  {selection.derivative_type.value}\t{selection.state.value}\t{selection.reason}"
+            )
+        else:
+            assert selection.source is not None  # MISSING always carries a selected source
+            typer.echo(
+                f"  {selection.derivative_type.value}\t{selection.state.value}\t"
+                f"{selection.source.file} ({selection.source.role})"
+            )
 
 
 @app.command()
