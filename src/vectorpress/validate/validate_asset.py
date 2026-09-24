@@ -1,5 +1,5 @@
-"""Per-asset orchestration for ``vpress validate`` (§9, §35, ADR 0004, ADR
-0006, ADR 0007, issue #37 fix round 1).
+"""Per-asset orchestration for ``vpress validate`` (§9, §9.1, §35, ADR 0004,
+ADR 0006, ADR 0007, ADR 0008, issue #37 fix round 1, issue #38).
 
 :func:`validate_asset_cut_file` is the one place that decides which file one
 asset's ``cut_svg`` validation runs against, reads its bytes, runs the pure
@@ -82,9 +82,17 @@ def validate_asset_cut_file(
 
     ``reference_size_in`` is taken explicitly, not defaulted or read from
     ``config`` internally, matching issue #37's "pass the reference size
-    explicitly into validation functions" (a later issue adds a product
-    override resolver; this function's caller decides which reference size
-    applies).
+    explicitly into validation functions" -- the caller decides which
+    reference size applies, typically via :func:`vectorpress.domain.
+    reference_size.resolve_reference_size_in`.
+
+    The findings report is persisted at the catalog-default path
+    (``<file>.findings.json``, unchanged from before issue #38) exactly when
+    ``reference_size_in`` equals ``config.reference_size_in``; any other
+    value -- a product's override -- persists at its own size-keyed path
+    instead (:func:`vectorpress.catalog.findings.findings_path`'s
+    ``at_size``), so the two never overwrite or invalidate each other
+    (issue #38's "a findings report is per (cut file, reference size)").
     """
     recipe = RECIPES[DerivativeType.CUT_SVG]
     selection = select_source(asset, recipe)
@@ -116,6 +124,11 @@ def validate_asset_cut_file(
             reason=str(exc),
         )
 
+    # The catalog-default path stays exactly what it was before issue #38
+    # (``at_size=None``); any other reference size -- a product's override --
+    # is keyed by its own value instead, so it coexists rather than
+    # overwriting the catalog-default report.
+    at_size = None if reference_size_in == config.reference_size_in else reference_size_in
     write_findings_report(
         derived_dir,
         FindingsReport(
@@ -126,6 +139,7 @@ def validate_asset_cut_file(
             result=validation.outcome,
             findings=validation.findings,
         ),
+        at_size=at_size,
     )
 
     return AssetValidationResult(

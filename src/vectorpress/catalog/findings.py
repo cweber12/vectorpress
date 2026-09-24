@@ -1,5 +1,6 @@
 """Tool-owned findings reports for validated derivatives (ADR 0004, ADR
-0005, ADR 0007, CONTEXT.md "Findings", §9, §9.1, §9.2, issue #37).
+0005, ADR 0007, ADR 0008, CONTEXT.md "Findings", §9, §9.1, §9.2, issue #37,
+issue #38).
 
 Findings are produced by pure functions in :mod:`vectorpress.validate` from
 an effective derivative's own bytes plus a reference size, and persisted
@@ -32,7 +33,7 @@ from vectorpress.domain.finding import (
     PathReference,
     ValidationOutcome,
 )
-from vectorpress.domain.numeric_format import round_number
+from vectorpress.domain.numeric_format import format_number, round_number
 
 #: A findings report for ``<name>`` is a plain-JSON file named
 #: ``<name>.findings.json`` beside it, so it never collides with the
@@ -40,10 +41,38 @@ from vectorpress.domain.numeric_format import round_number
 #: :mod:`vectorpress.catalog.provenance`'s own ``_PROVENANCE_SUFFIX``).
 _FINDINGS_SUFFIX = ".findings.json"
 
+#: A findings report computed at some *other* reference size than the one
+#: ``findings_path`` above names (issue #38's "per-size coexistence") lives
+#: beside it too, keyed by that size, so validating a product's override
+#: never overwrites or invalidates the catalog-default report and the
+#: reverse holds too -- "a findings report is per (cut file, reference
+#: size)". ``format_number`` (the same fixed-precision, trailing-zero-
+#: trimmed rule every number this tool writes to a file already follows,
+#: §36) keeps the token stable and byte-identical across platforms.
+_SIZED_FINDINGS_INFIX = ".findings.at-"
+_SIZED_FINDINGS_SUFFIX = "in.json"
 
-def findings_path(derived_dir: Path, validated_filename: str) -> Path:
-    """Where one derivative's findings report lives, beside it."""
-    return derived_dir / f"{validated_filename}{_FINDINGS_SUFFIX}"
+
+def findings_path(
+    derived_dir: Path, validated_filename: str, *, at_size: float | None = None
+) -> Path:
+    """Where one derivative's findings report lives, beside it.
+
+    ``at_size`` is ``None`` for the one report every existing caller already
+    reads and writes -- ``<name>.findings.json``, byte-identical to before
+    this issue (issue #38's "the catalog-default report must stay
+    byte-identical where it is"). Given a reference size, the path is keyed
+    by it instead (``<name>.findings.at-<size>in.json``), so a report
+    computed at any other size than the caller's usual one coexists beside
+    it rather than colliding with or overwriting it.
+    """
+    if at_size is None:
+        return derived_dir / f"{validated_filename}{_FINDINGS_SUFFIX}"
+    size_token = format_number(at_size)
+    return (
+        derived_dir
+        / f"{validated_filename}{_SIZED_FINDINGS_INFIX}{size_token}{_SIZED_FINDINGS_SUFFIX}"
+    )
 
 
 @dataclass(frozen=True)
@@ -176,10 +205,13 @@ def _atomic_write_bytes(path: Path, data: bytes) -> None:
         raise
 
 
-def read_findings_report(derived_dir: Path, validated_filename: str) -> FindingsReport | None:
+def read_findings_report(
+    derived_dir: Path, validated_filename: str, *, at_size: float | None = None
+) -> FindingsReport | None:
     """The findings report for one derivative, or ``None`` if it has never
-    been validated."""
-    path = findings_path(derived_dir, validated_filename)
+    been validated at that path (issue #38's ``at_size``, see
+    :func:`findings_path`)."""
+    path = findings_path(derived_dir, validated_filename, at_size=at_size)
     if not path.is_file():
         return None
     data = json.loads(path.read_text(encoding="utf-8"))
@@ -193,14 +225,22 @@ def read_findings_report(derived_dir: Path, validated_filename: str) -> Findings
     )
 
 
-def write_findings_report(derived_dir: Path, report: FindingsReport) -> None:
+def write_findings_report(
+    derived_dir: Path, report: FindingsReport, *, at_size: float | None = None
+) -> None:
     """Persist one findings report (§35, §36, issue #37).
 
     Idempotent like :func:`vectorpress.catalog.provenance.write_derivative`:
     when the payload about to be written already matches what is on disk
     byte-for-byte, the file is left untouched -- a second ``vpress validate``
-    with nothing changed rewrites nothing."""
-    path = findings_path(derived_dir, report.validated_file)
+    with nothing changed rewrites nothing.
+
+    ``at_size`` selects which coexisting path this report is written to
+    (issue #38, see :func:`findings_path`) -- the caller already knows
+    whether this report is "the" catalog-default one or a size-keyed one;
+    this never re-derives that from ``report.reference_size_in`` itself,
+    since a product's override can equal the catalog default too."""
+    path = findings_path(derived_dir, report.validated_file, at_size=at_size)
     payload = _report_payload(report)
     if not (path.is_file() and path.read_bytes() == payload):
         _atomic_write_bytes(path, payload)

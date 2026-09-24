@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 from vectorpress.catalog.load import load_catalog_config
-from vectorpress.catalog.products import find_product, load_products
+from vectorpress.catalog.products import find_product, load_products, lookup_product
 from vectorpress.domain.membership import MembershipForm
 
 FIXTURE_CATALOG_ROOT = Path(__file__).parents[1] / "fixtures" / "catalog"
@@ -304,6 +304,46 @@ def test_find_product_returns_none_for_an_unknown_slug() -> None:
     inventory = load_products(FIXTURE_CATALOG_ROOT, config)
 
     assert find_product(inventory, "not_a_real_product") is None
+
+
+# --- lookup_product: unknown slug vs. failed-to-load (issue #38) ---------------------
+
+
+def test_lookup_product_returns_the_matching_loaded_product() -> None:
+    config = load_catalog_config(FIXTURE_CATALOG_ROOT)
+    inventory = load_products(FIXTURE_CATALOG_ROOT, config)
+
+    result = lookup_product(inventory, config, "kelp_forest_mini_pack")
+
+    assert result.product is not None
+    assert result.product.slug == "kelp_forest_mini_pack"
+    assert result.problems == []
+
+
+def test_lookup_product_is_empty_for_a_genuinely_unknown_slug() -> None:
+    config = load_catalog_config(FIXTURE_CATALOG_ROOT)
+    inventory = load_products(FIXTURE_CATALOG_ROOT, config)
+
+    result = lookup_product(inventory, config, "not_a_real_product")
+
+    assert result.product is None
+    assert result.problems == []
+
+
+def test_lookup_product_reports_problems_for_a_slug_that_failed_to_load(
+    catalog_copy: Path,
+) -> None:
+    path = _product_toml(catalog_copy, "kelp_forest_mini_pack")
+    text = path.read_text(encoding="utf-8").replace('formats = ["svg"]', 'formats = ["webp"]')
+    path.write_text(text, encoding="utf-8")
+    config = load_catalog_config(catalog_copy)
+    inventory = load_products(catalog_copy, config)
+
+    result = lookup_product(inventory, config, "kelp_forest_mini_pack")
+
+    assert result.product is None
+    assert len(result.problems) == 1
+    assert result.problems[0].field == "formats.0"
 
 
 # --- duplicate slugs (issue #5's pattern, reused per issue #7) ---------------------

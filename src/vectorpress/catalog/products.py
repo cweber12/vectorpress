@@ -49,6 +49,44 @@ def find_product(inventory: ProductInventory, slug: ProductSlug) -> Product | No
     return next((p for p in inventory.products if p.slug == slug), None)
 
 
+@dataclass(frozen=True)
+class ProductLookup:
+    """The result of resolving one product slug against a loaded inventory
+    (issue #38), mirroring :class:`~vectorpress.catalog.assets.AssetLookup`.
+
+    Three outcomes, told apart here rather than in ``cli`` (ADR 0006): the
+    product loaded (``product`` set, ``problems`` empty); no ``<slug>.toml``
+    exists at all (both empty -- genuinely unknown slug); or that file exists
+    but failed to load (``product`` is ``None``, ``problems`` non-empty).
+    """
+
+    product: Product | None
+    problems: list[MetadataProblem]
+
+
+def lookup_product(
+    inventory: ProductInventory, config: CatalogConfig, slug: ProductSlug
+) -> ProductLookup:
+    """Resolve one product slug, distinguishing "no such file" from "file
+    exists but failed to load" (issue #38's "An unknown product slug is an
+    actionable error, and so is a product that failed to load"), the same
+    two-outcome split :func:`vectorpress.catalog.assets.lookup_asset` already
+    makes for asset IDs.
+
+    A problem is attributed to this slug when its ``path`` (relative to the
+    catalog root) is exactly ``<products_dir>/<slug>.toml`` -- the file
+    ``load_products`` would have read this product from, whether the failure
+    was a TOML syntax error, a schema problem, or a duplicate-slug collision.
+    """
+    product = find_product(inventory, slug)
+    if product is not None:
+        return ProductLookup(product=product, problems=[])
+
+    toml_path = Path(config.products_dir) / f"{slug}{PRODUCT_CONFIG_SUFFIX}"
+    problems = [problem for problem in inventory.problems if problem.path == toml_path]
+    return ProductLookup(product=None, problems=problems)
+
+
 def load_products(root: Path, config: CatalogConfig) -> ProductInventory:
     """Load and validate every product file under the catalog's products
     directory.

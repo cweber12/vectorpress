@@ -518,6 +518,142 @@ def test_an_unparseable_cut_file_is_reported_on_stderr_and_the_run_exits_1(
     )
 
 
+# --- --product: reference-size resolution, per-size coexistence (issue #38) --------------
+
+
+@pytest.mark.integration
+def test_validate_with_product_resolves_the_products_reference_size(
+    monkeypatch: pytest.MonkeyPatch, temp_catalog_root: Path
+) -> None:
+    """``kelp_forest_mini_pack`` overrides the catalog's 3.0 in default down
+    to 1.0 in (issue #38). ``--product`` validates at that resolved size --
+    only the size, never whether the asset belongs to the product (that is
+    PRD 5's job) -- and the report it writes records that size."""
+    monkeypatch.chdir(temp_catalog_root)
+    runner.invoke(app, ["generate", "--all"])
+    runner.invoke(app, ["validate", "--all"])  # the catalog-default report, first
+
+    result = runner.invoke(
+        app, ["validate", "purple_sea_urchin", "--product", "kelp_forest_mini_pack"]
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "purple_sea_urchin\tcut_svg\tpurple-sea-urchin-cut.svg\tpass" in result.stdout
+    assert "product kelp_forest_mini_pack" in result.stdout
+
+    sized_report = read_findings_report(
+        _derived_dir(temp_catalog_root, "purple_sea_urchin"),
+        "purple-sea-urchin-cut.svg",
+        at_size=1.0,
+    )
+    assert sized_report is not None
+    assert sized_report.reference_size_in == 1.0
+
+
+@pytest.mark.integration
+def test_validate_with_product_never_touches_the_catalog_default_report(
+    monkeypatch: pytest.MonkeyPatch, temp_catalog_root: Path
+) -> None:
+    """Issue #38's coexistence: the catalog-default report -- already
+    written by a plain ``validate --all`` -- stays byte-unchanged and still
+    current after a ``--product`` validation at a different size."""
+    monkeypatch.chdir(temp_catalog_root)
+    runner.invoke(app, ["generate", "--all"])
+    runner.invoke(app, ["validate", "--all"])
+    derived_dir = _derived_dir(temp_catalog_root, "purple_sea_urchin")
+    default_path = findings_path(derived_dir, "purple-sea-urchin-cut.svg")
+    default_bytes_before = default_path.read_bytes()
+
+    result = runner.invoke(
+        app, ["validate", "purple_sea_urchin", "--product", "kelp_forest_mini_pack"]
+    )
+
+    assert result.exit_code == 0, result.output
+    assert default_path.read_bytes() == default_bytes_before
+    asset_result = runner.invoke(app, ["asset", "purple_sea_urchin"])
+    assert "cut_svg\tcurrent\tpurple-sea-urchin-cut.svg\tpass" in asset_result.stdout
+    assert "findings stale" not in asset_result.stdout
+
+
+@pytest.mark.integration
+def test_validate_product_combines_with_all(
+    monkeypatch: pytest.MonkeyPatch, temp_catalog_root: Path
+) -> None:
+    """Issue #38's "``--product`` with ``--all`` is allowed, giving every
+    asset at that product's size"."""
+    monkeypatch.chdir(temp_catalog_root)
+    runner.invoke(app, ["generate", "--all"])
+
+    result = runner.invoke(app, ["validate", "--all", "--product", "kelp_forest_mini_pack"])
+
+    assert result.exit_code == 0, result.output
+    for asset_id, filename in FIXTURE_CUT_FILES:
+        report = read_findings_report(
+            _derived_dir(temp_catalog_root, asset_id), filename, at_size=1.0
+        )
+        assert report is not None
+        assert report.reference_size_in == 1.0
+
+
+@pytest.mark.integration
+def test_unknown_product_slug_is_an_actionable_error_and_writes_no_toml(
+    monkeypatch: pytest.MonkeyPatch, temp_catalog_root: Path
+) -> None:
+    monkeypatch.chdir(temp_catalog_root)
+    runner.invoke(app, ["generate", "--all"])
+    toml_paths = sorted(temp_catalog_root.rglob("*.toml"))
+    toml_before = {path: path.read_bytes() for path in toml_paths}
+
+    result = runner.invoke(app, ["validate", "--all", "--product", "not_a_real_product"])
+
+    assert result.exit_code == 1
+    assert "Unknown product" in result.stdout + result.output
+    for path in toml_paths:
+        assert path.read_bytes() == toml_before[path]
+
+
+@pytest.mark.integration
+def test_a_product_that_failed_to_load_is_an_actionable_error(
+    monkeypatch: pytest.MonkeyPatch, temp_catalog_root: Path
+) -> None:
+    product_toml = temp_catalog_root / "products" / "kelp_forest_mini_pack.toml"
+    product_toml.write_text(
+        product_toml.read_text(encoding="utf-8").replace('formats = ["svg"]', 'formats = ["webp"]'),
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(temp_catalog_root)
+    runner.invoke(app, ["generate", "--all"])
+
+    result = runner.invoke(
+        app, ["validate", "purple_sea_urchin", "--product", "kelp_forest_mini_pack"]
+    )
+
+    assert result.exit_code == 1
+    assert "kelp_forest_mini_pack" in (result.stdout + result.output)
+
+
+# --- snapshot: product-size findings JSON locked, byte-identical across platforms --------
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("asset_id,filename", FIXTURE_CUT_FILES)
+def test_product_size_findings_json_is_locked_by_snapshot(
+    monkeypatch: pytest.MonkeyPatch,
+    temp_catalog_root: Path,
+    snapshot: SnapshotAssertion,
+    asset_id: str,
+    filename: str,
+) -> None:
+    monkeypatch.chdir(temp_catalog_root)
+    runner.invoke(app, ["generate", "--all"])
+
+    result = runner.invoke(app, ["validate", asset_id, "--product", "kelp_forest_mini_pack"])
+    assert result.exit_code == 0, result.output
+
+    path = findings_path(_derived_dir(temp_catalog_root, asset_id), filename, at_size=1.0)
+    assert json.loads(path.read_text(encoding="utf-8")) == snapshot
+
+
 @pytest.mark.integration
 def test_generate_still_never_validates(
     monkeypatch: pytest.MonkeyPatch, temp_catalog_root: Path
