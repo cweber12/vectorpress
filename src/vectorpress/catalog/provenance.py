@@ -1,0 +1,174 @@
+"""Tool-owned provenance records for generated derivatives (ADR 0004, ADR
+0005, CONTEXT.md "Provenance").
+
+Only ``catalog`` touches catalog files (ADR 0006): this module owns every
+byte that crosses the boundary between disk and a generator -- reading a
+source's bytes to hand to a generator, reading/writing provenance, and
+deciding whether a derivative is current by re-reading and re-hashing what
+is actually on disk. ``pipeline.generate`` orchestrates (which recipe, which
+generator, in what order) but never opens a catalog file itself (issue #23
+review fix round 2).
+"""
+
+import hashlib
+import json
+import os
+import tempfile
+from dataclasses import asdict, dataclass
+from pathlib import Path
+
+from vectorpress.catalog.assets import SOURCES_DIRNAME
+from vectorpress.domain.recipe import Recipe
+
+#: Every asset's generated derivatives live under this folder, sibling to
+#: ``sources/`` (ADR 0005's "Per-asset layout").
+DERIVED_DIRNAME = "derived"
+
+#: A provenance record for ``<name>`` is a plain-JSON file named
+#: ``<name>.provenance.json`` beside it, so it never collides with a
+#: derivative's own filename and is trivially findable from one.
+_PROVENANCE_SUFFIX = ".provenance.json"
+
+
+def sha256_bytes(data: bytes) -> str:
+    """The SHA-256 hex digest of ``data`` (ADR 0004: "Hashes are SHA-256 of
+    bytes")."""
+    return hashlib.sha256(data).hexdigest()
+
+
+def recipe_identity_hash(recipe: Recipe) -> str:
+    """The recipe identity hash: derivative type, generator name, and
+    parameters (ADR 0004: "recipe identity including parameters, hashed so a
+    parameter change changes the identity").
+
+    ``json.dumps(..., sort_keys=True)`` makes the encoding independent of
+    ``parameters``' key order, so the hash depends only on the recipe's
+    actual content -- not something incidental like dict insertion order.
+    """
+    payload = {
+        "derivative_type": recipe.derivative_type.value,
+        "generator": recipe.generator,
+        "parameters": recipe.parameters,
+    }
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return sha256_bytes(encoded)
+
+
+@dataclass(frozen=True)
+class Provenance:
+    """One derivative's tool-owned provenance record (ADR 0004, issue #23).
+
+    ``source_file`` and ``source_hash`` identify the source the derivative
+    was built from; ``recipe_hash`` is :func:`recipe_identity_hash` of the
+    recipe used, so a parameter or generator change is detectable without
+    re-deriving it; ``generator_versions`` records vectorpress's own version
+    plus every library the generator used (informational only -- ADR 0004:
+    "No manually bumped version numbers in tool logic" means currency is
+    never gated on these, only on the hashes).
+    """
+
+    source_file: str
+    source_hash: str
+    derivative_type: str
+    generator: str
+    parameters: dict[str, object]
+    recipe_hash: str
+    generator_versions: dict[str, str]
+    output_file: str
+    output_hash: str
+
+
+def read_source_bytes(asset_dir: Path, source_file: str) -> bytes:
+    """Read one asset's source file's bytes, to hand to a generator or hash
+    against provenance (ADR 0003: ``sources/`` is read-only to the tool --
+    this only ever reads it, never modifies it)."""
+    return (asset_dir / SOURCES_DIRNAME / source_file).read_bytes()
+
+
+def is_current(asset_dir: Path, output_filename: str, source_file: str, recipe_hash: str) -> bool:
+    """Whether the derivative named ``output_filename`` is current (ADR
+    0004, §36): its provenance exists, its recorded source hash matches
+    ``source_file`` as it stands now, its recipe identity matches
+    ``recipe_hash``, and the output file exists with the recorded hash.
+
+    Every catalog-file read this needs (source, provenance, output) happens
+    here, not in ``pipeline`` (ADR 0006's "catalog... the only layer
+    touching catalog files"): the caller passes in ``recipe_hash`` --
+    :func:`recipe_identity_hash` of the current recipe -- rather than the
+    recipe itself, since computing it is a pure function over domain data,
+    not a file read, and stays the caller's job.
+    """
+    derived_dir = asset_dir / DERIVED_DIRNAME
+    provenance = read_provenance(derived_dir, output_filename)
+    if provenance is None:
+        return False
+
+    source_path = asset_dir / SOURCES_DIRNAME / source_file
+    if not source_path.is_file():
+        return False
+    if provenance.source_hash != sha256_bytes(source_path.read_bytes()):
+        return False
+
+    if provenance.recipe_hash != recipe_hash:
+        return False
+
+    output_path = derived_dir / output_filename
+    if not output_path.is_file():
+        return False
+    return provenance.output_hash == sha256_bytes(output_path.read_bytes())
+
+
+def provenance_path(derived_dir: Path, output_filename: str) -> Path:
+    """Where one derivative's provenance record lives, beside it."""
+    return derived_dir / f"{output_filename}{_PROVENANCE_SUFFIX}"
+
+
+def read_provenance(derived_dir: Path, output_filename: str) -> Provenance | None:
+    """The provenance record for one derivative, or ``None`` if it does not
+    exist (never generated, or an override with no generated counterpart)."""
+    path = provenance_path(derived_dir, output_filename)
+    if not path.is_file():
+        return None
+    data = json.loads(path.read_text(encoding="utf-8"))
+    return Provenance(**data)
+
+
+def _atomic_write_bytes(path: Path, data: bytes) -> None:
+    """Write ``data`` to ``path`` without ever leaving a half-written file
+    observable (§35): write to a temporary file in the same directory, then
+    rename into place -- a rename is atomic on both POSIX and Windows
+    (``os.replace``, unlike a plain ``os.rename``, always overwrites)."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp_name = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "wb") as tmp_file:
+            tmp_file.write(data)
+        Path(tmp_name).replace(path)
+    except BaseException:
+        Path(tmp_name).unlink(missing_ok=True)
+        raise
+
+
+def write_derivative(
+    derived_dir: Path, output_filename: str, output_bytes: bytes, provenance: Provenance
+) -> None:
+    """Persist one derivative's output and provenance (§35, §36, issue #23).
+
+    Output is written first, provenance second, each as its own atomic
+    write, so a crash between the two leaves, at worst, a derivative whose
+    provenance has not caught up yet -- never a half-written file, and never
+    provenance describing an output that was not actually written.
+
+    When the output file already on disk hashes to ``provenance.output_hash``,
+    its bytes are left untouched (no rewrite, no mtime change): this is what
+    makes a second identical generation, and a parameter change that happens
+    to produce identical output, non-destructive (§36 idempotence).
+    """
+    output_path = derived_dir / output_filename
+    if not (
+        output_path.is_file() and sha256_bytes(output_path.read_bytes()) == provenance.output_hash
+    ):
+        _atomic_write_bytes(output_path, output_bytes)
+
+    payload = json.dumps(asdict(provenance), sort_keys=True, indent=2).encode("utf-8")
+    _atomic_write_bytes(provenance_path(derived_dir, output_filename), payload)

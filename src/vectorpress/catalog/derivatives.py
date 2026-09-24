@@ -8,6 +8,7 @@ reads asset folders, per CLAUDE.md's layering guardrail), so ``ui`` will be
 able to call these directly, without going through ``cli``, once it exists.
 """
 
+from collections.abc import Iterable
 from dataclasses import dataclass
 
 from vectorpress.domain.asset import Asset, Source
@@ -102,15 +103,33 @@ class DerivativeStateCounts:
     impossible: int
 
 
-def count_derivative_states(assets: list[Asset]) -> DerivativeStateCounts:
-    """Tally derivative states across every loaded asset, for ``vpress
-    status``."""
+def tally_derivative_states(states: Iterable[DerivativeState]) -> DerivativeStateCounts:
+    """Count how many states in ``states`` are ``MISSING`` and how many are
+    ``IMPOSSIBLE`` (``CURRENT`` counts as neither).
+
+    Shared by :func:`count_derivative_states` (pure, selection-only) and, once
+    generation exists, ``vpress status``'s disk-aware count (issue #23's
+    "the vpress status missing count drops accordingly"), so the increment
+    logic lives in exactly one place.
+    """
     missing = 0
     impossible = 0
-    for asset in assets:
-        for selection in select_derivatives(asset):
-            if selection.state is DerivativeState.MISSING:
-                missing += 1
-            elif selection.state is DerivativeState.IMPOSSIBLE:
-                impossible += 1
+    for state in states:
+        if state is DerivativeState.MISSING:
+            missing += 1
+        elif state is DerivativeState.IMPOSSIBLE:
+            impossible += 1
     return DerivativeStateCounts(missing=missing, impossible=impossible)
+
+
+def count_derivative_states(assets: list[Asset]) -> DerivativeStateCounts:
+    """Tally derivative states across every loaded asset, from selection
+    alone (``MISSING``/``IMPOSSIBLE``, no filesystem access).
+
+    ``vpress status`` uses :func:`vectorpress.pipeline.generate.count_derivative_states`
+    instead, which additionally recognises a generated, current derivative
+    and so does not count it as missing (issue #23).
+    """
+    return tally_derivative_states(
+        selection.state for asset in assets for selection in select_derivatives(asset)
+    )

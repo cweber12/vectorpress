@@ -48,6 +48,36 @@ class AssetInventory:
     problems: list[MetadataProblem]
 
 
+def asset_dir(root: Path, config: CatalogConfig, asset_id: AssetId) -> Path:
+    """The on-disk folder for one asset ID, whether or not it loaded.
+
+    Kept here rather than duplicated in ``pipeline`` or ``cli`` (CLAUDE.md's
+    "cli and ui are thin"): only ``catalog`` computes on-disk layout, and
+    generation (issue #23) needs this same join of ``config.assets_dir`` and
+    ``asset_id`` that ``load_assets`` already does internally.
+    """
+    return root / config.assets_dir / asset_id
+
+
+def failed_asset_ids(inventory: AssetInventory, config: CatalogConfig) -> list[str]:
+    """Every asset ID whose folder exists under ``config.assets_dir`` but
+    failed to load, sorted and de-duplicated (issue #23's ``vpress generate
+    --all``: "assets that failed to load are skipped and named").
+
+    Derived from ``inventory.problems``' paths rather than re-walking the
+    filesystem: a problem's path always falls under
+    ``<assets_dir>/<asset_id>/...`` (``lookup_asset``'s same assumption).
+    """
+    assets_dir_parts = Path(config.assets_dir).parts
+    depth = len(assets_dir_parts)
+    ids: set[str] = set()
+    for problem in inventory.problems:
+        parts = problem.path.parts
+        if len(parts) > depth and parts[:depth] == assets_dir_parts:
+            ids.add(parts[depth])
+    return sorted(ids)
+
+
 def find_asset(inventory: AssetInventory, asset_id: AssetId) -> Asset | None:
     """Look up one loaded asset by ID, or ``None`` if it did not load.
 

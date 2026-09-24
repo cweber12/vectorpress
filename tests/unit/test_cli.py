@@ -528,3 +528,46 @@ def test_products_are_sorted_by_slug(monkeypatch: pytest.MonkeyPatch) -> None:
     lines = [line for line in result.stdout.splitlines() if line.strip()]
     slugs = [line.split("\t")[0] for line in lines]
     assert slugs == sorted(slugs)
+
+
+# --- generate (issue #23) ---------------------------------------------------------
+#
+# End-to-end behaviour of ``generate --all``/``generate <id>`` writing real
+# files (outcome reporting, idempotence, provenance, snapshot-locked bytes)
+# lives in tests/integration/test_generate.py, against a temporary copy of
+# the fixture (the committed fixture must never contain ``derived/``). These
+# tests cover the paths that write nothing: usage errors and unknown assets,
+# which can run directly against the read-only fixture.
+
+
+def test_generate_with_neither_an_id_nor_all_is_a_usage_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.chdir(FIXTURE_CATALOG_ROOT)
+
+    result = runner.invoke(app, ["generate"])
+
+    assert result.exit_code != 0
+    assert "--all" in result.output
+
+
+def test_generate_with_both_an_id_and_all_is_a_usage_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.chdir(FIXTURE_CATALOG_ROOT)
+
+    result = runner.invoke(app, ["generate", "ochre_sea_star", "--all"])
+
+    assert result.exit_code != 0
+
+
+def test_generate_with_unknown_id_exits_non_zero_and_names_the_id(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.chdir(FIXTURE_CATALOG_ROOT)
+
+    result = runner.invoke(app, ["generate", "not_a_real_asset"])
+
+    assert result.exit_code != 0
+    assert "not_a_real_asset" in result.output
+    assert "Unknown asset" in result.output

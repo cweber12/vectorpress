@@ -16,10 +16,13 @@ class DerivativeState(StrEnum):
 
     ``IMPOSSIBLE``: no source declared on the asset has a role its recipe
     accepts. ``MISSING``: a source is selectable but no derivative file
-    exists yet -- every possible derivative, in this PRD slice, since
-    nothing is generated yet. Later slices in this PRD add ``CURRENT`` (the
-    derivative exists and matches its source) and ``STALE`` (CONTEXT.md).
+    exists yet. ``CURRENT`` (issue #23): the derivative exists on disk, its
+    provenance's source hash matches the currently selected source, and its
+    recipe identity matches the current recipe (ADR 0004) -- generation is
+    idempotent, so a second ``vpress generate`` finds it and skips it. A
+    later PRD slice adds ``STALE`` (CONTEXT.md).
     """
 
     IMPOSSIBLE = "impossible"
     MISSING = "missing"
+    CURRENT = "current"

@@ -1,5 +1,6 @@
 """Recipe declarations: which source roles each derivative type accepts, in
-preference order (ADR 0003, CONTEXT.md "Recipe").
+preference order, and how it is generated (ADR 0003, ADR 0004, CONTEXT.md
+"Recipe").
 
 No I/O here (ADR 0006): a recipe is fixed, catalog-independent data, not
 something read off disk. Not every :class:`~vectorpress.domain.derivative_type.DerivativeType`
@@ -9,6 +10,7 @@ empty recipe; per the PRD, a type with no recipe is reported nowhere (neither
 missing nor impossible).
 """
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 
 from vectorpress.domain.derivative_type import DerivativeType
@@ -16,33 +18,52 @@ from vectorpress.domain.derivative_type import DerivativeType
 
 @dataclass(frozen=True)
 class Recipe:
-    """How one derivative type selects its source (ADR 0003).
+    """How one derivative type selects its source and is generated (ADR
+    0003, issue #23).
 
     ``accepted_roles`` lists roles in preference order. Selecting a source
     for one asset against this recipe -- and telling "missing" from
     "impossible" -- is :func:`vectorpress.catalog.derivatives.select_source`,
     since it reasons about a loaded asset, not just this static declaration.
+
+    ``generator`` names the :mod:`vectorpress.pipeline` generator that
+    produces this type's output, looked up through
+    :func:`vectorpress.pipeline.registry.get_generator`; ``None`` for a
+    recipe-bearing type whose generator has not landed yet (``silhouette_svg``,
+    ``flatcolor_svg`` in this slice -- PRD 3 gives them one). ``parameters``
+    are passed to the generator verbatim and are part of the recipe identity
+    (ADR 0004): changing them changes every derivative's provenance and marks
+    it stale, even when ``generator`` itself is unchanged.
     """
 
     derivative_type: DerivativeType
     accepted_roles: tuple[str, ...]
+    generator: str | None
+    parameters: Mapping[str, object]
 
 
-#: The recipe for every derivative type this PRD slice covers (issue #22).
-#: Keyed by type so a lookup by known type is direct; use :func:`recipe_for`
-#: to look one up by a name that may not even be a real derivative type.
+#: The recipe for every derivative type this PRD slice covers (issue #22,
+#: issue #23). Keyed by type so a lookup by known type is direct; use
+#: :func:`recipe_for` to look one up by a name that may not even be a real
+#: derivative type.
 RECIPES: dict[DerivativeType, Recipe] = {
     DerivativeType.TRANSPARENT_PNG: Recipe(
         derivative_type=DerivativeType.TRANSPARENT_PNG,
         accepted_roles=("detailed", "flatcolor", "silhouette", "lineart"),
+        generator="transparent_png",
+        parameters={},
     ),
     DerivativeType.SILHOUETTE_SVG: Recipe(
         derivative_type=DerivativeType.SILHOUETTE_SVG,
         accepted_roles=("silhouette",),
+        generator=None,
+        parameters={},
     ),
     DerivativeType.FLATCOLOR_SVG: Recipe(
         derivative_type=DerivativeType.FLATCOLOR_SVG,
         accepted_roles=("flatcolor",),
+        generator=None,
+        parameters={},
     ),
 }
 
