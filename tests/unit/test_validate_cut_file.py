@@ -83,6 +83,7 @@ def test_two_piece_finding_is_located_at_the_smaller_pieces_own_bbox() -> None:
     result = validate_cut_file(_TWO_PIECE, REFERENCE_SIZE_IN)
 
     finding = result.findings[0]
+    assert finding.location is not None
     assert finding.location.min_x == pytest.approx(20.0)
     assert finding.location.min_y == pytest.approx(2.0)
     assert finding.location.max_x == pytest.approx(28.0)
@@ -116,7 +117,8 @@ def test_findings_are_in_a_deterministic_document_order() -> None:
     result = validate_cut_file(_THREE_PIECE, REFERENCE_SIZE_IN)
 
     ordered = [f.path_reference.subpath_index for f in result.findings]
-    assert ordered == sorted(ordered)
+    assert all(index is not None for index in ordered)  # every finding here names a piece
+    assert ordered == sorted(ordered, key=lambda index: index if index is not None else -1)
 
 
 def test_a_hole_in_a_ring_is_not_a_disconnected_fragment() -> None:
@@ -243,6 +245,7 @@ def test_dot_below_threshold_yields_exactly_one_accidental_dot_finding() -> None
     assert len(result.findings) == 1
     finding = result.findings[0]
     assert finding.kind is FindingKind.ACCIDENTAL_DOT
+    assert finding.location is not None
     assert finding.location.min_x == pytest.approx(200.0)
     assert finding.location.min_y == pytest.approx(0.0)
     assert finding.location.max_x == pytest.approx(205.0)
@@ -278,6 +281,7 @@ def test_sliver_below_threshold_yields_exactly_one_tiny_isolated_shape_finding()
 
     assert result.outcome is ValidationOutcome.NEEDS_REVIEW
     finding = next(f for f in result.findings if f.kind is FindingKind.TINY_ISOLATED_SHAPE)
+    assert finding.location is not None
     assert finding.location.min_x == pytest.approx(200.0)
     assert finding.location.min_y == pytest.approx(0.0)
     assert finding.location.max_x == pytest.approx(250.0)
@@ -321,6 +325,7 @@ def test_pinhole_below_threshold_yields_exactly_one_small_hole_finding() -> None
     assert len(result.findings) == 1
     finding = result.findings[0]
     assert finding.kind is FindingKind.SMALL_HOLE
+    assert finding.location is not None
     assert finding.location.min_x == pytest.approx(40.0)
     assert finding.location.min_y == pytest.approx(40.0)
     assert finding.location.max_x == pytest.approx(50.0)
@@ -444,6 +449,7 @@ def test_dumbbell_with_a_narrow_neck_yields_one_narrow_feature_finding_at_the_ne
     # 47.5-52.5 span) -- not the lobes themselves, and not the shape's own
     # sharp corners (filtered as opening artifacts, this module's own
     # ``_raster._MIN_ELONGATION``).
+    assert finding.location is not None
     assert finding.location.min_x == pytest.approx(30.625)
     assert finding.location.max_x == pytest.approx(69.375)
     assert finding.location.min_y == pytest.approx(47.5)

@@ -16,12 +16,22 @@ from vectorpress.domain.finding import Finding, ValidationResult
 from vectorpress.validate import (
     accidental_dot,
     disconnected_fragments,
+    duplicate_geometry,
     excessive_complexity,
     narrow_feature,
+    open_path,
+    overlap,
+    raster_content,
     small_hole,
+    stray_object,
     tiny_isolated_shape,
 )
-from vectorpress.validate._svg_geometry import Piece, parse_cut_file
+from vectorpress.validate._svg_geometry import (
+    Piece,
+    parse_cut_file,
+    parse_document_elements,
+    parse_subpaths,
+)
 
 #: Every physical-unit threshold this issue's detectors use, keyed by name,
 #: recorded verbatim with every findings report (issue #37's "the thresholds
@@ -86,6 +96,28 @@ from vectorpress.validate._svg_geometry import Piece, parse_cut_file
 #: override, the highest observed -- with room to spare, while
 #: ``coralline_algae``'s own finely rippled outline (issue #40) clears it
 #: with a comfortable margin too (~13.4 nodes/in at the catalog default).
+#:
+#: ``stray_object_off_canvas_tolerance_in`` (issue #41 review fix round 1,
+#: controller ruling) -- :mod:`vectorpress.validate.stray_object`'s own
+#: off-canvas check applies this tolerance to a ``<path>`` element only
+#: (every other element tag keeps an exact, tolerance-free check): this
+#: module's own curve-flattening can disagree with the document's own
+#: written ``viewBox`` by a fraction of a user unit of pure rounding noise
+#: (§36's :data:`~vectorpress.domain.numeric_format.DECIMAL_PLACES`
+#: absorbs everything past the fourth decimal place everywhere *else* this
+#: tool writes a number, but the ``viewBox`` text and a freshly
+#: re-flattened path bbox are two *independent* roundings of numbers that
+#: were never exactly equal to begin with). Measured directly (not
+#: assumed) against every ``<path>`` in every fixture asset's own
+#: generated cut file, at both the catalog default (3in) and
+#: ``kelp_forest_mini_pack``'s own override (1in): the single largest
+#: discrepancy anywhere is ``bat_star``'s own, ``0.0001`` user units
+#: (~1.15e-6in at the catalog's 3in default) -- everything else is exactly
+#: ``0.0``. ``0.01in`` sits four orders of magnitude above that measured
+#: noise floor -- a comfortable margin for a different platform's own
+#: last-bit curve-sampling difference -- while staying far below anything
+#: a genuinely stray, off-canvas ``<path>`` (this issue's own hand-authored
+#: trip fixture places one tens of user units away) would ever measure.
 THRESHOLDS: dict[str, float] = {
     "accidental_dot_max_dimension_in": 0.2,
     "tiny_isolated_shape_min_area_in2": 0.02,
@@ -94,23 +126,30 @@ THRESHOLDS: dict[str, float] = {
     "excessive_complexity_max_nodes_per_in": 11.0,
     "excessive_complexity_min_perimeter_in": 0.75,
     "excessive_complexity_max_node_count": 300.0,
+    "stray_object_off_canvas_tolerance_in": 0.01,
 }
 
 
-def _claimed(findings: list[Finding]) -> set[tuple[int, int]]:
+def _claimed(findings: list[Finding]) -> set[tuple[int, int | None]]:
     """The ``(element_index, subpath_index)`` of every piece a detector's
     findings already claimed (issue #39): how :func:`validate_cut_file`
     keeps dot, tiny-shape and disconnected-fragment classification mutually
     exclusive without each detector needing to know about the others --
     a piece is simply never offered to the next detector once one finding
-    already names it."""
+    already names it. ``findings`` here is always :mod:`vectorpress.
+    validate.accidental_dot`/:mod:`vectorpress.validate.tiny_isolated_shape`
+    output, whose own ``subpath_index`` is always a concrete piece index,
+    never ``None`` (issue #41's element-only reference is only ever built
+    by the five detectors that never call this) -- the wider ``int | None``
+    element type is only to match :class:`~vectorpress.domain.finding.
+    PathReference`'s own declared field type."""
     return {
         (finding.path_reference.element_index, finding.path_reference.subpath_index)
         for finding in findings
     }
 
 
-def _unclaimed(pieces: list[Piece], claimed: set[tuple[int, int]]) -> list[Piece]:
+def _unclaimed(pieces: list[Piece], claimed: set[tuple[int, int | None]]) -> list[Piece]:
     return [piece for piece in pieces if (piece.element_index, piece.subpath_index) not in claimed]
 
 
@@ -121,9 +160,12 @@ def validate_cut_file(svg_bytes: bytes, reference_size_in: float) -> ValidationR
     adds :mod:`vectorpress.validate.accidental_dot`, :mod:`vectorpress.
     validate.tiny_isolated_shape` and :mod:`vectorpress.validate.small_hole`;
     issue #40 adds :mod:`vectorpress.validate.narrow_feature` and
-    :mod:`vectorpress.validate.excessive_complexity`; later issues add the
-    rest of §9's list here, each contributing its own findings to the same
-    result.
+    :mod:`vectorpress.validate.excessive_complexity`; issue #41 adds the
+    remaining five §9 kinds -- :mod:`vectorpress.validate.open_path`,
+    :mod:`vectorpress.validate.raster_content`, :mod:`vectorpress.validate.
+    stray_object`, :mod:`vectorpress.validate.duplicate_geometry` and
+    :mod:`vectorpress.validate.overlap` -- completing §9's list; each
+    detector contributes its own findings to the same result.
 
     A piece is checked against :mod:`accidental_dot` first, then
     :mod:`tiny_isolated_shape`, then :mod:`disconnected_fragments` -- each
@@ -132,14 +174,30 @@ def validate_cut_file(svg_bytes: bytes, reference_size_in: float) -> ValidationR
     three, never more than one (issue #39's "one kind per shape", documented
     on :class:`~vectorpress.domain.finding.FindingKind`). Holes are an
     independent axis (:mod:`vectorpress.validate.small_hole`): a hole is
-    never also a piece, so it never competes with any of the three. Narrow
-    feature and excessive complexity (issue #40) are two further independent
-    axes, checked against *every* piece the document has -- largest
-    included, and regardless of whatever :mod:`accidental_dot`/
-    :mod:`tiny_isolated_shape`/:mod:`disconnected_fragments` already claimed
-    -- since neither is a piece-*classification* judgment the way those
-    three are: a piece's own geometry can be narrow, or disproportionately
-    complex, on top of whatever else it was already reported as.
+    never also a piece, so it never competes with any of the three.
+
+    Every other detector -- narrow feature and excessive complexity (issue
+    #40), and all five of issue #41's own kinds -- is a further independent
+    axis, never part of that three-way exclusion and never claiming or
+    excluding a piece for anyone else: a piece's (or a document's) own
+    geometry can be narrow, disproportionately complex, unclosed, stray,
+    duplicated or overlapping *on top of* whatever else it was already
+    reported as. Issue #41's own five run over the document's raw subpaths
+    and elements (:func:`~vectorpress.validate._svg_geometry.
+    parse_subpaths`, :func:`~vectorpress.validate._svg_geometry.
+    parse_document_elements`), never the piece/hole containment-parity
+    grouping :func:`~vectorpress.validate._svg_geometry.parse_cut_file`
+    computes for the six kinds above -- a malformed subpath (unclosed,
+    self-intersecting) cannot be reliably classified into that grouping to
+    begin with, and :mod:`vectorpress.validate.overlap` in particular must
+    not rely on it (that module's own docstring). The §8 builder only ever
+    emits closed, filled, non-overlapping, non-duplicated paths with no
+    raster content and no stray elements, so none of these five kinds is
+    ever tripped by a generated cut file (locked by ``tests/integration/
+    test_validate.py``'s own "every generated fixture cut file yields none
+    of these five kinds" test) -- only a hand-edited override can trip them
+    (§9's own scope bullet 5: "validation runs on any SVG derivative, not
+    only generated ones").
 
     Raises :class:`ValueError` (propagated from :func:`vectorpress.validate.
     _svg_geometry.parse_cut_file`) for an SVG with no ``viewBox`` and no
@@ -175,6 +233,17 @@ def validate_cut_file(svg_bytes: bytes, reference_size_in: float) -> ValidationR
         THRESHOLDS["excessive_complexity_max_node_count"],
     )
 
+    subpaths = parse_subpaths(svg_bytes)
+    view_box, elements = parse_document_elements(svg_bytes)
+
+    open_path_findings = open_path.detect(subpaths)
+    raster_content_findings = raster_content.detect(elements)
+    stray_object_findings = stray_object.detect(
+        view_box, elements, scale, THRESHOLDS["stray_object_off_canvas_tolerance_in"]
+    )
+    duplicate_geometry_findings = duplicate_geometry.detect(subpaths)
+    overlap_findings = overlap.detect(subpaths)
+
     findings: list[Finding] = [
         *dot_findings,
         *tiny_findings,
@@ -182,5 +251,10 @@ def validate_cut_file(svg_bytes: bytes, reference_size_in: float) -> ValidationR
         *hole_findings,
         *narrow_findings,
         *complexity_findings,
+        *open_path_findings,
+        *raster_content_findings,
+        *stray_object_findings,
+        *duplicate_geometry_findings,
+        *overlap_findings,
     ]
     return ValidationResult(findings=tuple(findings))

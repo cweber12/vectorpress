@@ -11,7 +11,11 @@ Rules:
   `owl_limpet`/`giant_green_anemone` for disconnected fragments (issue #36, issue
   #37), `gumboot_chiton`/`bat_star`/`keyhole_limpet` for the three area-based kinds
   (issue #39), `nudibranch`/`coralline_algae` for the two shape-based kinds (issue
-  #40) -- see "Assets" below for which subject trips which kind.
+  #40) -- see "Assets" below for which subject trips which kind. The remaining five
+  §9 kinds (open path, raster content, stray object, duplicate geometry, unintended
+  overlap) can only appear in a hand-edited SVG, never a generated one -- their own
+  hand-authored trip SVGs live outside this catalog, at `tests/fixtures/findings/`
+  (issue #41; see that directory's own README for which file trips which kind).
 - Never point the tool's tests at a real catalog.
 
 ## Layout

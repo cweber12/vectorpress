@@ -1,0 +1,143 @@
+# serializer version: 1
+# name: test_trip_svg_findings_json_is_locked_by_snapshot[clean]
+  dict({
+    'findings': list([
+    ]),
+    'result': 'pass',
+  })
+# ---
+# name: test_trip_svg_findings_json_is_locked_by_snapshot[duplicate_geometry]
+  dict({
+    'findings': list([
+      dict({
+        'classification': 'needs_review',
+        'kind': 'duplicate_geometry',
+        'location': dict({
+          'max_x': 60.0,
+          'max_y': 60.0,
+          'min_x': 40.0,
+          'min_y': 40.0,
+        }),
+        'measured_value': None,
+        'message': 'duplicate geometry: path element 0, subpath 1 has the same geometry as path element 0, subpath 2',
+        'path_reference': dict({
+          'element_index': 0,
+          'id': None,
+          'subpath_index': 1,
+        }),
+        'related_path_reference': dict({
+          'element_index': 0,
+          'id': None,
+          'subpath_index': 2,
+        }),
+        'threshold': None,
+      }),
+    ]),
+    'result': 'needs_review',
+  })
+# ---
+# name: test_trip_svg_findings_json_is_locked_by_snapshot[open_path]
+  dict({
+    'findings': list([
+      dict({
+        'classification': 'needs_review',
+        'kind': 'open_path',
+        'location': dict({
+          'max_x': 90.0,
+          'max_y': 90.0,
+          'min_x': 10.0,
+          'min_y': 10.0,
+        }),
+        'measured_value': None,
+        'message': 'open path: path element 0, subpath 0 is not closed (no Z, and its end is not its start)',
+        'path_reference': dict({
+          'element_index': 0,
+          'id': None,
+          'subpath_index': 0,
+        }),
+        'threshold': None,
+      }),
+    ]),
+    'result': 'needs_review',
+  })
+# ---
+# name: test_trip_svg_findings_json_is_locked_by_snapshot[overlap]
+  dict({
+    'findings': list([
+      dict({
+        'classification': 'needs_review',
+        'kind': 'overlap',
+        'location': dict({
+          'max_x': 60.0,
+          'max_y': 60.0,
+          'min_x': 40.0,
+          'min_y': 40.0,
+        }),
+        'measured_value': None,
+        'message': 'unintended overlap: path element 0, subpath 0 overlaps path element 1, subpath 0',
+        'path_reference': dict({
+          'element_index': 0,
+          'id': 'a',
+          'subpath_index': 0,
+        }),
+        'related_path_reference': dict({
+          'element_index': 1,
+          'id': 'b',
+          'subpath_index': 0,
+        }),
+        'threshold': None,
+      }),
+    ]),
+    'result': 'needs_review',
+  })
+# ---
+# name: test_trip_svg_findings_json_is_locked_by_snapshot[raster_content]
+  dict({
+    'findings': list([
+      dict({
+        'classification': 'needs_review',
+        'kind': 'raster_content',
+        'location': dict({
+          'max_x': 20.0,
+          'max_y': 20.0,
+          'min_x': 0.0,
+          'min_y': 0.0,
+        }),
+        'measured_value': None,
+        'message': 'raster content: element 1 (<image>) is a raster <image> element',
+        'path_reference': dict({
+          'element_index': 1,
+          'id': None,
+          'subpath_index': None,
+        }),
+        'threshold': None,
+      }),
+    ]),
+    'result': 'needs_review',
+  })
+# ---
+# name: test_trip_svg_findings_json_is_locked_by_snapshot[stray_object]
+  dict({
+    'findings': list([
+      dict({
+        'classification': 'needs_review',
+        'kind': 'stray_object',
+        'location': dict({
+          'max_x': 160.0,
+          'max_y': 160.0,
+          'min_x': 150.0,
+          'min_y': 150.0,
+        }),
+        'measured_value': None,
+        'message': "stray object: element 1 (<rect>) sits wholly or partly outside the document's own viewBox",
+        'path_reference': dict({
+          'element_index': 1,
+          'id': None,
+          'subpath_index': None,
+        }),
+        'threshold': None,
+      }),
+    ]),
+    'result': 'needs_review',
+  })
+# ---
