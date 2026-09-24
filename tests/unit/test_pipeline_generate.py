@@ -483,6 +483,50 @@ def test_generate_asset_reports_failed_when_write_derivative_raises_after_the_ou
     assert read_provenance(asset_dir / DERIVED_DIRNAME, output_path.name) is not None
 
 
+def test_generate_asset_leaves_no_temp_file_when_the_real_write_fails_to_rename(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Issue #27 review fix round 1: the test above bypasses
+    ``catalog.provenance.write_derivative`` entirely (it is replaced with a
+    fake), so it never exercises that module's own atomic-write cleanup.
+    This one drives a write failure through the *real* ``write_derivative``
+    -- ``_atomic_write_bytes``'s rename step (``Path.replace``) is made to
+    raise, so its own ``except BaseException: ... unlink(missing_ok=True);
+    raise`` cleanup runs for real, not a stand-in for it.
+
+    Asserts the derivative is reported ``failed``, ``derived/`` is left with
+    no output file and no stray ``*.tmp`` file (or any other file), no
+    provenance record exists, and ``asset_derivative_statuses`` reports it
+    ``missing`` -- the same "nothing half-written" guarantee AC2 checks for
+    a decode failure (where nothing is ever attempted), now proven for a
+    write failure too (where a temp file really was created before the
+    failure).
+    """
+    asset_dir = _make_asset_dir(tmp_path)
+    output_path = asset_dir / DERIVED_DIRNAME / "ochre-sea-star-color.png"
+
+    def _fail_to_rename(self: Path, target: object) -> Path:
+        raise OSError("simulated disk full during rename")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(Path, "replace", _fail_to_rename)
+        results = {r.derivative_type: r for r in generate_asset(_asset(), asset_dir)}
+
+    result = results[DerivativeType.TRANSPARENT_PNG]
+    assert result.outcome is GenerationOutcome.FAILED
+    assert result.detail  # a non-empty cause
+
+    derived_dir = asset_dir / DERIVED_DIRNAME
+    assert not output_path.exists()
+    if derived_dir.exists():
+        entries = list(derived_dir.iterdir())
+        assert entries == [], f"expected an empty or absent derived/, found: {entries}"
+    assert read_provenance(derived_dir, output_path.name) is None
+
+    statuses = {s.derivative_type: s for s in asset_derivative_statuses(_asset(), asset_dir)}
+    assert statuses[DerivativeType.TRANSPARENT_PNG].state is DerivativeState.MISSING
+
+
 def test_generate_asset_after_a_source_change_a_failing_generator_leaves_the_prior_derivative_stale(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -106,6 +106,10 @@ def test_generate_all_prints_one_stderr_line_per_failed_derivative_naming_asset_
         assert matching_lines, (
             f"expected a stderr line for {BROKEN_ASSET_ID}/{derivative_type}, got:\n{result.stderr}"
         )
+        assert len(matching_lines) == 1, (
+            f"expected exactly one stderr line for {BROKEN_ASSET_ID}/{derivative_type}, "
+            f"got:\n{matching_lines}"
+        )
         line = matching_lines[0]
         assert BROKEN_SOURCE_FILENAME in line
         # a cause follows the source file name -- non-empty, not just the
@@ -120,15 +124,19 @@ def test_generate_all_ends_with_a_stderr_summary_naming_the_failure_count(
     """Acceptance criterion 1: a run with failures ends with a summary
     naming how many -- exactly acorn_barnacle's two (transparent_png,
     silhouette_svg); flatcolor_svg is impossible, not failed, and does not
-    count."""
+    count. Asserted as the exact, final stderr line (not just "some line
+    contains a 2 and the word failed" -- the two per-derivative diagnostic
+    lines above it already contain "failed", so a looser check would not
+    catch a missing or miscounted summary)."""
     root = _temp_catalog_root(tmp_path)
     monkeypatch.chdir(root)
 
     result = runner.invoke(app, ["generate", "--all"])
 
     assert result.exit_code == 1, result.output
-    assert "2" in result.stderr
-    assert "failed" in result.stderr.lower()
+    stderr_lines = [line for line in result.stderr.splitlines() if line.strip()]
+    assert stderr_lines, "expected stderr output"
+    assert stderr_lines[-1] == "generate: 2 derivative(s) failed"
 
 
 # --- acceptance criterion 2: nothing half-written, the asset reports missing ------
