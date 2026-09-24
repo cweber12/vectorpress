@@ -103,19 +103,43 @@ def test_generate_asset_reports_impossible_with_a_reason(tmp_path: Path) -> None
 
 
 def test_generate_asset_reports_no_generator_for_a_recipe_without_one(tmp_path: Path) -> None:
-    """silhouette_svg has a recipe (issue #22) but no generator yet (PRD 3
-    lands it): it is reported, not silently skipped, and nothing is written
-    for it."""
+    """flatcolor_svg has a recipe but no generator yet (PRD 3 lands it,
+    issue #25): with a selectable flatcolor source it is reported, not
+    silently skipped, and nothing is written for it."""
+    asset_dir = _make_asset_dir(tmp_path)
+    _write_source_png(asset_dir / SOURCES_DIRNAME / "flatcolor.png")
+    asset = _asset(
+        sources=[
+            Source(role="silhouette", file="silhouette.png"),
+            Source(role="flatcolor", file="flatcolor.png"),
+        ]
+    )
+
+    results = {r.derivative_type: r for r in generate_asset(asset, asset_dir)}
+
+    result = results[DerivativeType.FLATCOLOR_SVG]
+    assert result.outcome is GenerationOutcome.NO_GENERATOR
+    assert result.detail == ""
+    assert not (asset_dir / DERIVED_DIRNAME).exists() or not any(
+        (asset_dir / DERIVED_DIRNAME).glob("*color.svg")
+    )
+
+
+def test_generate_asset_generates_silhouette_svg_with_customer_facing_filename(
+    tmp_path: Path,
+) -> None:
+    """Issue #24: ``silhouette_svg`` now has a landed generator."""
     asset_dir = _make_asset_dir(tmp_path)
 
     results = {r.derivative_type: r for r in generate_asset(_asset(), asset_dir)}
 
     result = results[DerivativeType.SILHOUETTE_SVG]
-    assert result.outcome is GenerationOutcome.NO_GENERATOR
-    assert result.detail == ""
-    assert not (asset_dir / DERIVED_DIRNAME).exists() or not any(
-        (asset_dir / DERIVED_DIRNAME).glob("*silhouette*")
-    )
+    assert result.outcome is GenerationOutcome.GENERATED
+    assert result.detail == "ochre-sea-star-silhouette.svg"
+
+    output_path = asset_dir / DERIVED_DIRNAME / "ochre-sea-star-silhouette.svg"
+    assert output_path.is_file()
+    assert b"<image" not in output_path.read_bytes()
 
 
 def test_generate_asset_generates_transparent_png_with_customer_facing_filename(

@@ -8,6 +8,7 @@ sit next to.
 """
 
 import json
+from dataclasses import replace
 from pathlib import Path
 
 from vectorpress.catalog.provenance import (
@@ -22,7 +23,7 @@ from vectorpress.catalog.provenance import (
     write_derivative,
 )
 from vectorpress.domain.derivative_type import DerivativeType
-from vectorpress.domain.recipe import Recipe
+from vectorpress.domain.recipe import RECIPES, Recipe
 
 SOURCES_DIRNAME = "sources"
 
@@ -88,6 +89,17 @@ def test_recipe_identity_hash_changes_when_the_generator_changes() -> None:
     )
 
     assert recipe_identity_hash(base) != recipe_identity_hash(other)
+
+
+def test_recipe_identity_hash_changes_when_a_tracing_parameter_changes() -> None:
+    """Issue #24 acceptance criterion: changing one of
+    ``silhouette_svg``'s real tracing parameters (curve tolerance here)
+    changes the recipe identity, so every derivative built under the old
+    value becomes stale (ADR 0004)."""
+    base = RECIPES[DerivativeType.SILHOUETTE_SVG]
+    changed = replace(base, parameters={**base.parameters, "curve_tolerance": 0.8})
+
+    assert recipe_identity_hash(base) != recipe_identity_hash(changed)
 
 
 def test_recipe_identity_hash_is_stable_regardless_of_parameter_key_order() -> None:
