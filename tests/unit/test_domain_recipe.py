@@ -46,3 +46,20 @@ def test_recipe_for_returns_none_for_a_real_type_with_no_recipe_yet() -> None:
 
 def test_recipe_for_returns_none_for_a_name_that_is_not_a_derivative_type() -> None:
     assert recipe_for("not_a_real_derivative_type") is None
+
+
+# --- generator identity (issue #23) -------------------------------------------------
+
+
+def test_transparent_png_has_a_landed_generator() -> None:
+    recipe = RECIPES[DerivativeType.TRANSPARENT_PNG]
+
+    assert recipe.generator == "transparent_png"
+    assert recipe.parameters == {}
+
+
+def test_silhouette_svg_and_flatcolor_svg_have_no_generator_yet() -> None:
+    """PRD 3 lands their generators; until then ``vpress generate`` reports
+    them ``no generator`` rather than attempting to run one (issue #23)."""
+    assert RECIPES[DerivativeType.SILHOUETTE_SVG].generator is None
+    assert RECIPES[DerivativeType.FLATCOLOR_SVG].generator is None

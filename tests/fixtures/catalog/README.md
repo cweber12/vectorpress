@@ -30,19 +30,25 @@ catalog/
     └── <product_id>.toml
 ```
 
-Later slices add, per asset, `derived/` (generated derivatives + `_state.json`) and
-`overrides/` (hand-edited effective derivatives) — see ADR 0005 and ADR 0007.
+`derived/` (generated derivatives + provenance) now exists per asset once a test
+generates into a **temporary copy** of this fixture (issue #23) — never here: this
+committed fixture never contains `derived/`. Later slices add `overrides/`
+(hand-edited effective derivatives) — see ADR 0005 and ADR 0007.
 
 ## Assets
 
 Three tide-pool subjects from §30, each with valid metadata and one or more source
 images tagged with a role (§4.1, ADR 0003):
 
-- `ochre_sea_star` — `silhouette` and `lineart` sources
-- `purple_sea_urchin` — a `silhouette` source
-- `giant_green_anemone` — a `silhouette` source
+- `ochre_sea_star` — `silhouette` (a solid blob) and `lineart` (a plain placeholder)
+  sources
+- `purple_sea_urchin` — a `silhouette` source (a ring: a solid shape with a hole)
+- `giant_green_anemone` — a `silhouette` source (a blob plus a detached island)
 
-Populated by PRD 1. Source PNGs are tiny, solid-color and regenerated with
+Populated by PRD 1. Each `silhouette.png` is a real shape on a transparent
+background, not a solid-color square (issue #23): the transparent PNG generator's
+crop-to-content and hole-preserving behaviour need actual content to crop and an
+actual hole to preserve. Still tiny (16x16), and regenerated deterministically with
 `uv run python tests/fixtures/catalog/generate_source_pngs.py`.
 
 ## Brand

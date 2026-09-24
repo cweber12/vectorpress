@@ -1,0 +1,197 @@
+"""pipeline.generate: generation orchestration, provenance, and idempotence
+(ADR 0004, §35, §36, issue #23).
+
+Builds a real asset folder on disk under ``tmp_path`` (a source PNG plus a
+fabricated :class:`~vectorpress.domain.asset.Asset`) rather than the fixture
+catalog: this module's job is the generate/current/provenance wiring, not
+catalog loading (``tests/integration/test_generate.py`` exercises that end
+to end).
+"""
+
+from pathlib import Path
+
+from PIL import Image
+
+from vectorpress.catalog.provenance import DERIVED_DIRNAME, read_provenance, sha256_bytes
+from vectorpress.domain.asset import AccuracyStatus, Asset, RightsStatus, Source
+from vectorpress.domain.derivative_state import DerivativeState
+from vectorpress.domain.derivative_type import DerivativeType
+from vectorpress.pipeline.generate import (
+    GenerationOutcome,
+    asset_derivative_statuses,
+    generate_asset,
+)
+
+SOURCES_DIRNAME = "sources"
+
+
+def _write_source_png(path: Path, rgba: tuple[int, int, int, int] = (196, 93, 38, 255)) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    Image.new("RGBA", (4, 4), rgba).save(path, format="PNG")
+
+
+def _asset(
+    display_name: str = "Ochre Sea Star",
+    sources: list[Source] | None = None,
+) -> Asset:
+    return Asset(
+        id="ochre_sea_star",
+        common_name="Ochre sea star",
+        display_name=display_name,
+        description="A test asset.",
+        subject_category="Echinoderm",
+        taxonomic_group="Echinoderm",
+        rights_status=RightsStatus.ORIGINAL_ARTWORK,
+        accuracy_status=AccuracyStatus.NOT_REVIEWED,
+        sources=sources
+        if sources is not None
+        else [Source(role="silhouette", file="silhouette.png")],
+    )
+
+
+def _make_asset_dir(tmp_path: Path) -> Path:
+    asset_dir = tmp_path / "ochre_sea_star"
+    _write_source_png(asset_dir / SOURCES_DIRNAME / "silhouette.png")
+    return asset_dir
+
+
+# --- asset_derivative_statuses: impossible / missing / current --------------------
+
+
+def test_status_is_impossible_for_flatcolor_svg_with_only_a_silhouette_source(
+    tmp_path: Path,
+) -> None:
+    asset_dir = _make_asset_dir(tmp_path)
+
+    statuses = {s.derivative_type: s for s in asset_derivative_statuses(_asset(), asset_dir)}
+
+    assert statuses[DerivativeType.FLATCOLOR_SVG].state is DerivativeState.IMPOSSIBLE
+    assert statuses[DerivativeType.FLATCOLOR_SVG].output_filename is None
+
+
+def test_status_is_missing_before_anything_is_generated(tmp_path: Path) -> None:
+    asset_dir = _make_asset_dir(tmp_path)
+
+    statuses = {s.derivative_type: s for s in asset_derivative_statuses(_asset(), asset_dir)}
+
+    assert statuses[DerivativeType.TRANSPARENT_PNG].state is DerivativeState.MISSING
+    assert statuses[DerivativeType.SILHOUETTE_SVG].state is DerivativeState.MISSING
+
+
+def test_status_is_current_after_generation(tmp_path: Path) -> None:
+    asset_dir = _make_asset_dir(tmp_path)
+    generate_asset(_asset(), asset_dir)
+
+    statuses = {s.derivative_type: s for s in asset_derivative_statuses(_asset(), asset_dir)}
+
+    png_status = statuses[DerivativeType.TRANSPARENT_PNG]
+    assert png_status.state is DerivativeState.CURRENT
+    assert png_status.output_filename == "ochre-sea-star-color.png"
+
+
+# --- generate_asset outcomes ------------------------------------------------------
+
+
+def test_generate_asset_reports_impossible_with_a_reason(tmp_path: Path) -> None:
+    asset_dir = _make_asset_dir(tmp_path)
+
+    results = {r.derivative_type: r for r in generate_asset(_asset(), asset_dir)}
+
+    result = results[DerivativeType.FLATCOLOR_SVG]
+    assert result.outcome is GenerationOutcome.IMPOSSIBLE
+    assert "flatcolor" in result.detail
+
+
+def test_generate_asset_reports_no_generator_for_a_recipe_without_one(tmp_path: Path) -> None:
+    """silhouette_svg has a recipe (issue #22) but no generator yet (PRD 3
+    lands it): it is reported, not silently skipped, and nothing is written
+    for it."""
+    asset_dir = _make_asset_dir(tmp_path)
+
+    results = {r.derivative_type: r for r in generate_asset(_asset(), asset_dir)}
+
+    result = results[DerivativeType.SILHOUETTE_SVG]
+    assert result.outcome is GenerationOutcome.NO_GENERATOR
+    assert result.detail == ""
+    assert not (asset_dir / DERIVED_DIRNAME).exists() or not any(
+        (asset_dir / DERIVED_DIRNAME).glob("*silhouette*")
+    )
+
+
+def test_generate_asset_generates_transparent_png_with_customer_facing_filename(
+    tmp_path: Path,
+) -> None:
+    asset_dir = _make_asset_dir(tmp_path)
+
+    results = {r.derivative_type: r for r in generate_asset(_asset(), asset_dir)}
+
+    result = results[DerivativeType.TRANSPARENT_PNG]
+    assert result.outcome is GenerationOutcome.GENERATED
+    assert result.detail == "ochre-sea-star-color.png"
+
+    output_path = asset_dir / DERIVED_DIRNAME / "ochre-sea-star-color.png"
+    assert output_path.is_file()
+    with Image.open(output_path) as image:
+        assert image.mode == "RGBA"
+
+
+def test_generate_asset_writes_a_provenance_record_with_every_required_field(
+    tmp_path: Path,
+) -> None:
+    asset_dir = _make_asset_dir(tmp_path)
+
+    generate_asset(_asset(), asset_dir)
+
+    provenance = read_provenance(asset_dir / DERIVED_DIRNAME, "ochre-sea-star-color.png")
+    assert provenance is not None
+    assert provenance.source_file == "silhouette.png"
+    source_bytes = (asset_dir / SOURCES_DIRNAME / "silhouette.png").read_bytes()
+    assert provenance.source_hash == sha256_bytes(source_bytes)
+    assert provenance.derivative_type == "transparent_png"
+    assert provenance.generator == "transparent_png"
+    assert provenance.recipe_hash  # non-empty
+    assert provenance.generator_versions["vectorpress"]
+    assert provenance.generator_versions["Pillow"]
+    assert provenance.output_file == "ochre-sea-star-color.png"
+    output_bytes = (asset_dir / DERIVED_DIRNAME / "ochre-sea-star-color.png").read_bytes()
+    assert provenance.output_hash == sha256_bytes(output_bytes)
+
+
+# --- idempotence (§36) -------------------------------------------------------------
+
+
+def test_second_generate_reports_current_and_rewrites_nothing(tmp_path: Path) -> None:
+    asset_dir = _make_asset_dir(tmp_path)
+    generate_asset(_asset(), asset_dir)
+    output_path = asset_dir / DERIVED_DIRNAME / "ochre-sea-star-color.png"
+    provenance_file = asset_dir / DERIVED_DIRNAME / "ochre-sea-star-color.png.provenance.json"
+    output_mtime = output_path.stat().st_mtime_ns
+    provenance_mtime = provenance_file.stat().st_mtime_ns
+
+    results = {r.derivative_type: r for r in generate_asset(_asset(), asset_dir)}
+
+    result = results[DerivativeType.TRANSPARENT_PNG]
+    assert result.outcome is GenerationOutcome.CURRENT
+    assert result.detail == "ochre-sea-star-color.png"
+    assert output_path.stat().st_mtime_ns == output_mtime
+    assert provenance_file.stat().st_mtime_ns == provenance_mtime
+
+
+def test_regenerates_when_the_source_file_changes(tmp_path: Path) -> None:
+    """§22: "If an approved master asset is updated, the user should be able
+    to regenerate its derivatives" -- and issue #23 acceptance criterion 4's
+    "a different source changes the source hash"."""
+    asset_dir = _make_asset_dir(tmp_path)
+    generate_asset(_asset(), asset_dir)
+    first_provenance = read_provenance(asset_dir / DERIVED_DIRNAME, "ochre-sea-star-color.png")
+    assert first_provenance is not None
+
+    _write_source_png(asset_dir / SOURCES_DIRNAME / "silhouette.png", rgba=(10, 20, 30, 255))
+
+    results = {r.derivative_type: r for r in generate_asset(_asset(), asset_dir)}
+    result = results[DerivativeType.TRANSPARENT_PNG]
+    assert result.outcome is GenerationOutcome.GENERATED
+
+    second_provenance = read_provenance(asset_dir / DERIVED_DIRNAME, "ochre-sea-star-color.png")
+    assert second_provenance is not None
+    assert second_provenance.source_hash != first_provenance.source_hash

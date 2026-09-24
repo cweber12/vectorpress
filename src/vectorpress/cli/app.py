@@ -9,9 +9,9 @@ from pathlib import Path
 import typer
 
 from vectorpress import __version__
-from vectorpress.catalog.assets import load_assets, lookup_asset
+from vectorpress.catalog.assets import asset_dir, failed_asset_ids, load_assets, lookup_asset
 from vectorpress.catalog.collections import load_collections
-from vectorpress.catalog.derivatives import count_derivative_states, select_derivatives
+from vectorpress.catalog.derivatives import DerivativeStateCounts
 from vectorpress.catalog.errors import CatalogConfigError, CatalogNotFoundError
 from vectorpress.catalog.load import load_catalog, load_catalog_config
 from vectorpress.catalog.locate import locate_catalog_root
@@ -19,6 +19,11 @@ from vectorpress.catalog.metadata_problem import MetadataProblem
 from vectorpress.catalog.products import load_products
 from vectorpress.domain.catalog_config import CatalogConfig
 from vectorpress.domain.derivative_state import DerivativeState
+from vectorpress.pipeline.generate import (
+    asset_derivative_statuses,
+    count_derivative_states,
+    generate_asset,
+)
 
 app = typer.Typer(
     name="vpress",
@@ -123,7 +128,10 @@ def status(ctx: typer.Context) -> None:
     typer.echo(f"Assets: {len(catalog.assets)}")
     typer.echo(f"Collections: {len(catalog.collections)}")
     typer.echo(f"Products: {len(catalog.products)}")
-    counts = count_derivative_states(catalog.assets)
+    if catalog.config is not None:
+        counts = count_derivative_states(catalog.assets, root, catalog.config)
+    else:
+        counts = DerivativeStateCounts(missing=0, impossible=0)
     typer.echo(f"Missing derivatives: {counts.missing}")
     typer.echo(f"Impossible derivatives: {counts.impossible}")
     _echo_problems(catalog.problems)
@@ -156,8 +164,9 @@ def asset(
     asset_id: str = typer.Argument(help="The asset's ID (its folder name under assets/)."),
 ) -> None:
     """Show one asset in full: metadata, statuses, every source with its
-    role, and every recipe-bearing derivative type's selected source or
-    impossibility reason (issue #22, ADR 0003).
+    role, and every recipe-bearing derivative type's selected source,
+    impossibility reason, or (once generated) current output filename
+    (issue #22, issue #23, ADR 0003, ADR 0004).
 
     An ID naming a folder whose ``asset.toml`` failed to load is not the
     same as an ID naming no folder at all (issue #15): the former prints
@@ -185,16 +194,74 @@ def asset(
         typer.echo(f"  {source.file}\t{source.role}")
 
     typer.echo("Derivatives:")
-    for selection in select_derivatives(found):
-        if selection.state is DerivativeState.IMPOSSIBLE:
+    for status in asset_derivative_statuses(found, asset_dir(root, config, found.id)):
+        if status.state is DerivativeState.IMPOSSIBLE:
+            typer.echo(f"  {status.derivative_type.value}\t{status.state.value}\t{status.reason}")
+        elif status.state is DerivativeState.CURRENT:
             typer.echo(
-                f"  {selection.derivative_type.value}\t{selection.state.value}\t{selection.reason}"
+                f"  {status.derivative_type.value}\t{status.state.value}\t{status.output_filename}"
             )
         else:
-            assert selection.source is not None  # MISSING always carries a selected source
+            assert status.source is not None  # MISSING always carries a selected source
             typer.echo(
-                f"  {selection.derivative_type.value}\t{selection.state.value}\t"
-                f"{selection.source.file} ({selection.source.role})"
+                f"  {status.derivative_type.value}\t{status.state.value}\t"
+                f"{status.source.file} ({status.source.role})"
+            )
+
+
+@app.command()
+def generate(
+    ctx: typer.Context,
+    asset_id: str | None = typer.Argument(
+        None, help="The asset's ID (its folder name under assets/)."
+    ),
+    all_assets: bool = typer.Option(
+        False,
+        "--all",
+        help="Generate every recipe-bearing derivative type for every loaded asset.",
+    ),
+) -> None:
+    """Generate every recipe-bearing derivative type for one asset, or every
+    loaded asset with ``--all`` (§6.1, §20, §35, §36, issue #23).
+
+    Each derivative is reported on its own line: asset, type, and outcome
+    (``generated``, ``current``, ``impossible``, or ``no generator`` for a
+    recipe-bearing type whose generator has not landed yet). Regenerating is
+    a no-op: a current derivative is reported ``current`` and never
+    rewritten (§36). An asset that failed to load is skipped and named
+    rather than stopping the rest of ``--all`` (§35); an unknown asset ID is
+    the same actionable error ``vpress asset`` gives.
+    """
+    if asset_id is None and not all_assets:
+        typer.echo("Provide an asset ID, or --all.", err=True)
+        raise typer.Exit(code=2)
+    if asset_id is not None and all_assets:
+        typer.echo("Provide an asset ID or --all, not both.", err=True)
+        raise typer.Exit(code=2)
+
+    root, config = _locate_and_load_config(ctx)
+    inventory = load_assets(root, config)
+
+    if all_assets:
+        for failed_id in failed_asset_ids(inventory, config):
+            typer.echo(f"{failed_id}\tskipped: failed to load")
+        targets = inventory.assets
+    else:
+        assert asset_id is not None  # usage-error branch above covers the None case
+        result = lookup_asset(inventory, config, asset_id)
+        if result.asset is None:
+            if result.problems:
+                _echo_problems(result.problems)
+            else:
+                typer.echo(f"Unknown asset: {asset_id!r}", err=True)
+            raise typer.Exit(code=1)
+        targets = [result.asset]
+
+    for target in targets:
+        for result in generate_asset(target, asset_dir(root, config, target.id)):
+            typer.echo(
+                f"{result.asset_id}\t{result.derivative_type.value}\t"
+                f"{result.outcome.value}\t{result.detail}"
             )
 
 

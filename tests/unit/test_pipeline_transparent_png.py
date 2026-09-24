@@ -1,0 +1,112 @@
+"""pipeline.transparent_png: the transparent PNG generator (§6.1, issue #23).
+
+Builds its own tiny source PNGs with Pillow rather than reading the fixture
+catalog: this module's job is the generator's pixel behaviour, not catalog
+wiring (that is ``tests/integration/test_generate.py``'s job).
+"""
+
+from io import BytesIO
+from pathlib import Path
+
+from PIL import Image
+
+from vectorpress.pipeline.transparent_png import generate
+
+Rgba = tuple[int, int, int, int]
+
+TRANSPARENT: Rgba = (0, 0, 0, 0)
+OPAQUE: Rgba = (196, 93, 38, 255)
+
+
+def _write_source(path: Path, pixels: list[list[Rgba]]) -> None:
+    """Write an RGBA PNG from a row-major grid of ``(r, g, b, a)`` pixels."""
+    height = len(pixels)
+    width = len(pixels[0])
+    image = Image.new("RGBA", (width, height))
+    for y, row in enumerate(pixels):
+        for x, pixel in enumerate(row):
+            image.putpixel((x, y), pixel)
+    image.save(path, format="PNG")
+
+
+def _open_bytes(data: bytes) -> Image.Image:
+    return Image.open(BytesIO(data))
+
+
+def _pixel(image: Image.Image, xy: tuple[int, int]) -> Rgba:
+    pixel = image.convert("RGBA").getpixel(xy)
+    assert isinstance(pixel, tuple) and len(pixel) == 4
+    r, g, b, a = pixel
+    return (int(r), int(g), int(b), int(a))
+
+
+def test_output_is_8_bit_rgba(tmp_path: Path) -> None:
+    source_path = tmp_path / "source.png"
+    _write_source(source_path, [[OPAQUE, OPAQUE], [OPAQUE, OPAQUE]])
+
+    result = generate(source_path, {})
+
+    with _open_bytes(result.output_bytes) as out:
+        assert out.mode == "RGBA"
+        assert _pixel(out, (0, 0)) == OPAQUE
+
+
+def test_crops_to_the_tight_bounding_box_of_non_transparent_pixels(tmp_path: Path) -> None:
+    """A 4x4 canvas with a 2x2 opaque block in one corner and transparent
+    padding everywhere else crops down to just the 2x2 content (clean
+    bounds, §8)."""
+    grid = [
+        [TRANSPARENT, TRANSPARENT, TRANSPARENT, TRANSPARENT],
+        [TRANSPARENT, OPAQUE, OPAQUE, TRANSPARENT],
+        [TRANSPARENT, OPAQUE, OPAQUE, TRANSPARENT],
+        [TRANSPARENT, TRANSPARENT, TRANSPARENT, TRANSPARENT],
+    ]
+    source_path = tmp_path / "source.png"
+    _write_source(source_path, grid)
+
+    result = generate(source_path, {})
+
+    with _open_bytes(result.output_bytes) as out:
+        assert out.size == (2, 2)
+        assert all(_pixel(out, (x, y)) == OPAQUE for x in range(2) for y in range(2))
+
+
+def test_transparent_background_outside_the_shape_is_preserved(tmp_path: Path) -> None:
+    """A ring (a shape with a hole) keeps its hole transparent after
+    cropping -- the crop is a bounding box, not a re-fill."""
+    grid = [
+        [OPAQUE, OPAQUE, OPAQUE],
+        [OPAQUE, TRANSPARENT, OPAQUE],
+        [OPAQUE, OPAQUE, OPAQUE],
+    ]
+    source_path = tmp_path / "source.png"
+    _write_source(source_path, grid)
+
+    result = generate(source_path, {})
+
+    with _open_bytes(result.output_bytes) as out:
+        assert out.size == (3, 3)
+        assert _pixel(out, (1, 1))[3] == 0  # the hole stays transparent
+        assert _pixel(out, (0, 0)) == OPAQUE
+
+
+def test_generation_is_byte_deterministic(tmp_path: Path) -> None:
+    """§36: unchanged input produces byte-identical output, every time."""
+    source_path = tmp_path / "source.png"
+    _write_source(source_path, [[OPAQUE, TRANSPARENT], [TRANSPARENT, OPAQUE]])
+
+    first = generate(source_path, {})
+    second = generate(source_path, {})
+
+    assert first.output_bytes == second.output_bytes
+
+
+def test_reports_the_pillow_version_it_used(tmp_path: Path) -> None:
+    import PIL
+
+    source_path = tmp_path / "source.png"
+    _write_source(source_path, [[OPAQUE]])
+
+    result = generate(source_path, {})
+
+    assert result.library_versions == {"Pillow": PIL.__version__}
