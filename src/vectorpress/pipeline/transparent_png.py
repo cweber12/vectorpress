@@ -23,7 +23,7 @@ already uses for exactly this reason.
 import struct
 import zlib
 from collections.abc import Mapping
-from pathlib import Path
+from io import BytesIO
 
 import PIL
 from PIL import Image
@@ -62,15 +62,19 @@ def _encode_rgba_png(width: int, height: int, raw_rgba: bytes) -> bytes:
     )
 
 
-def generate(source_path: Path, parameters: Mapping[str, object]) -> GeneratorOutput:
-    """Produce a transparent PNG from ``source_path`` (§6.1).
+def generate(source_bytes: bytes, parameters: Mapping[str, object]) -> GeneratorOutput:
+    """Produce a transparent PNG from ``source_bytes`` (§6.1).
+
+    Takes bytes, not a path: no generator touches the filesystem (ADR 0006,
+    issue #23 review fix round 2) -- ``catalog.provenance.read_source_bytes``
+    already read the source before calling this.
 
     ``parameters`` is unused: this generator has none yet, but takes the
     common generator signature (:data:`vectorpress.pipeline.generator.Generator`)
     so a later parameter (e.g. a padding margin) can be added without
     changing the interface.
     """
-    with Image.open(source_path) as source:
+    with Image.open(BytesIO(source_bytes)) as source:
         rgba = source.convert("RGBA")
         bbox = rgba.getchannel("A").getbbox()
         cropped = rgba.crop(bbox) if bbox is not None else rgba

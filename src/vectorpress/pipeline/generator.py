@@ -2,16 +2,17 @@
 (ADR 0006: "pipeline: derivative generators, one module per derivative type
 behind a common interface").
 
-No filesystem writes here: a generator only decodes a source file and
-returns bytes plus the library versions it used; persisting those bytes
-alongside a provenance record is ``catalog.provenance``'s job (ADR 0006's
-"catalog... the only layer touching catalog files"), driven by
-:mod:`vectorpress.pipeline.generate`.
+No filesystem access here at all -- not even a read: a generator takes the
+source's bytes (already read by ``catalog.provenance.read_source_bytes``)
+and returns output bytes plus the library versions it used. Persisting those
+bytes alongside a provenance record is also ``catalog.provenance``'s job
+(ADR 0006's "catalog... the only layer touching catalog files"); a generator
+never opens a path itself, so it stays a pure bytes-in, bytes-out function
+(issue #23 review fix round 2).
 """
 
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from pathlib import Path
 
 
 @dataclass(frozen=True)
@@ -27,7 +28,8 @@ class GeneratorOutput:
     library_versions: dict[str, str]
 
 
-#: A generator decodes the source file at ``Path``, applies ``parameters``
-#: (a recipe's :attr:`~vectorpress.domain.recipe.Recipe.parameters`), and
-#: returns the encoded output plus the library versions it used.
-Generator = Callable[[Path, Mapping[str, object]], GeneratorOutput]
+#: A generator decodes ``source_bytes`` (already read off disk by the
+#: catalog layer), applies ``parameters`` (a recipe's
+#: :attr:`~vectorpress.domain.recipe.Recipe.parameters`), and returns the
+#: encoded output plus the library versions it used -- no filesystem access.
+Generator = Callable[[bytes, Mapping[str, object]], GeneratorOutput]

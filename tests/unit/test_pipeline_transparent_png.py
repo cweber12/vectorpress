@@ -1,13 +1,14 @@
 """pipeline.transparent_png: the transparent PNG generator (§6.1, issue #23).
 
-Builds its own tiny source PNGs with Pillow rather than reading the fixture
-catalog: this module's job is the generator's pixel behaviour, not catalog
-wiring (that is ``tests/integration/test_generate.py``'s job).
+Builds its own tiny source PNGs with Pillow, in memory, rather than reading
+the fixture catalog: this module's job is the generator's pixel behaviour,
+not catalog wiring (that is ``tests/integration/test_generate.py``'s job).
+No filesystem is touched anywhere in this file -- the generator takes bytes,
+not a path (ADR 0006, issue #23 review fix round 2).
 """
 
 import struct
 from io import BytesIO
-from pathlib import Path
 
 from PIL import Image
 
@@ -19,15 +20,17 @@ TRANSPARENT: Rgba = (0, 0, 0, 0)
 OPAQUE: Rgba = (196, 93, 38, 255)
 
 
-def _write_source(path: Path, pixels: list[list[Rgba]]) -> None:
-    """Write an RGBA PNG from a row-major grid of ``(r, g, b, a)`` pixels."""
+def _source_bytes(pixels: list[list[Rgba]]) -> bytes:
+    """An RGBA PNG's bytes, from a row-major grid of ``(r, g, b, a)`` pixels."""
     height = len(pixels)
     width = len(pixels[0])
     image = Image.new("RGBA", (width, height))
     for y, row in enumerate(pixels):
         for x, pixel in enumerate(row):
             image.putpixel((x, y), pixel)
-    image.save(path, format="PNG")
+    buffer = BytesIO()
+    image.save(buffer, format="PNG")
+    return buffer.getvalue()
 
 
 def _open_bytes(data: bytes) -> Image.Image:
@@ -41,18 +44,17 @@ def _pixel(image: Image.Image, xy: tuple[int, int]) -> Rgba:
     return (int(r), int(g), int(b), int(a))
 
 
-def test_output_is_8_bit_rgba(tmp_path: Path) -> None:
-    source_path = tmp_path / "source.png"
-    _write_source(source_path, [[OPAQUE, OPAQUE], [OPAQUE, OPAQUE]])
+def test_output_is_8_bit_rgba() -> None:
+    source_bytes = _source_bytes([[OPAQUE, OPAQUE], [OPAQUE, OPAQUE]])
 
-    result = generate(source_path, {})
+    result = generate(source_bytes, {})
 
     with _open_bytes(result.output_bytes) as out:
         assert out.mode == "RGBA"
         assert _pixel(out, (0, 0)) == OPAQUE
 
 
-def test_crops_to_the_tight_bounding_box_of_non_transparent_pixels(tmp_path: Path) -> None:
+def test_crops_to_the_tight_bounding_box_of_non_transparent_pixels() -> None:
     """A 4x4 canvas with a 2x2 opaque block in one corner and transparent
     padding everywhere else crops down to just the 2x2 content (clean
     bounds, §8)."""
@@ -62,17 +64,16 @@ def test_crops_to_the_tight_bounding_box_of_non_transparent_pixels(tmp_path: Pat
         [TRANSPARENT, OPAQUE, OPAQUE, TRANSPARENT],
         [TRANSPARENT, TRANSPARENT, TRANSPARENT, TRANSPARENT],
     ]
-    source_path = tmp_path / "source.png"
-    _write_source(source_path, grid)
+    source_bytes = _source_bytes(grid)
 
-    result = generate(source_path, {})
+    result = generate(source_bytes, {})
 
     with _open_bytes(result.output_bytes) as out:
         assert out.size == (2, 2)
         assert all(_pixel(out, (x, y)) == OPAQUE for x in range(2) for y in range(2))
 
 
-def test_transparent_background_outside_the_shape_is_preserved(tmp_path: Path) -> None:
+def test_transparent_background_outside_the_shape_is_preserved() -> None:
     """A ring (a shape with a hole) keeps its hole transparent after
     cropping -- the crop is a bounding box, not a re-fill."""
     grid = [
@@ -80,10 +81,9 @@ def test_transparent_background_outside_the_shape_is_preserved(tmp_path: Path) -
         [OPAQUE, TRANSPARENT, OPAQUE],
         [OPAQUE, OPAQUE, OPAQUE],
     ]
-    source_path = tmp_path / "source.png"
-    _write_source(source_path, grid)
+    source_bytes = _source_bytes(grid)
 
-    result = generate(source_path, {})
+    result = generate(source_bytes, {})
 
     with _open_bytes(result.output_bytes) as out:
         assert out.size == (3, 3)
@@ -91,18 +91,17 @@ def test_transparent_background_outside_the_shape_is_preserved(tmp_path: Path) -
         assert _pixel(out, (0, 0)) == OPAQUE
 
 
-def test_generation_is_byte_deterministic(tmp_path: Path) -> None:
+def test_generation_is_byte_deterministic() -> None:
     """§36: unchanged input produces byte-identical output, every time."""
-    source_path = tmp_path / "source.png"
-    _write_source(source_path, [[OPAQUE, TRANSPARENT], [TRANSPARENT, OPAQUE]])
+    source_bytes = _source_bytes([[OPAQUE, TRANSPARENT], [TRANSPARENT, OPAQUE]])
 
-    first = generate(source_path, {})
-    second = generate(source_path, {})
+    first = generate(source_bytes, {})
+    second = generate(source_bytes, {})
 
     assert first.output_bytes == second.output_bytes
 
 
-def test_reports_the_pillow_and_zlib_versions_it_used(tmp_path: Path) -> None:
+def test_reports_the_pillow_and_zlib_versions_it_used() -> None:
     """Pillow decodes and crops; the encoder is our own, over the stdlib
     ``zlib`` (fix round 1) -- provenance's generator_versions must name both,
     since both actually produced the output bytes."""
@@ -110,10 +109,9 @@ def test_reports_the_pillow_and_zlib_versions_it_used(tmp_path: Path) -> None:
 
     import PIL
 
-    source_path = tmp_path / "source.png"
-    _write_source(source_path, [[OPAQUE]])
+    source_bytes = _source_bytes([[OPAQUE]])
 
-    result = generate(source_path, {})
+    result = generate(source_bytes, {})
 
     assert result.library_versions == {"Pillow": PIL.__version__, "zlib": zlib.ZLIB_VERSION}
 
@@ -131,13 +129,12 @@ def _chunk_types(png_bytes: bytes) -> list[bytes]:
     return types
 
 
-def test_writes_no_ancillary_chunks(tmp_path: Path) -> None:
+def test_writes_no_ancillary_chunks() -> None:
     """§6.1, §20's "predictable naming" cousin for bytes: only the three
     critical chunks every PNG needs, no tEXt/tIME/pHYs/iCCP carried over
     from the source or added by the encoder."""
-    source_path = tmp_path / "source.png"
-    _write_source(source_path, [[OPAQUE, OPAQUE], [OPAQUE, OPAQUE]])
+    source_bytes = _source_bytes([[OPAQUE, OPAQUE], [OPAQUE, OPAQUE]])
 
-    result = generate(source_path, {})
+    result = generate(source_bytes, {})
 
     assert _chunk_types(result.output_bytes) == [b"IHDR", b"IDAT", b"IEND"]

@@ -1,10 +1,13 @@
 """Tool-owned provenance records for generated derivatives (ADR 0004, ADR
 0005, CONTEXT.md "Provenance").
 
-Only ``catalog`` reads and writes provenance (ADR 0006, issue #23's "read and
-written only by the catalog layer"): a generator in ``pipeline`` computes
-output bytes and hands them here to be persisted, atomically, beside the
-derivative under ``derived/`` -- never inside the output file itself.
+Only ``catalog`` touches catalog files (ADR 0006): this module owns every
+byte that crosses the boundary between disk and a generator -- reading a
+source's bytes to hand to a generator, reading/writing provenance, and
+deciding whether a derivative is current by re-reading and re-hashing what
+is actually on disk. ``pipeline.generate`` orchestrates (which recipe, which
+generator, in what order) but never opens a catalog file itself (issue #23
+review fix round 2).
 """
 
 import hashlib
@@ -14,6 +17,7 @@ import tempfile
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
+from vectorpress.catalog.assets import SOURCES_DIRNAME
 from vectorpress.domain.recipe import Recipe
 
 #: Every asset's generated derivatives live under this folder, sibling to
@@ -72,6 +76,46 @@ class Provenance:
     generator_versions: dict[str, str]
     output_file: str
     output_hash: str
+
+
+def read_source_bytes(asset_dir: Path, source_file: str) -> bytes:
+    """Read one asset's source file's bytes, to hand to a generator or hash
+    against provenance (ADR 0003: ``sources/`` is read-only to the tool --
+    this only ever reads it, never modifies it)."""
+    return (asset_dir / SOURCES_DIRNAME / source_file).read_bytes()
+
+
+def is_current(asset_dir: Path, output_filename: str, source_file: str, recipe_hash: str) -> bool:
+    """Whether the derivative named ``output_filename`` is current (ADR
+    0004, §36): its provenance exists, its recorded source hash matches
+    ``source_file`` as it stands now, its recipe identity matches
+    ``recipe_hash``, and the output file exists with the recorded hash.
+
+    Every catalog-file read this needs (source, provenance, output) happens
+    here, not in ``pipeline`` (ADR 0006's "catalog... the only layer
+    touching catalog files"): the caller passes in ``recipe_hash`` --
+    :func:`recipe_identity_hash` of the current recipe -- rather than the
+    recipe itself, since computing it is a pure function over domain data,
+    not a file read, and stays the caller's job.
+    """
+    derived_dir = asset_dir / DERIVED_DIRNAME
+    provenance = read_provenance(derived_dir, output_filename)
+    if provenance is None:
+        return False
+
+    source_path = asset_dir / SOURCES_DIRNAME / source_file
+    if not source_path.is_file():
+        return False
+    if provenance.source_hash != sha256_bytes(source_path.read_bytes()):
+        return False
+
+    if provenance.recipe_hash != recipe_hash:
+        return False
+
+    output_path = derived_dir / output_filename
+    if not output_path.is_file():
+        return False
+    return provenance.output_hash == sha256_bytes(output_path.read_bytes())
 
 
 def provenance_path(derived_dir: Path, output_filename: str) -> Path:
