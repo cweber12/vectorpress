@@ -1,5 +1,5 @@
 """The ``excessive_complexity`` detector (§9, §9.1, ADR 0007, issue #40, PR
-#46 review fix round 1).
+#46 review fix rounds 1 and 2).
 
 A path whose node count is out of proportion to its own physical size is
 hard to cut cleanly and hard for a human to review or hand-edit -- issue
@@ -17,16 +17,24 @@ perimeter, nothing to do with genuine complexity -- exactly the shape
 :mod:`vectorpress.validate.accidental_dot` and :mod:`vectorpress.validate.
 tiny_isolated_shape` already exist to name. Density is therefore judged only
 on a piece whose own perimeter is at or above ``min_perimeter_in`` -- a
-piece smaller than that is left entirely to the dot/tiny-shape kinds, never
-judged for complexity at all (not even against the absolute cap below,
-which exists for a *large, genuinely overbuilt* path, not a small one).
+piece smaller than that is never judged *by density*, left entirely to the
+dot/tiny-shape kinds for that measure.
 
 The **absolute node cap** (``max_node_count``) is a backstop against a
 pathologically node-heavy path whose density alone would not flag it (a
 huge, evenly detailed design, say) -- set well above what realistic traced
 artwork ever needs (hundreds of nodes, not tens), so in practice the density
 measure above is what actually catches an excessively complex piece; the
-cap is deliberately the rarer path to a finding, not the common one.
+cap is deliberately the rarer path to a finding, not the common one. Unlike
+density, the cap is checked **regardless of a piece's own size** (review fix
+round 2): a piece below ``min_perimeter_in`` is exempt from density, never
+from the cap -- an authored node count in the hundreds is exactly as
+unmanageable to cut and hand-edit on a tiny piece as on a large one, so
+nothing about being small should exempt a piece from this particular
+backstop (in practice, the pieces small enough to be excluded from density
+essentially never carry that many nodes, so this rarely fires on them; it
+is a deliberate, checked property of the detector, not an untested
+possibility).
 
 A piece trips this kind when either measure is out of bounds; the
 ``measured_value``/``threshold`` recorded are whichever one it tripped

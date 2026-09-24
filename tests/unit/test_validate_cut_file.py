@@ -13,8 +13,10 @@ import xml.etree.ElementTree as ET
 import pytest
 
 from vectorpress.domain.derivative_type import DerivativeType
-from vectorpress.domain.finding import FindingKind, ValidationOutcome
+from vectorpress.domain.finding import BoundingBox, FindingKind, ValidationOutcome
 from vectorpress.domain.recipe import RECIPES
+from vectorpress.validate import excessive_complexity
+from vectorpress.validate._svg_geometry import Piece
 from vectorpress.validate.cut_file import THRESHOLDS, validate_cut_file
 
 REFERENCE_SIZE_IN = 3.0
@@ -543,3 +545,48 @@ def test_a_small_plain_square_below_the_min_perimeter_yields_no_finding_even_tho
 
     assert result.outcome is ValidationOutcome.PASS
     assert result.findings == ()
+
+
+def test_the_absolute_node_cap_still_applies_to_a_piece_below_the_min_perimeter() -> None:
+    """Review fix round 2, PR #46: unlike density, the absolute node-count
+    cap is checked regardless of a piece's own size (the module docstring's
+    own correction) -- a piece whose own perimeter sits below
+    ``min_perimeter_in`` (so its own density is never judged at all) still
+    trips the cap once its own node count clears it, exactly the same way a
+    piece above the minimum perimeter would.
+
+    Calls :func:`vectorpress.validate.excessive_complexity.detect` directly
+    with a small, test-local ``Piece`` and thresholds, rather than going
+    through a hand-written SVG and :func:`~vectorpress.validate.cut_file.
+    validate_cut_file` the way every other test in this file does -- the
+    real ``excessive_complexity_max_node_count`` (300) would need an
+    impractically large fixture to clear."""
+    tiny_ring = ((0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0))  # perimeter 4 user units
+    piece = Piece(
+        element_index=0,
+        subpath_index=0,
+        element_id=None,
+        bbox=BoundingBox(min_x=0.0, min_y=0.0, max_x=1.0, max_y=1.0),
+        area=1.0,
+        node_count=10,
+        outer_ring=tiny_ring,
+        hole_rings=(),
+    )
+    scale_user_units_per_inch = 100.0  # this piece's own perimeter: 4 / 100 = 0.04in
+    min_perimeter_in = 10.0  # far above 0.04in -- this piece's own density is never judged
+    max_nodes_per_inch = 1.0  # deliberately tiny too, moot since density isn't judged here
+    max_node_count = 5.0  # this piece's own 10 nodes clear it
+
+    findings = excessive_complexity.detect(
+        [piece], scale_user_units_per_inch, max_nodes_per_inch, min_perimeter_in, max_node_count
+    )
+
+    assert len(findings) == 1
+    finding = findings[0]
+    assert finding.kind is FindingKind.EXCESSIVE_COMPLEXITY
+    assert finding.measured_value == pytest.approx(10.0)
+    assert finding.threshold == pytest.approx(5.0)
+    assert finding.message == (
+        "excessive geometric complexity: path element 0, subpath 0 has 10 nodes, "
+        "above the 5-node cap"
+    )
