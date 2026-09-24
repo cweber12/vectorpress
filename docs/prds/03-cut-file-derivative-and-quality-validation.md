@@ -1,6 +1,6 @@
 # PRD 3 — Cut-File Derivative and Quality Validation
 
-Status: not started
+Status: complete
 Depends on: see `docs/PLAN.md` Part 3 dependency graph
 
 **Goal.** A cut-file derivative is produced as a manufacturable draft, and every
