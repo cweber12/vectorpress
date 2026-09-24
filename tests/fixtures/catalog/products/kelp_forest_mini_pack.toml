@@ -2,11 +2,17 @@
 # file's stem. Declares an inline collection (same Membership shape as a
 # collection file, ADR 0008) instead of referencing a collection slug, and
 # has no [listing] yet, since PRD 7 drafts that on first build (issue #7).
+#
+# reference_size_in overrides the catalog default (3.0 in) down to 1.0 in
+# (§9.1, ADR 0008, issue #38): a mini pack sells at a smaller physical size
+# than the catalog default, and `vpress validate --product
+# kelp_forest_mini_pack` validates at this size instead.
 
 derivative_types = ["cut_svg"]
 formats = ["svg"]
 tier = "mini_pack"
 price = 6.00
+reference_size_in = 1.0
 
 [membership.rule]
 field = "ecosystems"

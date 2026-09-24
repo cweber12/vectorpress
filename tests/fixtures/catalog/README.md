@@ -115,7 +115,12 @@ Two valid products (§7, §18, ADR 0008), populated by issue #7:
   `[listing]`.
 - `kelp_forest_mini_pack` — an inline collection (the same `Membership`
   shape a collection file uses) instead of a collection slug reference,
-  and no `[listing]` yet, since PRD 7 drafts that on first build.
+  and no `[listing]` yet, since PRD 7 drafts that on first build. Carries
+  a `reference_size_in = 1.0` override, smaller than the catalog's own
+  3.0 in default (§9.1, ADR 0008, issue #38): `vpress validate <asset_id>
+  --product kelp_forest_mini_pack` validates at this size instead, and its
+  findings report is kept side by side with the catalog-default one rather
+  than overwriting it.
 
 Whether a referenced collection slug, or an inline membership's asset IDs
 and collection slugs, actually exist is PRD 5's job; this fixture only

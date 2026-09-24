@@ -17,12 +17,15 @@ from vectorpress.catalog.findings import FindingsCurrencyState, findings_currenc
 from vectorpress.catalog.load import load_catalog, load_catalog_config
 from vectorpress.catalog.locate import locate_catalog_root
 from vectorpress.catalog.metadata_problem import MetadataProblem
-from vectorpress.catalog.products import load_products
+from vectorpress.catalog.products import load_products, lookup_product
 from vectorpress.catalog.provenance import DERIVED_DIRNAME, read_derivative_bytes
 from vectorpress.domain.catalog_config import CatalogConfig
 from vectorpress.domain.derivative_state import DerivativeState
 from vectorpress.domain.derivative_type import DerivativeType
 from vectorpress.domain.finding import ValidationOutcome
+from vectorpress.domain.numeric_format import format_number
+from vectorpress.domain.product import Product
+from vectorpress.domain.reference_size import resolve_reference_size_in
 from vectorpress.pipeline.generate import (
     DerivativeStatus,
     GenerationOutcome,
@@ -378,12 +381,22 @@ def validate(
         "--all",
         help="Validate every loaded asset's cut file.",
     ),
+    product: str | None = typer.Option(
+        None,
+        "--product",
+        help=(
+            "Validate at this product's resolved reference size (its own "
+            "override if it has one, else the catalog default) instead of "
+            "the catalog default alone. Only resolves the size -- it does "
+            "not check that an asset belongs to the product."
+        ),
+    ),
 ) -> None:
     """Validate one asset's ``cut_svg``, or every loaded asset's with
     ``--all``, against every landed §9 detector (§9, §9.1, §9.2, ADR 0007,
-    issue #37), writing a findings report beside the file (through
-    ``catalog.findings``) and printing pass / needs review with each
-    finding's kind and location.
+    ADR 0008, issue #37, issue #38), writing a findings report beside the
+    file (through ``catalog.findings``) and printing pass / needs review with
+    each finding's kind and location.
 
     Exactly one of ``asset_id`` or ``--all`` selects which assets are
     checked; providing both, or neither, is a usage error. An asset whose
@@ -392,6 +405,19 @@ def validate(
     is skipped and named (§35), the same as ``vpress generate --all``.
     ``vpress generate`` itself never calls this -- a findings report only
     ever exists because ``validate`` was run.
+
+    ``--product`` combines with either ``asset_id`` or ``--all`` (issue
+    #38): it resolves the reference size to validate at from the named
+    product (:func:`~vectorpress.domain.reference_size.resolve_reference_size_in`)
+    instead of using the catalog default outright -- whether that asset
+    actually belongs to the product is left to a later PRD. An unknown
+    product slug, or one whose file failed to load, is the same two-outcome
+    actionable error ``asset_id`` itself gets, and stops the command before
+    any asset is validated. The resulting report is persisted at its own
+    reference-size-keyed path, never overwriting or invalidating the
+    catalog-default report for the same asset (issue #38's "a findings
+    report is per (cut file, reference size)") -- ``vpress asset`` always
+    keeps showing the catalog-default result.
 
     A validation failure (an unparseable SVG -- most plausibly a hand-edited
     override, since a generated cut file always parses) is reported on
@@ -409,6 +435,20 @@ def validate(
 
     root, config = _locate_and_load_config(ctx)
     inventory = load_assets(root, config)
+
+    resolved_product: Product | None = None
+    if product is not None:
+        product_inventory = load_products(root, config)
+        product_lookup = lookup_product(product_inventory, config, product)
+        if product_lookup.product is None:
+            if product_lookup.problems:
+                _echo_problems(product_lookup.problems)
+            else:
+                typer.echo(f"Unknown product: {product!r}", err=True)
+            raise typer.Exit(code=1)
+        resolved_product = product_lookup.product
+
+    reference_size_in = resolve_reference_size_in(config, resolved_product)
 
     if all_assets:
         for failed_id in failed_asset_ids(inventory, config):
@@ -429,9 +469,10 @@ def validate(
     for target in targets:
         # The whole read-validate-persist cycle lives in the ``validate``
         # layer (issue #37 fix round 1): this command only decides *which*
-        # assets to check and formats the result -- it never opens a
-        # catalog file itself (ADR 0006, CLAUDE.md's "cli stays thin").
-        outcome = validate_asset_cut_file(root, config, target, config.reference_size_in)
+        # assets to check, at *which* reference size (issue #38), and
+        # formats the result -- it never opens a catalog file itself (ADR
+        # 0006, CLAUDE.md's "cli stays thin").
+        outcome = validate_asset_cut_file(root, config, target, reference_size_in)
 
         if outcome.outcome is AssetValidationOutcome.IMPOSSIBLE:
             typer.echo(f"{target.id}\tcut_svg\timpossible\t{outcome.reason}")
@@ -451,7 +492,15 @@ def validate(
         result_text = (
             "pass" if outcome.validation.outcome is ValidationOutcome.PASS else "needs review"
         )
-        typer.echo(f"{target.id}\tcut_svg\t{outcome.filename}\t{result_text}")
+        # A product-resolved size gets its own visible marker (issue #38):
+        # the plain flow's own line stays exactly as it was before this
+        # issue, since every existing test locks that exact string.
+        size_note = (
+            f"\t(at {format_number(reference_size_in)}in, product {resolved_product.slug})"
+            if resolved_product is not None
+            else ""
+        )
+        typer.echo(f"{target.id}\tcut_svg\t{outcome.filename}\t{result_text}{size_note}")
         for finding in outcome.validation.findings:
             location = finding.location
             typer.echo(

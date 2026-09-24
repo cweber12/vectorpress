@@ -198,3 +198,58 @@ def test_currency_is_stale_when_the_thresholds_changed(tmp_path: Path) -> None:
     )
 
     assert currency.state is FindingsCurrencyState.STALE
+
+
+# --- per-size coexistence (§9.1, ADR 0008, issue #38) -----------------------------------
+
+
+def test_findings_path_with_no_size_is_unchanged_from_before_issue_38(tmp_path: Path) -> None:
+    """The catalog-default path must stay byte-identical where it is (issue
+    #38): calling ``findings_path`` with no ``at_size`` at all keeps
+    returning exactly the same bare path it always has."""
+    bare = findings_path(tmp_path, "ochre-sea-star-cut.svg")
+
+    assert bare == tmp_path / "ochre-sea-star-cut.svg.findings.json"
+
+
+def test_findings_path_at_a_size_differs_from_the_bare_path(tmp_path: Path) -> None:
+    bare = findings_path(tmp_path, "ochre-sea-star-cut.svg")
+    sized = findings_path(tmp_path, "ochre-sea-star-cut.svg", at_size=1.5)
+
+    assert sized != bare
+
+
+def test_findings_path_at_different_sizes_differ_from_each_other(tmp_path: Path) -> None:
+    at_one = findings_path(tmp_path, "ochre-sea-star-cut.svg", at_size=1.0)
+    at_two = findings_path(tmp_path, "ochre-sea-star-cut.svg", at_size=2.0)
+
+    assert at_one != at_two
+
+
+def test_write_then_read_round_trips_a_sized_report(tmp_path: Path) -> None:
+    report = _report(reference_size_in=1.5)
+
+    write_findings_report(tmp_path, report, at_size=1.5)
+    reread = read_findings_report(tmp_path, report.validated_file, at_size=1.5)
+
+    assert reread == report
+    # and it never touched the bare, catalog-default path.
+    assert read_findings_report(tmp_path, report.validated_file) is None
+
+
+def test_a_sized_report_coexists_with_the_bare_report_without_overwriting_it(
+    tmp_path: Path,
+) -> None:
+    default_report = _report(reference_size_in=3.0, result=ValidationOutcome.PASS, findings=())
+    sized_report = _report(reference_size_in=1.0)
+
+    write_findings_report(tmp_path, default_report)
+    write_findings_report(tmp_path, sized_report, at_size=1.0)
+
+    assert read_findings_report(tmp_path, default_report.validated_file) == default_report
+    assert read_findings_report(tmp_path, sized_report.validated_file, at_size=1.0) == sized_report
+
+    # the reverse order holds too: rewriting the bare report afterwards
+    # leaves the sized one untouched.
+    write_findings_report(tmp_path, default_report)
+    assert read_findings_report(tmp_path, sized_report.validated_file, at_size=1.0) == sized_report

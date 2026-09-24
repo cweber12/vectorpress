@@ -152,7 +152,12 @@ def test_an_unparseable_cut_file_fails_and_persists_nothing(root: Path) -> None:
 # --- the reference size is taken explicitly, never defaulted internally --------------------
 
 
-def test_a_different_reference_size_changes_the_persisted_report(root: Path) -> None:
+def test_a_different_reference_size_persists_at_its_own_sized_path(root: Path) -> None:
+    """Validating at a size other than ``config.reference_size_in`` (here,
+    the catalog default of 3.0) persists at its own size-keyed path, not the
+    catalog-default one (issue #38's per-(cut file, reference size)
+    coexistence) -- the same report reads back through ``read_findings_report``
+    given the same ``at_size``."""
     config = _catalog(root)
     asset = _asset([Source(role="silhouette", file="silhouette.png")])
     derived_dir = root / "assets" / "test_asset" / DERIVED_DIRNAME
@@ -161,6 +166,53 @@ def test_a_different_reference_size_changes_the_persisted_report(root: Path) -> 
 
     validate_asset_cut_file(root, config, asset, 6.0)
 
-    report = read_findings_report(derived_dir, "test-asset-cut.svg")
+    assert read_findings_report(derived_dir, "test-asset-cut.svg") is None  # bare path untouched
+    report = read_findings_report(derived_dir, "test-asset-cut.svg", at_size=6.0)
     assert report is not None
     assert report.reference_size_in == 6.0
+
+
+def test_a_size_matching_the_catalog_default_persists_at_the_bare_path(root: Path) -> None:
+    """The opposite case: when ``reference_size_in`` equals
+    ``config.reference_size_in``, the report lands at the same bare path
+    every pre-issue-#38 caller already reads (issue #38's "the
+    catalog-default report must stay byte-identical where it is")."""
+    config = _catalog(root)
+    asset = _asset([Source(role="silhouette", file="silhouette.png")])
+    derived_dir = root / "assets" / "test_asset" / DERIVED_DIRNAME
+    derived_dir.mkdir(parents=True)
+    (derived_dir / "test-asset-cut.svg").write_bytes(_ONE_PIECE_SVG)
+
+    validate_asset_cut_file(root, config, asset, REFERENCE_SIZE_IN)
+
+    report = read_findings_report(derived_dir, "test-asset-cut.svg")
+    assert report is not None
+    assert report.reference_size_in == REFERENCE_SIZE_IN
+
+
+def test_validating_at_two_sizes_keeps_both_reports_side_by_side(root: Path) -> None:
+    """Issue #38's coexistence: validating the same cut file at the catalog
+    default and then at a product's override size leaves both reports on
+    disk, neither overwritten by the other -- and the reverse order holds
+    too."""
+    config = _catalog(root)
+    asset = _asset([Source(role="silhouette", file="silhouette.png")])
+    derived_dir = root / "assets" / "test_asset" / DERIVED_DIRNAME
+    derived_dir.mkdir(parents=True)
+    (derived_dir / "test-asset-cut.svg").write_bytes(_ONE_PIECE_SVG)
+
+    validate_asset_cut_file(root, config, asset, REFERENCE_SIZE_IN)
+    validate_asset_cut_file(root, config, asset, 6.0)
+
+    default_report = read_findings_report(derived_dir, "test-asset-cut.svg")
+    sized_report = read_findings_report(derived_dir, "test-asset-cut.svg", at_size=6.0)
+    assert default_report is not None
+    assert sized_report is not None
+    assert default_report.reference_size_in == REFERENCE_SIZE_IN
+    assert sized_report.reference_size_in == 6.0
+
+    # the reverse order: revalidating at the default afterwards leaves the
+    # sized report from the earlier call untouched.
+    validate_asset_cut_file(root, config, asset, REFERENCE_SIZE_IN)
+    still_sized = read_findings_report(derived_dir, "test-asset-cut.svg", at_size=6.0)
+    assert still_sized == sized_report
