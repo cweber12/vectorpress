@@ -30,6 +30,16 @@ def _write_source_png(path: Path, rgba: tuple[int, int, int, int] = (196, 93, 38
     Image.new("RGBA", (4, 4), rgba).save(path, format="PNG")
 
 
+def _write_fully_transparent_source_png(path: Path) -> None:
+    """A silhouette source with no ink at all: ``silhouette_svg`` has
+    nothing to trace and its generator raises (issue #24 review fix round
+    1) -- ``transparent_png`` tolerates the same source fine (an empty
+    bounding box just means an uncropped, all-transparent output), so this
+    is also a source that fails one derivative type but not another."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    Image.new("RGBA", (4, 4), (0, 0, 0, 0)).save(path, format="PNG")
+
+
 def _asset(
     display_name: str = "Ochre Sea Star",
     sources: list[Source] | None = None,
@@ -103,19 +113,43 @@ def test_generate_asset_reports_impossible_with_a_reason(tmp_path: Path) -> None
 
 
 def test_generate_asset_reports_no_generator_for_a_recipe_without_one(tmp_path: Path) -> None:
-    """silhouette_svg has a recipe (issue #22) but no generator yet (PRD 3
-    lands it): it is reported, not silently skipped, and nothing is written
-    for it."""
+    """flatcolor_svg has a recipe but no generator yet (PRD 3 lands it,
+    issue #25): with a selectable flatcolor source it is reported, not
+    silently skipped, and nothing is written for it."""
+    asset_dir = _make_asset_dir(tmp_path)
+    _write_source_png(asset_dir / SOURCES_DIRNAME / "flatcolor.png")
+    asset = _asset(
+        sources=[
+            Source(role="silhouette", file="silhouette.png"),
+            Source(role="flatcolor", file="flatcolor.png"),
+        ]
+    )
+
+    results = {r.derivative_type: r for r in generate_asset(asset, asset_dir)}
+
+    result = results[DerivativeType.FLATCOLOR_SVG]
+    assert result.outcome is GenerationOutcome.NO_GENERATOR
+    assert result.detail == ""
+    assert not (asset_dir / DERIVED_DIRNAME).exists() or not any(
+        (asset_dir / DERIVED_DIRNAME).glob("*color.svg")
+    )
+
+
+def test_generate_asset_generates_silhouette_svg_with_customer_facing_filename(
+    tmp_path: Path,
+) -> None:
+    """Issue #24: ``silhouette_svg`` now has a landed generator."""
     asset_dir = _make_asset_dir(tmp_path)
 
     results = {r.derivative_type: r for r in generate_asset(_asset(), asset_dir)}
 
     result = results[DerivativeType.SILHOUETTE_SVG]
-    assert result.outcome is GenerationOutcome.NO_GENERATOR
-    assert result.detail == ""
-    assert not (asset_dir / DERIVED_DIRNAME).exists() or not any(
-        (asset_dir / DERIVED_DIRNAME).glob("*silhouette*")
-    )
+    assert result.outcome is GenerationOutcome.GENERATED
+    assert result.detail == "ochre-sea-star-silhouette.svg"
+
+    output_path = asset_dir / DERIVED_DIRNAME / "ochre-sea-star-silhouette.svg"
+    assert output_path.is_file()
+    assert b"<image" not in output_path.read_bytes()
 
 
 def test_generate_asset_generates_transparent_png_with_customer_facing_filename(
@@ -155,6 +189,46 @@ def test_generate_asset_writes_a_provenance_record_with_every_required_field(
     assert provenance.output_file == "ochre-sea-star-color.png"
     output_bytes = (asset_dir / DERIVED_DIRNAME / "ochre-sea-star-color.png").read_bytes()
     assert provenance.output_hash == sha256_bytes(output_bytes)
+
+
+# --- generator failure isolation (issue #24 review fix round 1) -------------------
+
+
+def test_generate_asset_reports_failed_when_the_generator_raises(tmp_path: Path) -> None:
+    """A fully transparent silhouette source leaves ``silhouette_svg``
+    with no geometry to trace: its generator raises, and ``generate_asset``
+    reports ``failed`` with a reason instead of letting the exception
+    propagate and stop the rest of the asset (controller ruling: this is a
+    per-derivative failure, not ``impossible`` -- CONTEXT.md reserves
+    ``impossible`` for "no acceptable source", and a source was selected
+    here)."""
+    asset_dir = tmp_path / "ochre_sea_star"
+    _write_fully_transparent_source_png(asset_dir / SOURCES_DIRNAME / "silhouette.png")
+
+    results = {r.derivative_type: r for r in generate_asset(_asset(), asset_dir)}
+
+    result = results[DerivativeType.SILHOUETTE_SVG]
+    assert result.outcome is GenerationOutcome.FAILED
+    assert result.detail  # a non-empty reason
+
+    assert not (asset_dir / DERIVED_DIRNAME).exists() or not any(
+        (asset_dir / DERIVED_DIRNAME).glob("*silhouette*")
+    )
+
+
+def test_generate_asset_continues_past_a_failed_derivative_to_the_next(tmp_path: Path) -> None:
+    """One derivative failing does not stop the rest of the same asset:
+    ``transparent_png`` still generates from the same (fully transparent)
+    source that made ``silhouette_svg`` fail."""
+    asset_dir = tmp_path / "ochre_sea_star"
+    _write_fully_transparent_source_png(asset_dir / SOURCES_DIRNAME / "silhouette.png")
+
+    results = {r.derivative_type: r for r in generate_asset(_asset(), asset_dir)}
+
+    assert results[DerivativeType.SILHOUETTE_SVG].outcome is GenerationOutcome.FAILED
+    assert results[DerivativeType.TRANSPARENT_PNG].outcome is GenerationOutcome.GENERATED
+    output_path = asset_dir / DERIVED_DIRNAME / "ochre-sea-star-color.png"
+    assert output_path.is_file()
 
 
 # --- idempotence (§36) -------------------------------------------------------------

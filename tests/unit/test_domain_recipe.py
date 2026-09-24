@@ -58,8 +58,21 @@ def test_transparent_png_has_a_landed_generator() -> None:
     assert recipe.parameters == {}
 
 
-def test_silhouette_svg_and_flatcolor_svg_have_no_generator_yet() -> None:
-    """PRD 3 lands their generators; until then ``vpress generate`` reports
-    them ``no generator`` rather than attempting to run one (issue #23)."""
-    assert RECIPES[DerivativeType.SILHOUETTE_SVG].generator is None
+def test_silhouette_svg_has_a_landed_generator_with_its_tracing_parameters() -> None:
+    """Issue #24: the solid silhouette SVG generator, with its three
+    tracing parameters as recipe parameters so they are part of the recipe
+    identity (ADR 0004)."""
+    recipe = RECIPES[DerivativeType.SILHOUETTE_SVG]
+
+    assert recipe.generator == "silhouette_svg"
+    assert recipe.parameters == {
+        "alpha_threshold": 127,
+        "curve_tolerance": 0.2,
+        "speckle_size": 2,
+    }
+
+
+def test_flatcolor_svg_has_no_generator_yet() -> None:
+    """PRD 3 lands its generator; until then ``vpress generate`` reports it
+    ``no generator`` rather than attempting to run one (issue #23)."""
     assert RECIPES[DerivativeType.FLATCOLOR_SVG].generator is None

@@ -20,6 +20,7 @@ from vectorpress.catalog.products import load_products
 from vectorpress.domain.catalog_config import CatalogConfig
 from vectorpress.domain.derivative_state import DerivativeState
 from vectorpress.pipeline.generate import (
+    GenerationOutcome,
     asset_derivative_statuses,
     count_derivative_states,
     generate_asset,
@@ -222,15 +223,18 @@ def generate(
     ),
 ) -> None:
     """Generate every recipe-bearing derivative type for one asset, or every
-    loaded asset with ``--all`` (§6.1, §20, §35, §36, issue #23).
+    loaded asset with ``--all`` (§6.1, §20, §35, §36, issue #23, issue #24
+    review fix round 1).
 
     Each derivative is reported on its own line: asset, type, and outcome
-    (``generated``, ``current``, ``impossible``, or ``no generator`` for a
-    recipe-bearing type whose generator has not landed yet). Regenerating is
-    a no-op: a current derivative is reported ``current`` and never
-    rewritten (§36). An asset that failed to load is skipped and named
-    rather than stopping the rest of ``--all`` (§35); an unknown asset ID is
-    the same actionable error ``vpress asset`` gives.
+    (``generated``, ``current``, ``impossible``, ``no generator`` for a
+    recipe-bearing type whose generator has not landed yet, or ``failed``
+    when the generator itself raised). Regenerating is a no-op: a current
+    derivative is reported ``current`` and never rewritten (§36). An asset
+    that failed to load is skipped and named rather than stopping the rest
+    of ``--all`` (§35); an unknown asset ID is the same actionable error
+    ``vpress asset`` gives. Exits non-zero if any derivative failed, even
+    though every asset was still attempted.
     """
     if asset_id is None and not all_assets:
         typer.echo("Provide an asset ID, or --all.", err=True)
@@ -257,12 +261,18 @@ def generate(
             raise typer.Exit(code=1)
         targets = [result.asset]
 
+    any_failed = False
     for target in targets:
         for result in generate_asset(target, asset_dir(root, config, target.id)):
             typer.echo(
                 f"{result.asset_id}\t{result.derivative_type.value}\t"
                 f"{result.outcome.value}\t{result.detail}"
             )
+            if result.outcome is GenerationOutcome.FAILED:
+                any_failed = True
+
+    if any_failed:
+        raise typer.Exit(code=1)
 
 
 @app.command()

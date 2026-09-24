@@ -1,0 +1,10 @@
+# serializer version: 1
+# name: test_silhouette_svg_text_is_locked_by_snapshot[giant_green_anemone-giant-green-anemone-silhouette.svg]
+  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="2 2 12 8" width="12" height="8"><path fill="#000000" fill-rule="evenodd" stroke="none" d="M3.5714,8.4286C2.7071,7.5643 2,6.4714 2,6C2,4.8891 4.8891,2 6,2C7.1109,2 10,4.8891 10,6C10,7.1109 7.1109,10 6,10C5.5286,10 4.4357,9.2929 3.5714,8.4286ZM12,3C12,2.45 12.45,2 13,2C13.55,2 14,2.45 14,3C14,3.55 13.55,4 13,4C12.45,4 12,3.55 12,3Z"/></svg>'
+# ---
+# name: test_silhouette_svg_text_is_locked_by_snapshot[ochre_sea_star-ochre-sea-star-silhouette.svg]
+  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="3.0398 3.0398 9.9204 9.9602" width="9.9204" height="9.9602"><path fill="#000000" fill-rule="evenodd" stroke="none" d="M4.2,11.8C2.6531,10.2531 2.6531,5.7469 4.2,4.2C5.7469,2.6531 10.2531,2.6531 11.8,4.2C13.3469,5.7469 13.3469,10.2531 11.8,11.8C11.14,12.46 9.43,13 8,13C6.57,13 4.86,12.46 4.2,11.8Z"/></svg>'
+# ---
+# name: test_silhouette_svg_text_is_locked_by_snapshot[purple_sea_urchin-purple-sea-urchin-silhouette.svg]
+  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="2.0556 2 11.9444 12" width="11.9444" height="12"><path fill="#000000" fill-rule="evenodd" stroke="none" d="M3.5714,12.4286C1.5504,10.4075 1.5504,5.5925 3.5714,3.5714C4.4357,2.7071 6.4286,2 8,2C11.6443,2 14,4.3557 14,8C14,9.5714 13.2929,11.5643 12.4286,12.4286C11.5643,13.2929 9.5714,14 8,14C6.4286,14 4.4357,13.2929 3.5714,12.4286ZM10.5,8C10.5,6.1673 9.8983,5.4146 8.2455,5.1799C5.7884,4.831 4.3929,6.9755 5.3885,9.5701C5.7499,10.5119 6.8932,11.0122 8.2455,10.8201C9.8983,10.5854 10.5,9.8327 10.5,8Z"/></svg>'
+# ---

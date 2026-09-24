@@ -26,14 +26,14 @@ class DerivativeType(StrEnum):
     LAYERED_SVG = "layered_svg"
 
 
-#: The customer-facing filename suffix for each derivative type this PRD
-#: slice generates (§20, issue #23): every type gets an explicit suffix, no
-#: type uses the bare stem. Only ``transparent_png`` has one so far -- later
-#: slices add ``-silhouette.svg`` and ``-color.svg`` alongside their
-#: generators, the same way :data:`~vectorpress.domain.recipe.RECIPES` grows
-#: one type at a time.
+#: The customer-facing filename suffix for each derivative type with a
+#: landed generator (§20, issue #23, issue #24): every type gets an
+#: explicit suffix, no type uses the bare stem. A later slice adds
+#: ``-color.svg`` alongside ``flatcolor_svg``'s generator, the same way
+#: :data:`~vectorpress.domain.recipe.RECIPES` grows one type at a time.
 _FILENAME_SUFFIXES: dict[DerivativeType, str] = {
     DerivativeType.TRANSPARENT_PNG: "-color.png",
+    DerivativeType.SILHOUETTE_SVG: "-silhouette.svg",
 }
 
 _SLUG_STRIP_RE = re.compile(r"[^a-z0-9]+")

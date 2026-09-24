@@ -28,6 +28,13 @@ def test_derivative_filename_uses_display_name_never_the_asset_id() -> None:
     assert "ochre_sea_star" not in filename
 
 
+def test_derivative_filename_uses_the_silhouette_svg_suffix() -> None:
+    """§20, issue #24: the solid silhouette SVG's customer-facing filename."""
+    filename = derivative_filename("Ochre Sea Star", DerivativeType.SILHOUETTE_SVG)
+
+    assert filename == "ochre-sea-star-silhouette.svg"
+
+
 def test_derivative_filename_raises_for_a_type_with_no_suffix_yet() -> None:
     with pytest.raises(KeyError):
-        derivative_filename("Purple Sea Urchin", DerivativeType.SILHOUETTE_SVG)
+        derivative_filename("Purple Sea Urchin", DerivativeType.FLATCOLOR_SVG)
