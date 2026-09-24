@@ -1,10 +1,11 @@
-"""catalog.provenance: tool-owned provenance records (ADR 0004, issue #23).
+"""catalog.provenance: tool-owned provenance records (ADR 0004, issue #23,
+issue #26).
 
 Also the only module that reads a source's bytes or decides whether a
-derivative is current (ADR 0006's "catalog... the only layer touching
-catalog files"; issue #23 review fix round 2) -- ``read_source_bytes`` and
-``is_current`` are tested here alongside the provenance read/write pair they
-sit next to.
+derivative is current, stale (with a reason), or missing (ADR 0006's
+"catalog... the only layer touching catalog files"; issue #23 review fix
+round 2) -- ``read_source_bytes`` and ``derivative_currency`` are tested here
+alongside the provenance read/write pair they sit next to.
 """
 
 import json
@@ -13,8 +14,11 @@ from pathlib import Path
 
 from vectorpress.catalog.provenance import (
     DERIVED_DIRNAME,
+    OUTPUT_CHANGED_ON_DISK,
+    RECIPE_CHANGED,
+    SOURCE_CHANGED,
     Provenance,
-    is_current,
+    derivative_currency,
     provenance_path,
     read_provenance,
     read_source_bytes,
@@ -22,6 +26,7 @@ from vectorpress.catalog.provenance import (
     sha256_bytes,
     write_derivative,
 )
+from vectorpress.domain.derivative_state import DerivativeState
 from vectorpress.domain.derivative_type import DerivativeType
 from vectorpress.domain.recipe import RECIPES, Recipe
 
@@ -172,6 +177,55 @@ def test_write_derivative_does_not_rewrite_output_bytes_when_they_already_match(
     assert output_path.read_bytes() == output_bytes
 
 
+def test_write_derivative_does_not_rewrite_provenance_when_the_payload_already_matches(
+    tmp_path: Path,
+) -> None:
+    """Issue #26 review fix round 1: the same idempotence applies to the
+    provenance record itself, not just the output bytes -- this is what
+    keeps ``generate --force`` on an unchanged derivative a true no-op on
+    disk (AC5's "no file is rewritten (bytes and mtime unchanged)"),
+    matching the write of the output bytes right above."""
+    output_bytes = b"fake png bytes"
+    provenance = _provenance(output_hash=sha256_bytes(output_bytes))
+    write_derivative(tmp_path, provenance.output_file, output_bytes, provenance)
+    record_path = provenance_path(tmp_path, provenance.output_file)
+    mtime_before = record_path.stat().st_mtime_ns
+    bytes_before = record_path.read_bytes()
+
+    # A fresh call with an identical provenance record (as a real second,
+    # unchanged generation, or a ``--force`` regeneration, would produce).
+    write_derivative(tmp_path, provenance.output_file, output_bytes, provenance)
+
+    assert record_path.stat().st_mtime_ns == mtime_before
+    assert record_path.read_bytes() == bytes_before
+
+
+def test_write_derivative_rewrites_provenance_when_the_payload_differs(tmp_path: Path) -> None:
+    """A provenance record that differs -- even only in
+    ``generator_versions``, e.g. a library upgrade -- is still written: the
+    idempotence check compares the whole serialized payload, not just the
+    hashes it is built from.
+
+    Asserted through content, not mtime: on some filesystems two writes this
+    close together can land in the same mtime tick, so an unchanged mtime
+    would not reliably distinguish "rewritten with new content" from "write
+    skipped" -- the content itself does that unambiguously.
+    """
+    output_bytes = b"fake png bytes"
+    provenance = _provenance(output_hash=sha256_bytes(output_bytes))
+    write_derivative(tmp_path, provenance.output_file, output_bytes, provenance)
+    record_path = provenance_path(tmp_path, provenance.output_file)
+
+    upgraded = replace(
+        provenance, generator_versions={**provenance.generator_versions, "Pillow": "99.0.0"}
+    )
+    write_derivative(tmp_path, provenance.output_file, output_bytes, upgraded)
+
+    assert json.loads(record_path.read_text(encoding="utf-8"))["generator_versions"]["Pillow"] == (
+        "99.0.0"
+    )
+
+
 def test_write_derivative_creates_the_derived_directory(tmp_path: Path) -> None:
     provenance = _provenance()
     derived_dir = tmp_path / "derived"
@@ -201,7 +255,7 @@ def test_read_source_bytes_reads_the_file_under_sources(tmp_path: Path) -> None:
     assert read_source_bytes(tmp_path, "silhouette.png") == b"fake source bytes"
 
 
-# --- is_current (ADR 0004, §36) ----------------------------------------------------
+# --- derivative_currency (ADR 0004, §36, issue #26) ---------------------------------
 
 
 def _asset_dir_with_source(tmp_path: Path, source_bytes: bytes = b"source v1") -> Path:
@@ -224,49 +278,85 @@ def _generate_into(asset_dir: Path, source_bytes: bytes, recipe_hash: str) -> Pr
     return provenance
 
 
-def test_is_current_is_false_when_no_provenance_exists(tmp_path: Path) -> None:
+def test_derivative_currency_is_missing_when_no_provenance_exists(tmp_path: Path) -> None:
     asset_dir = _asset_dir_with_source(tmp_path)
 
-    assert is_current(asset_dir, "ochre-sea-star-color.png", "silhouette.png", "r" * 64) is False
+    currency = derivative_currency(
+        asset_dir, "ochre-sea-star-color.png", "silhouette.png", "r" * 64
+    )
+
+    assert currency.state is DerivativeState.MISSING
+    assert currency.reason is None
 
 
-def test_is_current_is_true_right_after_generation(tmp_path: Path) -> None:
+def test_derivative_currency_is_current_right_after_generation(tmp_path: Path) -> None:
     asset_dir = _asset_dir_with_source(tmp_path)
     provenance = _generate_into(asset_dir, b"source v1", recipe_hash="r" * 64)
 
-    assert is_current(asset_dir, provenance.output_file, "silhouette.png", "r" * 64) is True
+    currency = derivative_currency(asset_dir, provenance.output_file, "silhouette.png", "r" * 64)
+
+    assert currency.state is DerivativeState.CURRENT
+    assert currency.reason is None
 
 
-def test_is_current_is_false_when_the_source_file_changed(tmp_path: Path) -> None:
+def test_derivative_currency_is_stale_source_changed_when_the_source_file_changed(
+    tmp_path: Path,
+) -> None:
+    """Issue #26 acceptance criterion 1: overwriting the source with
+    different valid content marks the derivative built from it
+    ``stale (source changed)``."""
     asset_dir = _asset_dir_with_source(tmp_path)
     provenance = _generate_into(asset_dir, b"source v1", recipe_hash="r" * 64)
 
     (asset_dir / SOURCES_DIRNAME / "silhouette.png").write_bytes(b"source v2")
 
-    assert is_current(asset_dir, provenance.output_file, "silhouette.png", "r" * 64) is False
+    currency = derivative_currency(asset_dir, provenance.output_file, "silhouette.png", "r" * 64)
+
+    assert currency.state is DerivativeState.STALE
+    assert currency.reason == SOURCE_CHANGED
 
 
-def test_is_current_is_false_when_the_recipe_hash_changed(tmp_path: Path) -> None:
+def test_derivative_currency_is_stale_recipe_changed_when_the_recipe_hash_changed(
+    tmp_path: Path,
+) -> None:
+    """Issue #26 acceptance criterion 3: a recipe parameter change marks
+    every derivative of that type ``stale (recipe changed)``."""
     asset_dir = _asset_dir_with_source(tmp_path)
     provenance = _generate_into(asset_dir, b"source v1", recipe_hash="r" * 64)
 
-    assert is_current(asset_dir, provenance.output_file, "silhouette.png", "d" * 64) is False
+    currency = derivative_currency(asset_dir, provenance.output_file, "silhouette.png", "d" * 64)
+
+    assert currency.state is DerivativeState.STALE
+    assert currency.reason == RECIPE_CHANGED
 
 
-def test_is_current_is_false_when_the_output_file_was_deleted(tmp_path: Path) -> None:
+def test_derivative_currency_is_missing_when_the_output_file_was_deleted(tmp_path: Path) -> None:
+    """Issue #26 acceptance criterion 4, second half: a deleted derivative
+    is ``missing``, not stale, even though its provenance record is still
+    sitting beside it."""
     asset_dir = _asset_dir_with_source(tmp_path)
     provenance = _generate_into(asset_dir, b"source v1", recipe_hash="r" * 64)
     (asset_dir / DERIVED_DIRNAME / provenance.output_file).unlink()
 
-    assert is_current(asset_dir, provenance.output_file, "silhouette.png", "r" * 64) is False
+    currency = derivative_currency(asset_dir, provenance.output_file, "silhouette.png", "r" * 64)
+
+    assert currency.state is DerivativeState.MISSING
+    assert currency.reason is None
 
 
-def test_is_current_is_false_when_the_output_file_was_hand_edited(tmp_path: Path) -> None:
-    """A hand-edited output no longer matches its recorded hash: it is not
-    current (it would need to be regenerated, or the edit tracked as an
+def test_derivative_currency_is_stale_output_changed_on_disk_when_hand_edited(
+    tmp_path: Path,
+) -> None:
+    """Issue #26 acceptance criterion 4, first half: a hand-edited output no
+    longer matches its recorded hash, so it is
+    ``stale (output changed on disk)`` -- it still exists, unlike a deleted
+    one (it would need to be regenerated, or the edit tracked as an
     override in a later PRD)."""
     asset_dir = _asset_dir_with_source(tmp_path)
     provenance = _generate_into(asset_dir, b"source v1", recipe_hash="r" * 64)
     (asset_dir / DERIVED_DIRNAME / provenance.output_file).write_bytes(b"hand-edited bytes")
 
-    assert is_current(asset_dir, provenance.output_file, "silhouette.png", "r" * 64) is False
+    currency = derivative_currency(asset_dir, provenance.output_file, "silhouette.png", "r" * 64)
+
+    assert currency.state is DerivativeState.STALE
+    assert currency.reason == OUTPUT_CHANGED_ON_DISK

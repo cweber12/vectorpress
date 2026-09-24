@@ -93,7 +93,8 @@ def select_derivatives(asset: Asset) -> list[DerivativeSelection]:
 @dataclass(frozen=True)
 class DerivativeStateCounts:
     """How many (asset, derivative type) pairs are in each state, across a
-    set of loaded assets (§34's "missing expected derivatives", issue #22).
+    set of loaded assets (§34's "missing expected derivatives", issue #22;
+    ``stale`` added issue #26).
 
     Inventory counts, not metadata problems: they do not affect
     ``vpress status``'s exit code.
@@ -101,25 +102,30 @@ class DerivativeStateCounts:
 
     missing: int
     impossible: int
+    stale: int = 0
 
 
 def tally_derivative_states(states: Iterable[DerivativeState]) -> DerivativeStateCounts:
-    """Count how many states in ``states`` are ``MISSING`` and how many are
-    ``IMPOSSIBLE`` (``CURRENT`` counts as neither).
+    """Count how many states in ``states`` are ``MISSING``, ``IMPOSSIBLE``,
+    and ``STALE`` (``CURRENT`` counts as none of them).
 
-    Shared by :func:`count_derivative_states` (pure, selection-only) and, once
-    generation exists, ``vpress status``'s disk-aware count (issue #23's
-    "the vpress status missing count drops accordingly"), so the increment
-    logic lives in exactly one place.
+    Shared by :func:`count_derivative_states` (pure, selection-only -- never
+    yields ``STALE``, since staleness needs a disk-aware currency check) and
+    ``vpress status``'s disk-aware count (issue #23's "the vpress status
+    missing count drops accordingly", issue #26's "Stale derivatives: N"),
+    so the increment logic lives in exactly one place.
     """
     missing = 0
     impossible = 0
+    stale = 0
     for state in states:
         if state is DerivativeState.MISSING:
             missing += 1
         elif state is DerivativeState.IMPOSSIBLE:
             impossible += 1
-    return DerivativeStateCounts(missing=missing, impossible=impossible)
+        elif state is DerivativeState.STALE:
+            stale += 1
+    return DerivativeStateCounts(missing=missing, impossible=impossible, stale=stale)
 
 
 def count_derivative_states(assets: list[Asset]) -> DerivativeStateCounts:

@@ -535,3 +535,263 @@ def test_generate_all_reports_failed_for_a_fully_transparent_silhouette_and_cont
         if asset_id == "ochre_sea_star":
             continue
         assert f"{asset_id}\tsilhouette_svg\tgenerated\t{filename}" in result.stdout
+
+
+# --- staleness (issue #26) ----------------------------------------------------------
+
+
+def _overwrite_with_a_different_valid_source_png(path: Path) -> None:
+    """A different, still-traceable silhouette source (a filled square, one
+    solid blob, no holes) -- valid enough for both ``transparent_png`` and
+    ``silhouette_svg`` to regenerate from successfully."""
+    Image.new("RGBA", (16, 16), (10, 20, 30, 255)).save(path, format="PNG")
+
+
+@pytest.mark.integration
+def test_overwriting_a_source_marks_exactly_its_derivatives_stale(
+    monkeypatch: pytest.MonkeyPatch, temp_catalog_root: Path
+) -> None:
+    """Acceptance criterion 1: overwriting ``purple_sea_urchin``'s only
+    source (it has just a ``silhouette`` source, so both ``transparent_png``
+    and ``silhouette_svg`` select it) with different valid content marks
+    exactly those two derivatives ``stale (source changed)`` in ``vpress
+    asset``, counted in ``vpress status``; every other derivative in the
+    catalog -- including ``ochre_sea_star``'s and
+    ``giant_green_anemone``'s, which do not share that file -- stays
+    ``current``."""
+    monkeypatch.chdir(temp_catalog_root)
+    generate_result = runner.invoke(app, ["generate", "--all"])
+    assert generate_result.exit_code == 0, generate_result.output
+
+    source_path = temp_catalog_root / "assets" / "purple_sea_urchin" / "sources" / "silhouette.png"
+    _overwrite_with_a_different_valid_source_png(source_path)
+
+    asset_result = runner.invoke(app, ["asset", "purple_sea_urchin"])
+    assert asset_result.exit_code == 0, asset_result.output
+    assert (
+        "transparent_png\tstale (source changed)\tpurple-sea-urchin-color.png"
+        in asset_result.stdout
+    )
+    assert (
+        "silhouette_svg\tstale (source changed)\tpurple-sea-urchin-silhouette.svg"
+        in asset_result.stdout
+    )
+
+    status_result = runner.invoke(app, ["status"])
+    assert status_result.exit_code == 0, status_result.output
+    assert "Stale derivatives: 2" in status_result.stdout
+
+    # every other derivative in the catalog stays current.
+    for asset_id, filename in FIXTURE_OUTPUTS:
+        if asset_id == "purple_sea_urchin":
+            continue
+        other = runner.invoke(app, ["asset", asset_id])
+        assert other.exit_code == 0, other.output
+        assert f"transparent_png\tcurrent\t{filename}" in other.stdout
+    for asset_id, filename in FIXTURE_SILHOUETTE_OUTPUTS:
+        if asset_id == "purple_sea_urchin":
+            continue
+        other = runner.invoke(app, ["asset", asset_id])
+        assert other.exit_code == 0, other.output
+        assert f"silhouette_svg\tcurrent\t{filename}" in other.stdout
+    for asset_id, filename in FIXTURE_FLATCOLOR_OUTPUTS:
+        other = runner.invoke(app, ["asset", asset_id])
+        assert other.exit_code == 0, other.output
+        assert f"flatcolor_svg\tcurrent\t{filename}" in other.stdout
+
+
+@pytest.mark.integration
+def test_generate_stale_regenerates_only_stale_and_a_second_run_regenerates_nothing(
+    monkeypatch: pytest.MonkeyPatch, temp_catalog_root: Path
+) -> None:
+    """Acceptance criterion 2: ``vpress generate --stale`` regenerates
+    exactly the derivatives a changed source made stale, reports the rest
+    untouched, and a second ``--stale`` run regenerates nothing and reports
+    nothing stale."""
+    monkeypatch.chdir(temp_catalog_root)
+    first = runner.invoke(app, ["generate", "--all"])
+    assert first.exit_code == 0, first.output
+
+    source_path = temp_catalog_root / "assets" / "purple_sea_urchin" / "sources" / "silhouette.png"
+    _overwrite_with_a_different_valid_source_png(source_path)
+
+    before: dict[Path, tuple[bytes, int]] = {}
+    for derived_dir in sorted(temp_catalog_root.glob("assets/*/derived")):
+        for entry in sorted(derived_dir.iterdir()):
+            before[entry] = (entry.read_bytes(), entry.stat().st_mtime_ns)
+
+    stale_result = runner.invoke(app, ["generate", "--stale"])
+
+    assert stale_result.exit_code == 0, stale_result.output
+    assert (
+        "purple_sea_urchin\ttransparent_png\tgenerated\tpurple-sea-urchin-color.png"
+        in stale_result.stdout
+    )
+    assert (
+        "purple_sea_urchin\tsilhouette_svg\tgenerated\tpurple-sea-urchin-silhouette.svg"
+        in stale_result.stdout
+    )
+    # everything else is reported untouched: current, and unwritten on disk.
+    for asset_id, filename in FIXTURE_OUTPUTS:
+        if asset_id == "purple_sea_urchin":
+            continue
+        assert f"{asset_id}\ttransparent_png\tcurrent\t{filename}" in stale_result.stdout
+    for asset_id, filename in FIXTURE_SILHOUETTE_OUTPUTS:
+        if asset_id == "purple_sea_urchin":
+            continue
+        assert f"{asset_id}\tsilhouette_svg\tcurrent\t{filename}" in stale_result.stdout
+    for entry, (data, mtime) in before.items():
+        if "purple-sea-urchin" in entry.name:
+            continue
+        assert entry.read_bytes() == data
+        assert entry.stat().st_mtime_ns == mtime
+
+    status_after_stale = runner.invoke(app, ["status"])
+    assert status_after_stale.exit_code == 0, status_after_stale.output
+    assert "Stale derivatives: 0" in status_after_stale.stdout
+
+    after_first_stale_run: dict[Path, tuple[bytes, int]] = {}
+    for derived_dir in sorted(temp_catalog_root.glob("assets/*/derived")):
+        for entry in sorted(derived_dir.iterdir()):
+            after_first_stale_run[entry] = (entry.read_bytes(), entry.stat().st_mtime_ns)
+
+    second_stale_result = runner.invoke(app, ["generate", "--stale"])
+
+    assert second_stale_result.exit_code == 0, second_stale_result.output
+    assert "generated" not in second_stale_result.stdout
+    for entry, (data, mtime) in after_first_stale_run.items():
+        assert entry.read_bytes() == data
+        assert entry.stat().st_mtime_ns == mtime
+
+
+@pytest.mark.integration
+def test_recipe_parameter_change_marks_every_derivative_of_that_type_stale(
+    monkeypatch: pytest.MonkeyPatch, temp_catalog_root: Path
+) -> None:
+    """Acceptance criterion 3: a recipe parameter change (monkeypatched)
+    marks every derivative of that type stale, across every asset -- here,
+    ``silhouette_svg``'s ``curve_tolerance``, which every one of the three
+    fixture assets has a derivative of. ``transparent_png`` and
+    ``flatcolor_svg`` are untouched (a different recipe, a different
+    identity hash)."""
+    monkeypatch.chdir(temp_catalog_root)
+    first = runner.invoke(app, ["generate", "--all"])
+    assert first.exit_code == 0, first.output
+
+    original = recipe_module.RECIPES[DerivativeType.SILHOUETTE_SVG]
+    changed = Recipe(
+        derivative_type=original.derivative_type,
+        accepted_roles=original.accepted_roles,
+        generator=original.generator,
+        parameters={**original.parameters, "curve_tolerance": 0.8},
+    )
+    monkeypatch.setitem(recipe_module.RECIPES, DerivativeType.SILHOUETTE_SVG, changed)
+
+    for asset_id, filename in FIXTURE_SILHOUETTE_OUTPUTS:
+        result = runner.invoke(app, ["asset", asset_id])
+        assert result.exit_code == 0, result.output
+        assert f"silhouette_svg\tstale (recipe changed)\t{filename}" in result.stdout
+
+    for asset_id, filename in FIXTURE_OUTPUTS:
+        result = runner.invoke(app, ["asset", asset_id])
+        assert result.exit_code == 0, result.output
+        assert f"transparent_png\tcurrent\t{filename}" in result.stdout
+
+    status_result = runner.invoke(app, ["status"])
+    assert status_result.exit_code == 0, status_result.output
+    assert "Stale derivatives: 3" in status_result.stdout
+
+
+@pytest.mark.integration
+def test_hand_edited_output_is_stale_output_changed_on_disk(
+    monkeypatch: pytest.MonkeyPatch, temp_catalog_root: Path
+) -> None:
+    """Acceptance criterion 4, first half: a derived output edited on disk
+    (its bytes no longer match its recorded hash, but the file still
+    exists) shows ``stale (output changed on disk)``."""
+    monkeypatch.chdir(temp_catalog_root)
+    first = runner.invoke(app, ["generate", "ochre_sea_star"])
+    assert first.exit_code == 0, first.output
+
+    output_path = (
+        temp_catalog_root
+        / "assets"
+        / "ochre_sea_star"
+        / DERIVED_DIRNAME
+        / "ochre-sea-star-color.png"
+    )
+    output_path.write_bytes(b"hand-edited, not a real PNG anymore")
+
+    result = runner.invoke(app, ["asset", "ochre_sea_star"])
+
+    assert result.exit_code == 0, result.output
+    assert (
+        "transparent_png\tstale (output changed on disk)\tochre-sea-star-color.png" in result.stdout
+    )
+
+
+@pytest.mark.integration
+def test_deleted_output_is_missing_not_stale(
+    monkeypatch: pytest.MonkeyPatch, temp_catalog_root: Path
+) -> None:
+    """Acceptance criterion 4, second half: a deleted derivative shows
+    ``missing`` (its provenance record is left behind, but that alone does
+    not make a gone file stale)."""
+    monkeypatch.chdir(temp_catalog_root)
+    first = runner.invoke(app, ["generate", "ochre_sea_star"])
+    assert first.exit_code == 0, first.output
+
+    output_path = (
+        temp_catalog_root
+        / "assets"
+        / "ochre_sea_star"
+        / DERIVED_DIRNAME
+        / "ochre-sea-star-color.png"
+    )
+    output_path.unlink()
+
+    result = runner.invoke(app, ["asset", "ochre_sea_star"])
+
+    assert result.exit_code == 0, result.output
+    assert "transparent_png\tmissing\t" in result.stdout
+    assert "stale" not in result.stdout
+
+
+@pytest.mark.integration
+def test_force_regenerates_current_derivatives_without_rewriting_unchanged_bytes(
+    monkeypatch: pytest.MonkeyPatch, temp_catalog_root: Path
+) -> None:
+    """Acceptance criterion 5: ``--force`` regenerates every current
+    derivative (reported ``generated``, not ``current`` -- the generator
+    actually ran); since nothing about the sources or recipes changed, the
+    freshly generated bytes equal the recorded output hash, so no file is
+    rewritten (bytes and mtime unchanged)."""
+    monkeypatch.chdir(temp_catalog_root)
+    first = runner.invoke(app, ["generate", "--all"])
+    assert first.exit_code == 0, first.output
+
+    before: dict[Path, tuple[bytes, int]] = {}
+    for derived_dir in sorted(temp_catalog_root.glob("assets/*/derived")):
+        for entry in sorted(derived_dir.iterdir()):
+            before[entry] = (entry.read_bytes(), entry.stat().st_mtime_ns)
+    assert before, "generate --all should have written files to compare"
+
+    forced = runner.invoke(app, ["generate", "--force", "--all"])
+
+    assert forced.exit_code == 0, forced.output
+    for asset_id, filename in FIXTURE_OUTPUTS:
+        assert f"{asset_id}\ttransparent_png\tgenerated\t{filename}" in forced.stdout
+    for asset_id, filename in FIXTURE_SILHOUETTE_OUTPUTS:
+        assert f"{asset_id}\tsilhouette_svg\tgenerated\t{filename}" in forced.stdout
+    for asset_id, filename in FIXTURE_FLATCOLOR_OUTPUTS:
+        assert f"{asset_id}\tflatcolor_svg\tgenerated\t{filename}" in forced.stdout
+
+    after: dict[Path, tuple[bytes, int]] = {}
+    for derived_dir in sorted(temp_catalog_root.glob("assets/*/derived")):
+        for entry in sorted(derived_dir.iterdir()):
+            after[entry] = (entry.read_bytes(), entry.stat().st_mtime_ns)
+    # unchanged bytes are never rewritten, even under --force -- every file
+    # under derived/, provenance records included (issue #26 review fix
+    # round 1: write_derivative now skips the provenance write too, when
+    # its serialized payload already matches what is on disk).
+    assert after == before

@@ -1,3 +1,4 @@
+import re
 import shutil
 from pathlib import Path
 
@@ -10,6 +11,21 @@ from vectorpress.cli.app import app
 runner = CliRunner()
 
 FIXTURE_CATALOG_ROOT = Path(__file__).parents[1] / "fixtures" / "catalog"
+
+#: Rich (via typer's usage-error rendering) wraps a long message across
+#: several lines inside a bordered panel, box-drawing characters and all,
+#: and -- on a runner that detects color support, e.g. CI (issue #26 review
+#: fix round 2: local runs here are uncolored, so this only showed up on
+#: CI) -- wraps individual words in ANSI SGR escape sequences too. Stripping
+#: both, then collapsing whitespace, before asserting on the message text
+#: makes the check robust to exactly where the wrap falls and to whether
+#: the runner colors its output (issue #26 review fix round 1, round 2).
+_ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
+_BOX_DRAWING_RE = re.compile(r"[─-╿]")
+
+
+def _normalized_output(output: str) -> str:
+    return " ".join(_BOX_DRAWING_RE.sub(" ", _ANSI_RE.sub("", output)).split())
 
 
 def test_version_flag_prints_version() -> None:
@@ -568,12 +584,19 @@ def test_products_are_sorted_by_slug(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_generate_with_neither_an_id_nor_all_is_a_usage_error(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """A usage error is typer's own ``Usage: ...`` / ``Error: ...``
+    rendering (raised as ``typer.BadParameter``, exit code 2) -- not just
+    any non-zero exit, which an unknown asset ID (exit 1) or a crash would
+    also produce (issue #26 review fix round 1)."""
     monkeypatch.chdir(FIXTURE_CATALOG_ROOT)
 
     result = runner.invoke(app, ["generate"])
 
-    assert result.exit_code != 0
-    assert "--all" in result.output
+    assert result.exit_code == 2
+    assert "Usage:" in result.output
+    assert "Provide exactly one of: an asset ID, --all, --stale." in _normalized_output(
+        result.output
+    )
 
 
 def test_generate_with_both_an_id_and_all_is_a_usage_error(
@@ -583,7 +606,11 @@ def test_generate_with_both_an_id_and_all_is_a_usage_error(
 
     result = runner.invoke(app, ["generate", "ochre_sea_star", "--all"])
 
-    assert result.exit_code != 0
+    assert result.exit_code == 2
+    assert "Usage:" in result.output
+    assert "Provide exactly one of: an asset ID, --all, --stale." in _normalized_output(
+        result.output
+    )
 
 
 def test_generate_with_unknown_id_exits_non_zero_and_names_the_id(
@@ -593,6 +620,68 @@ def test_generate_with_unknown_id_exits_non_zero_and_names_the_id(
 
     result = runner.invoke(app, ["generate", "not_a_real_asset"])
 
-    assert result.exit_code != 0
+    assert result.exit_code == 1
     assert "not_a_real_asset" in result.output
     assert "Unknown asset" in result.output
+
+
+# --- generate --stale / --force usage errors (issue #26) --------------------------
+
+
+def test_generate_with_an_id_and_stale_is_a_usage_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.chdir(FIXTURE_CATALOG_ROOT)
+
+    result = runner.invoke(app, ["generate", "ochre_sea_star", "--stale"])
+
+    assert result.exit_code == 2
+    assert "Usage:" in result.output
+    assert "Provide exactly one of: an asset ID, --all, --stale." in _normalized_output(
+        result.output
+    )
+
+
+def test_generate_with_all_and_stale_is_a_usage_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.chdir(FIXTURE_CATALOG_ROOT)
+
+    result = runner.invoke(app, ["generate", "--all", "--stale"])
+
+    assert result.exit_code == 2
+    assert "Usage:" in result.output
+    assert "Provide exactly one of: an asset ID, --all, --stale." in _normalized_output(
+        result.output
+    )
+
+
+def test_generate_with_force_and_stale_is_a_usage_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.chdir(FIXTURE_CATALOG_ROOT)
+
+    result = runner.invoke(app, ["generate", "--stale", "--force"])
+
+    assert result.exit_code == 2
+    assert "Usage:" in result.output
+    assert "--force combines with an asset ID or --all, not --stale." in _normalized_output(
+        result.output
+    )
+
+
+def test_generate_with_force_alone_is_a_usage_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``--force`` combines with an asset ID or ``--all``, not on its own
+    (it selects nothing to force): this is caught by the same "exactly one
+    selector" check as no selector at all."""
+    monkeypatch.chdir(FIXTURE_CATALOG_ROOT)
+
+    result = runner.invoke(app, ["generate", "--force"])
+
+    assert result.exit_code == 2
+    assert "Usage:" in result.output
+    assert "Provide exactly one of: an asset ID, --all, --stale." in _normalized_output(
+        result.output
+    )

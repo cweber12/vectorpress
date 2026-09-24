@@ -4,10 +4,10 @@
 Only ``catalog`` touches catalog files (ADR 0006): this module owns every
 byte that crosses the boundary between disk and a generator -- reading a
 source's bytes to hand to a generator, reading/writing provenance, and
-deciding whether a derivative is current by re-reading and re-hashing what
-is actually on disk. ``pipeline.generate`` orchestrates (which recipe, which
-generator, in what order) but never opens a catalog file itself (issue #23
-review fix round 2).
+deciding whether a derivative is current, stale (with a reason), or missing
+by re-reading and re-hashing what is actually on disk (issue #26).
+``pipeline.generate`` orchestrates (which recipe, which generator, in what
+order) but never opens a catalog file itself (issue #23 review fix round 2).
 """
 
 import hashlib
@@ -18,6 +18,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 
 from vectorpress.catalog.assets import SOURCES_DIRNAME
+from vectorpress.domain.derivative_state import DerivativeState
 from vectorpress.domain.recipe import Recipe
 
 #: Every asset's generated derivatives live under this folder, sibling to
@@ -85,11 +86,48 @@ def read_source_bytes(asset_dir: Path, source_file: str) -> bytes:
     return (asset_dir / SOURCES_DIRNAME / source_file).read_bytes()
 
 
-def is_current(asset_dir: Path, output_filename: str, source_file: str, recipe_hash: str) -> bool:
-    """Whether the derivative named ``output_filename`` is current (ADR
-    0004, §36): its provenance exists, its recorded source hash matches
-    ``source_file`` as it stands now, its recipe identity matches
-    ``recipe_hash``, and the output file exists with the recorded hash.
+#: The three ways a derivative can be stale (ADR 0004, CONTEXT.md "Stale",
+#: issue #26), each a distinct, user-facing reason string. Checked in this
+#: order by :func:`derivative_currency`; ``vpress asset`` shows the reason as
+#: ``stale (<reason>)``.
+SOURCE_CHANGED = "source changed"
+RECIPE_CHANGED = "recipe changed"
+OUTPUT_CHANGED_ON_DISK = "output changed on disk"
+
+
+@dataclass(frozen=True)
+class Currency:
+    """The on-disk currency of one derivative that has already had a source
+    selected for it (ADR 0004, issue #26): :attr:`DerivativeState.CURRENT`,
+    :attr:`DerivativeState.STALE` with one of :data:`SOURCE_CHANGED`,
+    :data:`RECIPE_CHANGED`, :data:`OUTPUT_CHANGED_ON_DISK`, or
+    :attr:`DerivativeState.MISSING` (never generated, or its output file is
+    gone -- CONTEXT.md's "Stale" reserves staleness for a derivative that
+    still exists).
+
+    ``reason`` is set exactly when ``state`` is ``STALE``.
+    """
+
+    state: DerivativeState
+    reason: str | None
+
+
+def derivative_currency(
+    asset_dir: Path, output_filename: str, source_file: str, recipe_hash: str
+) -> Currency:
+    """Whether the derivative named ``output_filename`` is current, stale
+    (with a reason), or was never generated (ADR 0004, §36, issue #26).
+
+    ``MISSING``: no provenance record exists yet, or the output file itself
+    is gone -- a derivative whose file was deleted is missing, not stale,
+    even though its provenance record may still be sitting beside it.
+    ``STALE``: provenance and the output file both exist, but the recorded
+    source hash no longer matches ``source_file`` as it stands now
+    (:data:`SOURCE_CHANGED`), the recorded recipe identity no longer matches
+    ``recipe_hash`` (:data:`RECIPE_CHANGED`), or the output file's hash no
+    longer matches the recorded output hash (:data:`OUTPUT_CHANGED_ON_DISK`
+    -- hand-edited or replaced on disk; a hand edit belongs under
+    ``overrides/``, PRD 4, not ``derived/``). ``CURRENT``: none of the above.
 
     Every catalog-file read this needs (source, provenance, output) happens
     here, not in ``pipeline`` (ADR 0006's "catalog... the only layer
@@ -101,21 +139,24 @@ def is_current(asset_dir: Path, output_filename: str, source_file: str, recipe_h
     derived_dir = asset_dir / DERIVED_DIRNAME
     provenance = read_provenance(derived_dir, output_filename)
     if provenance is None:
-        return False
-
-    source_path = asset_dir / SOURCES_DIRNAME / source_file
-    if not source_path.is_file():
-        return False
-    if provenance.source_hash != sha256_bytes(source_path.read_bytes()):
-        return False
-
-    if provenance.recipe_hash != recipe_hash:
-        return False
+        return Currency(DerivativeState.MISSING, None)
 
     output_path = derived_dir / output_filename
     if not output_path.is_file():
-        return False
-    return provenance.output_hash == sha256_bytes(output_path.read_bytes())
+        return Currency(DerivativeState.MISSING, None)
+
+    source_path = asset_dir / SOURCES_DIRNAME / source_file
+    source_hash = sha256_bytes(source_path.read_bytes()) if source_path.is_file() else None
+    if provenance.source_hash != source_hash:
+        return Currency(DerivativeState.STALE, SOURCE_CHANGED)
+
+    if provenance.recipe_hash != recipe_hash:
+        return Currency(DerivativeState.STALE, RECIPE_CHANGED)
+
+    if provenance.output_hash != sha256_bytes(output_path.read_bytes()):
+        return Currency(DerivativeState.STALE, OUTPUT_CHANGED_ON_DISK)
+
+    return Currency(DerivativeState.CURRENT, None)
 
 
 def provenance_path(derived_dir: Path, output_filename: str) -> Path:
@@ -162,7 +203,14 @@ def write_derivative(
     When the output file already on disk hashes to ``provenance.output_hash``,
     its bytes are left untouched (no rewrite, no mtime change): this is what
     makes a second identical generation, and a parameter change that happens
-    to produce identical output, non-destructive (§36 idempotence).
+    to produce identical output, non-destructive (§36 idempotence). The same
+    idempotence applies to the provenance record itself (issue #26 review
+    fix round 1, AC5's "no file is rewritten"): when the serialized payload
+    about to be written is byte-identical to what is already on disk, it is
+    left untouched too -- so ``--force`` on an unchanged derivative rewrites
+    neither file. A payload that differs only in ``generator_versions``
+    (e.g. a library upgrade) is still written, since that is part of the
+    same serialized payload being compared.
     """
     output_path = derived_dir / output_filename
     if not (
@@ -171,4 +219,6 @@ def write_derivative(
         _atomic_write_bytes(output_path, output_bytes)
 
     payload = json.dumps(asdict(provenance), sort_keys=True, indent=2).encode("utf-8")
-    _atomic_write_bytes(provenance_path(derived_dir, output_filename), payload)
+    record_path = provenance_path(derived_dir, output_filename)
+    if not (record_path.is_file() and record_path.read_bytes() == payload):
+        _atomic_write_bytes(record_path, payload)

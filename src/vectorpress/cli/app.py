@@ -114,10 +114,11 @@ def status(ctx: typer.Context) -> None:
 
     The single place that answers "is my catalog metadata sound?" (issue
     #6): aggregates problems from catalog config, assets, collections,
-    products and brand. ``Missing derivatives`` and ``Impossible
-    derivatives`` (issue #22, ADR 0003, §34) are inventory counts, not
-    problems, and never affect the exit code. Exit code is non-zero only
-    when a metadata problem exists, so this works as a check in scripts.
+    products and brand. ``Missing derivatives``, ``Impossible derivatives``
+    (issue #22, ADR 0003, §34) and ``Stale derivatives`` (issue #26, ADR
+    0004) are inventory counts, not problems, and never affect the exit
+    code. Exit code is non-zero only when a metadata problem exists, so this
+    works as a check in scripts.
     """
     root = _locate_root(ctx)
     catalog = load_catalog(root)
@@ -132,9 +133,10 @@ def status(ctx: typer.Context) -> None:
     if catalog.config is not None:
         counts = count_derivative_states(catalog.assets, root, catalog.config)
     else:
-        counts = DerivativeStateCounts(missing=0, impossible=0)
+        counts = DerivativeStateCounts(missing=0, impossible=0, stale=0)
     typer.echo(f"Missing derivatives: {counts.missing}")
     typer.echo(f"Impossible derivatives: {counts.impossible}")
+    typer.echo(f"Stale derivatives: {counts.stale}")
     _echo_problems(catalog.problems)
 
     if catalog.problems:
@@ -166,8 +168,8 @@ def asset(
 ) -> None:
     """Show one asset in full: metadata, statuses, every source with its
     role, and every recipe-bearing derivative type's selected source,
-    impossibility reason, or (once generated) current output filename
-    (issue #22, issue #23, ADR 0003, ADR 0004).
+    impossibility reason, or (once generated) current or stale output
+    filename (issue #22, issue #23, issue #26, ADR 0003, ADR 0004).
 
     An ID naming a folder whose ``asset.toml`` failed to load is not the
     same as an ID naming no folder at all (issue #15): the former prints
@@ -202,6 +204,10 @@ def asset(
             typer.echo(
                 f"  {status.derivative_type.value}\t{status.state.value}\t{status.output_filename}"
             )
+        elif status.state is DerivativeState.STALE:
+            typer.echo(
+                f"  {status.derivative_type.value}\tstale ({status.reason})\t{status.output_filename}"
+            )
         else:
             assert status.source is not None  # MISSING always carries a selected source
             typer.echo(
@@ -221,32 +227,56 @@ def generate(
         "--all",
         help="Generate every recipe-bearing derivative type for every loaded asset.",
     ),
+    stale: bool = typer.Option(
+        False,
+        "--stale",
+        help="Regenerate only stale derivatives, across every loaded asset.",
+    ),
+    force: bool = typer.Option(
+        False,
+        "--force",
+        help="Regenerate even current derivatives (combine with an asset ID or --all).",
+    ),
 ) -> None:
-    """Generate every recipe-bearing derivative type for one asset, or every
-    loaded asset with ``--all`` (§6.1, §20, §35, §36, issue #23, issue #24
-    review fix round 1).
+    """Generate every recipe-bearing derivative type for one asset, every
+    loaded asset with ``--all``, or only stale derivatives across every
+    loaded asset with ``--stale`` (§6.1, §20, §22, §35, §36, issue #23,
+    issue #24 review fix round 1, issue #26).
+
+    Exactly one of ``asset_id``, ``--all``, ``--stale`` selects which
+    derivatives are considered; ``--force`` combines with ``asset_id`` or
+    ``--all`` only (not ``--stale``) to regenerate current derivatives too.
+    Any other combination is a usage error.
 
     Each derivative is reported on its own line: asset, type, and outcome
-    (``generated``, ``current``, ``impossible``, ``no generator`` for a
-    recipe-bearing type whose generator has not landed yet, or ``failed``
-    when the generator itself raised). Regenerating is a no-op: a current
-    derivative is reported ``current`` and never rewritten (§36). An asset
-    that failed to load is skipped and named rather than stopping the rest
-    of ``--all`` (§35); an unknown asset ID is the same actionable error
-    ``vpress asset`` gives. Exits non-zero if any derivative failed, even
-    though every asset was still attempted.
+    (``generated``, ``current``, ``missing`` -- ``--stale`` only, for a
+    derivative it left untouched because it was never generated --
+    ``impossible``, ``no generator`` for a recipe-bearing type whose
+    generator has not landed yet, or ``failed`` when the generator itself
+    raised). Regenerating is a no-op: a current derivative is reported
+    ``current`` and never rewritten (§36) unless ``--force`` asks for it
+    anyway, and even then unchanged bytes are not rewritten. An asset that
+    failed to load is skipped and named rather than stopping the rest of
+    ``--all``/``--stale`` (§35); an unknown asset ID is the same actionable
+    error ``vpress asset`` gives. Exits non-zero if any derivative failed,
+    even though every asset was still attempted.
     """
-    if asset_id is None and not all_assets:
-        typer.echo("Provide an asset ID, or --all.", err=True)
-        raise typer.Exit(code=2)
-    if asset_id is not None and all_assets:
-        typer.echo("Provide an asset ID or --all, not both.", err=True)
-        raise typer.Exit(code=2)
+    selectors = [asset_id is not None, all_assets, stale]
+    if sum(selectors) != 1:
+        raise typer.BadParameter(
+            "Provide exactly one of: an asset ID, --all, --stale.",
+            param_hint="asset_id / --all / --stale",
+        )
+    if force and stale:
+        raise typer.BadParameter(
+            "--force combines with an asset ID or --all, not --stale.",
+            param_hint="--force",
+        )
 
     root, config = _locate_and_load_config(ctx)
     inventory = load_assets(root, config)
 
-    if all_assets:
+    if all_assets or stale:
         for failed_id in failed_asset_ids(inventory, config):
             typer.echo(f"{failed_id}\tskipped: failed to load")
         targets = inventory.assets
@@ -263,7 +293,9 @@ def generate(
 
     any_failed = False
     for target in targets:
-        for result in generate_asset(target, asset_dir(root, config, target.id)):
+        for result in generate_asset(
+            target, asset_dir(root, config, target.id), stale_only=stale, force=force
+        ):
             typer.echo(
                 f"{result.asset_id}\t{result.derivative_type.value}\t"
                 f"{result.outcome.value}\t{result.detail}"

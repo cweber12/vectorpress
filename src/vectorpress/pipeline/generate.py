@@ -26,7 +26,7 @@ from vectorpress.catalog.derivatives import (
 from vectorpress.catalog.provenance import (
     DERIVED_DIRNAME,
     Provenance,
-    is_current,
+    derivative_currency,
     read_source_bytes,
     recipe_identity_hash,
     sha256_bytes,
@@ -44,11 +44,17 @@ from vectorpress.pipeline.registry import get_generator
 class DerivativeStatus:
     """One recipe-bearing derivative type's full state for one asset:
     :class:`~vectorpress.catalog.derivatives.DerivativeSelection` upgraded to
-    ``CURRENT`` where a matching provenance record and output file already
-    exist on disk (issue #23).
+    ``CURRENT`` or ``STALE`` where a provenance record and output file
+    already exist on disk (issue #23, issue #26).
 
-    ``output_filename`` is set exactly when ``state`` is
-    :attr:`~vectorpress.domain.derivative_state.DerivativeState.CURRENT`.
+    ``output_filename`` is set exactly when ``state`` is ``CURRENT`` or
+    ``STALE`` (both mean the file exists on disk; ``STALE`` just means it no
+    longer matches). ``reason`` is set exactly when ``state`` is
+    ``IMPOSSIBLE`` (why no source qualifies -- see
+    :func:`~vectorpress.catalog.derivatives.select_source`) or ``STALE``
+    (one of :data:`~vectorpress.catalog.provenance.SOURCE_CHANGED`,
+    :data:`~vectorpress.catalog.provenance.RECIPE_CHANGED`,
+    :data:`~vectorpress.catalog.provenance.OUTPUT_CHANGED_ON_DISK`).
     """
 
     derivative_type: DerivativeType
@@ -61,28 +67,33 @@ class DerivativeStatus:
 def asset_derivative_statuses(asset: Asset, asset_dir_path: Path) -> list[DerivativeStatus]:
     """One :class:`DerivativeStatus` per recipe-bearing derivative type, for
     one asset, upgrading :func:`~vectorpress.catalog.derivatives.select_derivatives`'s
-    ``MISSING`` to ``CURRENT`` where generation has already produced a
-    matching, up-to-date file (issue #23).
+    ``MISSING`` to ``CURRENT`` or ``STALE`` where generation has already
+    produced a file for it (issue #23, issue #26).
 
-    A type whose recipe has no generator yet can never be ``CURRENT``: it
-    stays ``MISSING``, the same as before generation existed at all. Every
-    type this PRD covers (``transparent_png``, ``silhouette_svg``,
-    ``flatcolor_svg``) now has one; a later PRD's types are the ones this
-    still applies to.
+    A type whose recipe has no generator yet can never be ``CURRENT`` or
+    ``STALE``: it stays ``MISSING``, the same as before generation existed
+    at all. Every type this PRD covers (``transparent_png``,
+    ``silhouette_svg``, ``flatcolor_svg``) now has one; a later PRD's types
+    are the ones this still applies to.
     """
     statuses: list[DerivativeStatus] = []
     for selection in select_derivatives(asset):
         recipe = RECIPES[selection.derivative_type]
         state = selection.state
+        reason = selection.reason
         output_filename: str | None = None
 
         if state is DerivativeState.MISSING and recipe.generator is not None:
             assert selection.source is not None  # MISSING always carries a selected source
             candidate = derivative_filename(asset.display_name, recipe.derivative_type)
-            if is_current(
+            currency = derivative_currency(
                 asset_dir_path, candidate, selection.source.file, recipe_identity_hash(recipe)
-            ):
-                state = DerivativeState.CURRENT
+            )
+            state = currency.state
+            if state is DerivativeState.STALE:
+                reason = currency.reason
+                output_filename = candidate
+            elif state is DerivativeState.CURRENT:
                 output_filename = candidate
 
         statuses.append(
@@ -90,7 +101,7 @@ def asset_derivative_statuses(asset: Asset, asset_dir_path: Path) -> list[Deriva
                 derivative_type=selection.derivative_type,
                 state=state,
                 source=selection.source,
-                reason=selection.reason,
+                reason=reason,
                 output_filename=output_filename,
             )
         )
@@ -111,10 +122,17 @@ def count_derivative_states(
 
 class GenerationOutcome(StrEnum):
     """One derivative's outcome from a ``vpress generate`` run (issue #23,
-    issue #24 review fix round 1)."""
+    issue #24 review fix round 1, issue #26).
+
+    ``MISSING`` is reported only under ``vpress generate --stale``: a
+    derivative that has never been generated is left untouched (``--stale``
+    regenerates stale derivatives, not missing ones), so it is reported
+    ``missing`` rather than silently omitted.
+    """
 
     GENERATED = "generated"
     CURRENT = "current"
+    MISSING = "missing"
     IMPOSSIBLE = "impossible"
     NO_GENERATOR = "no generator"
     FAILED = "failed"
@@ -185,20 +203,39 @@ def _generate_one(asset: Asset, recipe: Recipe, source: Source, asset_dir_path: 
     return filename
 
 
-def generate_asset(asset: Asset, asset_dir_path: Path) -> list[GenerationResult]:
+def generate_asset(
+    asset: Asset,
+    asset_dir_path: Path,
+    *,
+    stale_only: bool = False,
+    force: bool = False,
+) -> list[GenerationResult]:
     """Generate every recipe-bearing derivative type for one asset (issue
-    #23's ``vpress generate <asset_id>``).
+    #23's ``vpress generate <asset_id>``; ``stale_only`` and ``force`` are
+    issue #26's ``--stale`` and ``--force``, never both true at once -- the
+    caller, ``cli.app.generate``, enforces that as a usage error).
 
-    Current derivatives are skipped without any write (§36); a type with no
-    recipe-selectable source is reported ``impossible``; a recipe-bearing
-    type with no generator yet is reported ``no generator`` and skipped.
+    Default (``stale_only=False``, ``force=False``): every ``MISSING`` or
+    ``STALE`` derivative is generated; ``CURRENT`` is reported and skipped
+    without any write (§36); a type with no recipe-selectable source is
+    reported ``impossible``; a recipe-bearing type with no generator yet is
+    reported ``no generator`` and skipped.
+
+    ``stale_only``: only ``STALE`` derivatives are generated -- ``MISSING``
+    is reported (``GenerationOutcome.MISSING``) and left untouched, same as
+    ``CURRENT``.
+
+    ``force``: ``CURRENT`` derivatives are generated too (still a no-op on
+    disk when the freshly generated bytes equal the recorded output hash,
+    per :func:`~vectorpress.catalog.provenance.write_derivative`'s
+    idempotence).
 
     A generator that raises (issue #24 review fix round 1) is reported
     ``failed`` with the exception's message, nothing is written for that
     derivative, and the loop continues with the next derivative type --
     one failing derivative never stops the rest of this asset, and (since
     ``cli.app.generate`` calls this per asset) never stops the rest of
-    ``--all`` either.
+    ``--all``/``--stale`` either.
     """
     results: list[GenerationResult] = []
     for status in asset_derivative_statuses(asset, asset_dir_path):
@@ -207,14 +244,18 @@ def generate_asset(asset: Asset, asset_dir_path: Path) -> list[GenerationResult]
         if status.state is DerivativeState.IMPOSSIBLE:
             outcome = GenerationOutcome.IMPOSSIBLE
             detail = status.reason or ""
-        elif status.state is DerivativeState.CURRENT:
-            outcome = GenerationOutcome.CURRENT
-            detail = status.output_filename or ""
         elif recipe.generator is None:
             outcome = GenerationOutcome.NO_GENERATOR
             detail = ""
+        elif status.state is DerivativeState.CURRENT and not force:
+            outcome = GenerationOutcome.CURRENT
+            detail = status.output_filename or ""
+        elif status.state is DerivativeState.MISSING and stale_only:
+            outcome = GenerationOutcome.MISSING
+            detail = ""
         else:
-            assert status.source is not None  # MISSING always carries a selected source
+            # MISSING (not stale_only) or STALE, or CURRENT under --force.
+            assert status.source is not None  # MISSING/STALE/CURRENT always carry a selected source
             try:
                 detail = _generate_one(asset, recipe, status.source, asset_dir_path)
                 outcome = GenerationOutcome.GENERATED
