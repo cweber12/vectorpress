@@ -790,21 +790,8 @@ def test_force_regenerates_current_derivatives_without_rewriting_unchanged_bytes
     for derived_dir in sorted(temp_catalog_root.glob("assets/*/derived")):
         for entry in sorted(derived_dir.iterdir()):
             after[entry] = (entry.read_bytes(), entry.stat().st_mtime_ns)
-    # unchanged bytes are never rewritten, even under --force -- only
-    # compare the derivative files themselves, since provenance is a plain
-    # JSON record that is not claimed idempotent at the byte/mtime level.
-    for path, (data, mtime) in before.items():
-        if path.name.endswith(".provenance.json"):
-            continue
-        assert after[path] == (data, mtime)
-
-
-@pytest.mark.integration
-def test_generate_stale_and_force_together_is_a_usage_error(
-    monkeypatch: pytest.MonkeyPatch, temp_catalog_root: Path
-) -> None:
-    monkeypatch.chdir(temp_catalog_root)
-
-    result = runner.invoke(app, ["generate", "--stale", "--force"])
-
-    assert result.exit_code != 0
+    # unchanged bytes are never rewritten, even under --force -- every file
+    # under derived/, provenance records included (issue #26 review fix
+    # round 1: write_derivative now skips the provenance write too, when
+    # its serialized payload already matches what is on disk).
+    assert after == before

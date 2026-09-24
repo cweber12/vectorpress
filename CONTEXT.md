@@ -42,13 +42,14 @@ generator versions, output hash. Content-addressed; no version numbers.
 
 **Stale** — A derivative with a provenance record that no longer matches what it was
 built from or what is on disk, for one of three reasons: `source changed` (the
-recorded source hash no longer matches the selected source's content),
-`recipe changed` (the recorded recipe identity no longer matches the current recipe
-— a parameter change, or a pin that changed which source is selected), or
-`output changed on disk` (the output file's hash no longer matches the recorded
-output hash — hand-edited or replaced; a hand edit belongs under `overrides/`, not
-`derived/`). A derivative whose output file is gone is **missing**, not stale. An
-**override** is stale when the source it was edited against has changed.
+recorded source hash no longer matches the content of the currently selected
+source — either the source itself changed, or a pin changed which source is
+selected), `recipe changed` (the recorded recipe identity no longer matches the
+current recipe — a parameter or generator change), or `output changed on disk` (the
+output file's hash no longer matches the recorded output hash — hand-edited or
+replaced; a hand edit belongs under `overrides/`, not `derived/`). A derivative
+whose output file is gone is **missing**, not stale. An **override** is stale when
+the source it was edited against has changed.
 
 **Override** — A hand-edited derivative placed under `overrides/`. It is the
 **effective derivative** for that type, is validated and approved like any other, is

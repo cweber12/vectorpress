@@ -203,7 +203,14 @@ def write_derivative(
     When the output file already on disk hashes to ``provenance.output_hash``,
     its bytes are left untouched (no rewrite, no mtime change): this is what
     makes a second identical generation, and a parameter change that happens
-    to produce identical output, non-destructive (§36 idempotence).
+    to produce identical output, non-destructive (§36 idempotence). The same
+    idempotence applies to the provenance record itself (issue #26 review
+    fix round 1, AC5's "no file is rewritten"): when the serialized payload
+    about to be written is byte-identical to what is already on disk, it is
+    left untouched too -- so ``--force`` on an unchanged derivative rewrites
+    neither file. A payload that differs only in ``generator_versions``
+    (e.g. a library upgrade) is still written, since that is part of the
+    same serialized payload being compared.
     """
     output_path = derived_dir / output_filename
     if not (
@@ -212,4 +219,6 @@ def write_derivative(
         _atomic_write_bytes(output_path, output_bytes)
 
     payload = json.dumps(asdict(provenance), sort_keys=True, indent=2).encode("utf-8")
-    _atomic_write_bytes(provenance_path(derived_dir, output_filename), payload)
+    record_path = provenance_path(derived_dir, output_filename)
+    if not (record_path.is_file() and record_path.read_bytes() == payload):
+        _atomic_write_bytes(record_path, payload)

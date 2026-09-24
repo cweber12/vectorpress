@@ -177,6 +177,51 @@ def test_write_derivative_does_not_rewrite_output_bytes_when_they_already_match(
     assert output_path.read_bytes() == output_bytes
 
 
+def test_write_derivative_does_not_rewrite_provenance_when_the_payload_already_matches(
+    tmp_path: Path,
+) -> None:
+    """Issue #26 review fix round 1: the same idempotence applies to the
+    provenance record itself, not just the output bytes -- this is what
+    keeps ``generate --force`` on an unchanged derivative a true no-op on
+    disk (AC5's "no file is rewritten (bytes and mtime unchanged)"),
+    matching the write of the output bytes right above."""
+    output_bytes = b"fake png bytes"
+    provenance = _provenance(output_hash=sha256_bytes(output_bytes))
+    write_derivative(tmp_path, provenance.output_file, output_bytes, provenance)
+    record_path = provenance_path(tmp_path, provenance.output_file)
+    mtime_before = record_path.stat().st_mtime_ns
+    bytes_before = record_path.read_bytes()
+
+    # A fresh call with an identical provenance record (as a real second,
+    # unchanged generation, or a ``--force`` regeneration, would produce).
+    write_derivative(tmp_path, provenance.output_file, output_bytes, provenance)
+
+    assert record_path.stat().st_mtime_ns == mtime_before
+    assert record_path.read_bytes() == bytes_before
+
+
+def test_write_derivative_rewrites_provenance_when_the_payload_differs(tmp_path: Path) -> None:
+    """A provenance record that differs -- even only in
+    ``generator_versions``, e.g. a library upgrade -- is still written: the
+    idempotence check compares the whole serialized payload, not just the
+    hashes it is built from."""
+    output_bytes = b"fake png bytes"
+    provenance = _provenance(output_hash=sha256_bytes(output_bytes))
+    write_derivative(tmp_path, provenance.output_file, output_bytes, provenance)
+    record_path = provenance_path(tmp_path, provenance.output_file)
+    mtime_before = record_path.stat().st_mtime_ns
+
+    upgraded = replace(
+        provenance, generator_versions={**provenance.generator_versions, "Pillow": "99.0.0"}
+    )
+    write_derivative(tmp_path, provenance.output_file, output_bytes, upgraded)
+
+    assert record_path.stat().st_mtime_ns != mtime_before
+    assert json.loads(record_path.read_text(encoding="utf-8"))["generator_versions"]["Pillow"] == (
+        "99.0.0"
+    )
+
+
 def test_write_derivative_creates_the_derived_directory(tmp_path: Path) -> None:
     provenance = _provenance()
     derived_dir = tmp_path / "derived"

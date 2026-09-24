@@ -263,11 +263,15 @@ def generate(
     """
     selectors = [asset_id is not None, all_assets, stale]
     if sum(selectors) != 1:
-        typer.echo("Provide exactly one of: an asset ID, --all, --stale.", err=True)
-        raise typer.Exit(code=2)
+        raise typer.BadParameter(
+            "Provide exactly one of: an asset ID, --all, --stale.",
+            param_hint="asset_id / --all / --stale",
+        )
     if force and stale:
-        typer.echo("--force combines with an asset ID or --all, not --stale.", err=True)
-        raise typer.Exit(code=2)
+        raise typer.BadParameter(
+            "--force combines with an asset ID or --all, not --stale.",
+            param_hint="--force",
+        )
 
     root, config = _locate_and_load_config(ctx)
     inventory = load_assets(root, config)
