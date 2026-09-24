@@ -237,6 +237,19 @@ def test_generate_asset_continues_past_a_failed_derivative_to_the_next(tmp_path:
 # --- idempotence (§36) -------------------------------------------------------------
 
 
+def test_status_is_stale_source_changed_when_the_source_changes(tmp_path: Path) -> None:
+    asset_dir = _make_asset_dir(tmp_path)
+    generate_asset(_asset(), asset_dir)
+
+    _write_source_png(asset_dir / SOURCES_DIRNAME / "silhouette.png", rgba=(10, 20, 30, 255))
+
+    statuses = {s.derivative_type: s for s in asset_derivative_statuses(_asset(), asset_dir)}
+    png_status = statuses[DerivativeType.TRANSPARENT_PNG]
+    assert png_status.state is DerivativeState.STALE
+    assert png_status.reason == "source changed"
+    assert png_status.output_filename == "ochre-sea-star-color.png"
+
+
 def test_second_generate_reports_current_and_rewrites_nothing(tmp_path: Path) -> None:
     asset_dir = _make_asset_dir(tmp_path)
     generate_asset(_asset(), asset_dir)
@@ -272,3 +285,127 @@ def test_regenerates_when_the_source_file_changes(tmp_path: Path) -> None:
     second_provenance = read_provenance(asset_dir / DERIVED_DIRNAME, "ochre-sea-star-color.png")
     assert second_provenance is not None
     assert second_provenance.source_hash != first_provenance.source_hash
+
+
+# --- stale_only (issue #26's --stale) ----------------------------------------------
+
+
+def test_stale_only_regenerates_stale_but_leaves_current_untouched(tmp_path: Path) -> None:
+    """Issue #26 acceptance criterion 2: ``--stale`` regenerates exactly the
+    stale derivatives and reports the rest untouched -- here, only the
+    silhouette source changes, so ``silhouette_svg`` (the only type that
+    selects it -- ``transparent_png`` and ``flatcolor_svg`` both prefer the
+    flatcolor source) goes stale and is regenerated, while the other two
+    stay current and untouched."""
+    asset_dir = _make_asset_dir(tmp_path)
+    _write_source_png(asset_dir / SOURCES_DIRNAME / "flatcolor.png")
+    asset = _asset(
+        sources=[
+            Source(role="silhouette", file="silhouette.png"),
+            Source(role="flatcolor", file="flatcolor.png"),
+        ]
+    )
+    generate_asset(asset, asset_dir)
+    png_path = asset_dir / DERIVED_DIRNAME / "ochre-sea-star-color.png"
+    flatcolor_svg_path = asset_dir / DERIVED_DIRNAME / "ochre-sea-star-color.svg"
+    png_mtime = png_path.stat().st_mtime_ns
+    flatcolor_svg_mtime = flatcolor_svg_path.stat().st_mtime_ns
+
+    _write_source_png(asset_dir / SOURCES_DIRNAME / "silhouette.png", rgba=(10, 20, 30, 255))
+
+    results = {r.derivative_type: r for r in generate_asset(asset, asset_dir, stale_only=True)}
+
+    assert results[DerivativeType.SILHOUETTE_SVG].outcome is GenerationOutcome.GENERATED
+    assert results[DerivativeType.TRANSPARENT_PNG].outcome is GenerationOutcome.CURRENT
+    assert results[DerivativeType.FLATCOLOR_SVG].outcome is GenerationOutcome.CURRENT
+    assert png_path.stat().st_mtime_ns == png_mtime
+    assert flatcolor_svg_path.stat().st_mtime_ns == flatcolor_svg_mtime
+
+
+def test_stale_only_reports_missing_as_missing_and_does_not_generate_it(tmp_path: Path) -> None:
+    """``--stale`` never generates a derivative that has not been generated
+    yet -- "not missing ones" -- and reports it as ``missing`` rather than
+    silently dropping it from the report."""
+    asset_dir = _make_asset_dir(tmp_path)
+
+    results = {r.derivative_type: r for r in generate_asset(_asset(), asset_dir, stale_only=True)}
+
+    result = results[DerivativeType.TRANSPARENT_PNG]
+    assert result.outcome is GenerationOutcome.MISSING
+    assert not (asset_dir / DERIVED_DIRNAME).exists()
+
+
+def test_stale_only_reports_current_as_current_and_does_not_regenerate_it(tmp_path: Path) -> None:
+    """``--stale`` never regenerates an already-current derivative -- "not
+    current ones"."""
+    asset_dir = _make_asset_dir(tmp_path)
+    generate_asset(_asset(), asset_dir)
+    output_path = asset_dir / DERIVED_DIRNAME / "ochre-sea-star-color.png"
+    mtime_before = output_path.stat().st_mtime_ns
+
+    results = {r.derivative_type: r for r in generate_asset(_asset(), asset_dir, stale_only=True)}
+
+    result = results[DerivativeType.TRANSPARENT_PNG]
+    assert result.outcome is GenerationOutcome.CURRENT
+    assert output_path.stat().st_mtime_ns == mtime_before
+
+
+def test_second_stale_only_run_regenerates_nothing(tmp_path: Path) -> None:
+    """Issue #26 acceptance criterion 2: a second ``--stale`` run finds
+    nothing stale left and regenerates nothing."""
+    asset_dir = _make_asset_dir(tmp_path)
+    generate_asset(_asset(), asset_dir)
+    _write_source_png(asset_dir / SOURCES_DIRNAME / "silhouette.png", rgba=(10, 20, 30, 255))
+    generate_asset(_asset(), asset_dir, stale_only=True)
+    output_path = asset_dir / DERIVED_DIRNAME / "ochre-sea-star-color.png"
+    mtime_after_first_stale_run = output_path.stat().st_mtime_ns
+
+    results = {r.derivative_type: r for r in generate_asset(_asset(), asset_dir, stale_only=True)}
+
+    for result in results.values():
+        assert result.outcome is not GenerationOutcome.GENERATED
+    assert output_path.stat().st_mtime_ns == mtime_after_first_stale_run
+
+
+# --- force (issue #26's --force) -----------------------------------------------------
+
+
+def test_force_regenerates_a_current_derivative(tmp_path: Path) -> None:
+    """Issue #26 acceptance criterion 5: ``--force`` regenerates a current
+    derivative (reported ``generated`` -- the generator actually ran)."""
+    asset_dir = _make_asset_dir(tmp_path)
+    generate_asset(_asset(), asset_dir)
+
+    results = {r.derivative_type: r for r in generate_asset(_asset(), asset_dir, force=True)}
+
+    result = results[DerivativeType.TRANSPARENT_PNG]
+    assert result.outcome is GenerationOutcome.GENERATED
+
+
+def test_force_does_not_rewrite_output_bytes_when_they_are_unchanged(tmp_path: Path) -> None:
+    """Issue #26 acceptance criterion 5: when the freshly generated bytes
+    equal the recorded output hash, ``--force`` still does not rewrite the
+    file (bytes and mtime unchanged) -- §36 idempotence, unaffected by
+    forcing the generator to actually run."""
+    asset_dir = _make_asset_dir(tmp_path)
+    generate_asset(_asset(), asset_dir)
+    output_path = asset_dir / DERIVED_DIRNAME / "ochre-sea-star-color.png"
+    output_bytes_before = output_path.read_bytes()
+    mtime_before = output_path.stat().st_mtime_ns
+
+    generate_asset(_asset(), asset_dir, force=True)
+
+    assert output_path.read_bytes() == output_bytes_before
+    assert output_path.stat().st_mtime_ns == mtime_before
+
+
+def test_force_regenerates_a_stale_derivative_same_as_default(tmp_path: Path) -> None:
+    """``--force`` also regenerates stale and missing derivatives -- it
+    only changes the treatment of current ones."""
+    asset_dir = _make_asset_dir(tmp_path)
+    generate_asset(_asset(), asset_dir)
+    _write_source_png(asset_dir / SOURCES_DIRNAME / "silhouette.png", rgba=(10, 20, 30, 255))
+
+    results = {r.derivative_type: r for r in generate_asset(_asset(), asset_dir, force=True)}
+
+    assert results[DerivativeType.TRANSPARENT_PNG].outcome is GenerationOutcome.GENERATED

@@ -596,3 +596,48 @@ def test_generate_with_unknown_id_exits_non_zero_and_names_the_id(
     assert result.exit_code != 0
     assert "not_a_real_asset" in result.output
     assert "Unknown asset" in result.output
+
+
+# --- generate --stale / --force usage errors (issue #26) --------------------------
+
+
+def test_generate_with_an_id_and_stale_is_a_usage_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.chdir(FIXTURE_CATALOG_ROOT)
+
+    result = runner.invoke(app, ["generate", "ochre_sea_star", "--stale"])
+
+    assert result.exit_code != 0
+
+
+def test_generate_with_all_and_stale_is_a_usage_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.chdir(FIXTURE_CATALOG_ROOT)
+
+    result = runner.invoke(app, ["generate", "--all", "--stale"])
+
+    assert result.exit_code != 0
+
+
+def test_generate_with_force_and_stale_is_a_usage_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.chdir(FIXTURE_CATALOG_ROOT)
+
+    result = runner.invoke(app, ["generate", "--stale", "--force"])
+
+    assert result.exit_code != 0
+
+
+def test_generate_with_force_alone_is_a_usage_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``--force`` combines with an asset ID or ``--all``, not on its own
+    (it selects nothing to force)."""
+    monkeypatch.chdir(FIXTURE_CATALOG_ROOT)
+
+    result = runner.invoke(app, ["generate", "--force"])
+
+    assert result.exit_code != 0
