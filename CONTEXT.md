@@ -77,7 +77,8 @@ mechanical roll-up from validation, not a human review decision.
 
 **Reference size** — The physical size (e.g. 3 in on the longest side) at which
 cut-file thresholds are evaluated. Catalog default; product override; recorded with
-findings.
+findings. Cut-file cleanup always uses the catalog default; a product override changes
+validation only (ADR 0009).
 
 **Rights status** — Asset-level licensing state (§26). Hand-authored.
 

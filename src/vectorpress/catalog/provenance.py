@@ -12,13 +12,12 @@ order) but never opens a catalog file itself (issue #23 review fix round 2).
 
 import hashlib
 import json
-import os
-import tempfile
 from collections.abc import Mapping
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
 from vectorpress.catalog.assets import SOURCES_DIRNAME
+from vectorpress.catalog.atomic_write import atomic_write_bytes
 from vectorpress.domain.derivative_state import DerivativeState
 from vectorpress.domain.recipe import Recipe
 
@@ -201,22 +200,6 @@ def read_provenance(derived_dir: Path, output_filename: str) -> Provenance | Non
     return Provenance(**data)
 
 
-def _atomic_write_bytes(path: Path, data: bytes) -> None:
-    """Write ``data`` to ``path`` without ever leaving a half-written file
-    observable (§35): write to a temporary file in the same directory, then
-    rename into place -- a rename is atomic on both POSIX and Windows
-    (``os.replace``, unlike a plain ``os.rename``, always overwrites)."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp_name = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")
-    try:
-        with os.fdopen(fd, "wb") as tmp_file:
-            tmp_file.write(data)
-        Path(tmp_name).replace(path)
-    except BaseException:
-        Path(tmp_name).unlink(missing_ok=True)
-        raise
-
-
 def write_derivative(
     derived_dir: Path, output_filename: str, output_bytes: bytes, provenance: Provenance
 ) -> None:
@@ -243,9 +226,9 @@ def write_derivative(
     if not (
         output_path.is_file() and sha256_bytes(output_path.read_bytes()) == provenance.output_hash
     ):
-        _atomic_write_bytes(output_path, output_bytes)
+        atomic_write_bytes(output_path, output_bytes)
 
     payload = json.dumps(asdict(provenance), sort_keys=True, indent=2).encode("utf-8")
     record_path = provenance_path(derived_dir, output_filename)
     if not (record_path.is_file() and record_path.read_bytes() == payload):
-        _atomic_write_bytes(record_path, payload)
+        atomic_write_bytes(record_path, payload)

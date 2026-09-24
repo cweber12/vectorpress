@@ -9,7 +9,13 @@ from pathlib import Path
 import typer
 
 from vectorpress import __version__
-from vectorpress.catalog.assets import asset_dir, failed_asset_ids, load_assets, lookup_asset
+from vectorpress.catalog.assets import (
+    AssetInventory,
+    asset_dir,
+    failed_asset_ids,
+    load_assets,
+    lookup_asset,
+)
 from vectorpress.catalog.collections import load_collections
 from vectorpress.catalog.derivatives import DerivativeStateCounts
 from vectorpress.catalog.errors import CatalogConfigError, CatalogNotFoundError
@@ -19,6 +25,7 @@ from vectorpress.catalog.locate import locate_catalog_root
 from vectorpress.catalog.metadata_problem import MetadataProblem
 from vectorpress.catalog.products import load_products, lookup_product
 from vectorpress.catalog.provenance import DERIVED_DIRNAME, read_derivative_bytes
+from vectorpress.domain.asset import Asset
 from vectorpress.domain.catalog_config import CatalogConfig
 from vectorpress.domain.derivative_state import DerivativeState
 from vectorpress.domain.derivative_type import DerivativeType
@@ -95,11 +102,8 @@ def _locate_and_load_config(ctx: typer.Context) -> tuple[Path, CatalogConfig]:
 
 
 def _echo_problems(problems: list[MetadataProblem]) -> None:
-    """Render the problems section of ``vpress status``, grouped by file.
-
-    The catalog layer produces ``problems``; this only formats it
-    (CLAUDE.md's "cli and ui are thin").
-    """
+    """Render metadata problems grouped by file. The catalog layer produces
+    them; this only formats them."""
     if not problems:
         typer.echo("Metadata problems: none")
         return
@@ -118,17 +122,43 @@ def _echo_problems(problems: list[MetadataProblem]) -> None:
                 typer.echo(f"  {problem.message}")
 
 
+def _lookup_asset_or_exit(inventory: AssetInventory, config: CatalogConfig, asset_id: str) -> Asset:
+    """The asset named ``asset_id``, or exit 1. An ID whose ``asset.toml``
+    failed to load prints that asset's problems; an ID naming no asset
+    folder prints "Unknown asset"."""
+    result = lookup_asset(inventory, config, asset_id)
+    if result.asset is None:
+        if result.problems:
+            _echo_problems(result.problems)
+        else:
+            typer.echo(f"Unknown asset: {asset_id!r}", err=True)
+        raise typer.Exit(code=1)
+    return result.asset
+
+
+def _lookup_product_or_exit(root: Path, config: CatalogConfig, slug: str) -> Product:
+    """The product named ``slug``, or exit 1 -- the same two outcomes as
+    :func:`_lookup_asset_or_exit`."""
+    result = lookup_product(load_products(root, config), config, slug)
+    if result.product is None:
+        if result.problems:
+            _echo_problems(result.problems)
+        else:
+            typer.echo(f"Unknown product: {slug!r}", err=True)
+        raise typer.Exit(code=1)
+    return result.product
+
+
 @app.command()
 def status(ctx: typer.Context) -> None:
-    """Report the catalog's inventory and every metadata problem found.
+    """Show the catalog's inventory and every metadata problem.
 
-    The single place that answers "is my catalog metadata sound?" (issue
-    #6): aggregates problems from catalog config, assets, collections,
-    products and brand. ``Missing derivatives``, ``Impossible derivatives``
-    (issue #22, ADR 0003, §34) and ``Stale derivatives`` (issue #26, ADR
-    0004) are inventory counts, not problems, and never affect the exit
-    code. Exit code is non-zero only when a metadata problem exists, so this
-    works as a check in scripts.
+    Exits 1 when any metadata problem exists, so it works as a check in
+    scripts.
+    \f
+    Aggregates problems from catalog config, assets, collections, products
+    and brand. Missing, impossible and stale derivative counts are
+    inventory, not problems, and never affect the exit code.
     """
     root = _locate_root(ctx)
     catalog = load_catalog(root)
@@ -155,10 +185,10 @@ def status(ctx: typer.Context) -> None:
 
 @app.command()
 def assets(ctx: typer.Context) -> None:
-    """List every loaded asset: ID, display name, statuses, and source count.
+    """List every asset that loaded: ID, display name, rights status,
+    accuracy status and number of sources.
 
-    Metadata problems are ``vpress status``'s report, not this command's; a
-    catalog with a broken asset still lists every asset that did load.
+    Assets that failed to load are reported by 'vpress status'.
     """
     root, config = _locate_and_load_config(ctx)
     inventory = load_assets(root, config)
@@ -174,12 +204,10 @@ def assets(ctx: typer.Context) -> None:
 def _findings_display(
     status: DerivativeStatus, root: Path, config: CatalogConfig, asset_id: str
 ) -> str:
-    """The findings column ``vpress asset``'s ``cut_svg`` line adds (issue
-    #37): ``pass`` / ``needs review`` when a current findings report exists,
-    ``findings stale`` when one exists but no longer matches the file's
-    content hash, reference size or thresholds, or ``not validated`` when
-    there is no cut file to check yet (``impossible``/``missing``) or
-    ``vpress validate`` has simply never run for it."""
+    """The findings column on ``vpress asset``'s ``cut_svg`` line: ``pass`` /
+    ``needs review`` for a current catalog-default findings report,
+    ``findings stale`` when the report no longer matches the file, reference
+    size or thresholds, else ``not validated``."""
     if status.state not in (DerivativeState.CURRENT, DerivativeState.STALE):
         return "not validated"
 
@@ -209,29 +237,15 @@ def asset(
     ctx: typer.Context,
     asset_id: str = typer.Argument(help="The asset's ID (its folder name under assets/)."),
 ) -> None:
-    """Show one asset in full: metadata, statuses, every source with its
-    role, and every recipe-bearing derivative type's selected source,
-    impossibility reason, or (once generated) current or stale output
-    filename (issue #22, issue #23, issue #26, ADR 0003, ADR 0004).
+    """Show one asset: metadata, sources with their roles, and each
+    derivative type's state (current, stale, missing or impossible).
 
-    An ID naming a folder whose ``asset.toml`` failed to load is not the
-    same as an ID naming no folder at all (issue #15): the former prints
-    that asset's problems (same rendering as ``vpress status``), the latter
-    prints "Unknown asset". ``catalog.assets.lookup_asset`` tells the two
-    apart; this only formats whichever it returns.
+    The cut_svg line also shows its findings result: pass, needs review,
+    findings stale, or not validated. An asset that failed to load shows
+    its metadata problems instead.
     """
     root, config = _locate_and_load_config(ctx)
-    inventory = load_assets(root, config)
-
-    result = lookup_asset(inventory, config, asset_id)
-    if result.asset is None:
-        if result.problems:
-            _echo_problems(result.problems)
-        else:
-            typer.echo(f"Unknown asset: {asset_id!r}", err=True)
-        raise typer.Exit(code=1)
-
-    found = result.asset
+    found = _lookup_asset_or_exit(load_assets(root, config), config, asset_id)
     typer.echo(f"{found.id}\t{found.display_name}")
     typer.echo(f"Rights status: {found.rights_status.value}")
     typer.echo(f"Accuracy status: {found.accuracy_status.value}")
@@ -255,11 +269,23 @@ def asset(
                 f"  {status.derivative_type.value}\t{status.state.value}\t"
                 f"{status.source.file} ({status.source.role})"
             )
-        # cut_svg's line alone also carries its findings result (issue #37):
-        # no other derivative type is validated yet.
+        # Only cut_svg is validated, so only its line carries a findings result.
         if status.derivative_type is DerivativeType.CUT_SVG:
             line += f"\t{_findings_display(status, root, config, found.id)}"
         typer.echo(line)
+
+
+def _select_targets(
+    inventory: AssetInventory, config: CatalogConfig, asset_id: str | None
+) -> list[Asset]:
+    """The assets a batch command acts on: the one named ``asset_id``, or
+    every loaded asset when it is ``None`` -- naming each asset that failed
+    to load as skipped, so one broken asset never stops the rest (§35)."""
+    if asset_id is not None:
+        return [_lookup_asset_or_exit(inventory, config, asset_id)]
+    for failed_id in failed_asset_ids(inventory, config):
+        typer.echo(f"{failed_id}\tskipped: failed to load")
+    return inventory.assets
 
 
 @app.command()
@@ -284,35 +310,15 @@ def generate(
         help="Regenerate even current derivatives (combine with an asset ID or --all).",
     ),
 ) -> None:
-    """Generate every recipe-bearing derivative type for one asset, every
-    loaded asset with ``--all``, or only stale derivatives across every
-    loaded asset with ``--stale`` (§6.1, §20, §22, §35, §36, issue #23,
-    issue #24 review fix round 1, issue #26).
+    """Generate derivatives for one asset, every asset (--all), or only
+    stale derivatives (--stale).
 
-    Exactly one of ``asset_id``, ``--all``, ``--stale`` selects which
-    derivatives are considered; ``--force`` combines with ``asset_id`` or
-    ``--all`` only (not ``--stale``) to regenerate current derivatives too.
-    Any other combination is a usage error.
-
-    Each derivative is reported on its own line: asset, type, and outcome
-    (``generated``, ``current``, ``missing`` -- ``--stale`` only, for a
-    derivative it left untouched because it was never generated --
-    ``impossible``, ``no generator`` for a recipe-bearing type whose
-    generator has not landed yet, or ``failed`` when reading its source,
-    running the generator, or writing its result raised (issue #27,
-    widened from just the generator itself)). Regenerating is a no-op: a
-    current derivative is reported ``current`` and never rewritten (§36)
-    unless ``--force`` asks for it anyway, and even then unchanged bytes
-    are not rewritten. An asset that failed to load is skipped and named
-    rather than stopping the rest of ``--all``/``--stale`` (§35); an
-    unknown asset ID is the same actionable error ``vpress asset`` gives.
-
-    Each ``failed`` derivative also gets its own stderr line naming the
-    asset, type, source file and cause (§35: failures must be visible and
-    understandable), on top of its place in the stdout report above; a run
-    with at least one failure ends with a stderr summary of how many.
-    Exits non-zero if any derivative failed, even though every asset was
-    still attempted.
+    Give exactly one of ASSET_ID, --all or --stale. Prints one line per
+    derivative: generated, current, missing (--stale leaves never-generated
+    derivatives alone), impossible, no generator, or failed. A current
+    derivative is never rewritten unless --force asks, and even then
+    unchanged bytes are left alone. Every asset is attempted; exits 1 if any
+    derivative failed, with the cause of each failure on stderr.
     """
     selectors = [asset_id is not None, all_assets, stale]
     if sum(selectors) != 1:
@@ -327,22 +333,7 @@ def generate(
         )
 
     root, config = _locate_and_load_config(ctx)
-    inventory = load_assets(root, config)
-
-    if all_assets or stale:
-        for failed_id in failed_asset_ids(inventory, config):
-            typer.echo(f"{failed_id}\tskipped: failed to load")
-        targets = inventory.assets
-    else:
-        assert asset_id is not None  # usage-error branch above covers the None case
-        result = lookup_asset(inventory, config, asset_id)
-        if result.asset is None:
-            if result.problems:
-                _echo_problems(result.problems)
-            else:
-                typer.echo(f"Unknown asset: {asset_id!r}", err=True)
-            raise typer.Exit(code=1)
-        targets = [result.asset]
+    targets = _select_targets(load_assets(root, config), config, asset_id)
 
     failure_count = 0
     for target in targets:
@@ -371,12 +362,9 @@ def generate(
 
 
 def _optional_catalog_config(ctx: typer.Context) -> CatalogConfig | None:
-    """The catalog config for the catalog containing the current directory,
-    or ``None`` when none is found or it fails to load (issue #41's
-    ``vpress validate --file``): unlike every other command, running
-    outside a catalog is a normal, supported case here, not a hard error --
-    ``--file`` validates "any SVG on disk", catalog or not (§9's own scope
-    bullet 5)."""
+    """The config of the catalog containing the current directory, or
+    ``None`` when there is none or it fails to load. Only ``validate
+    --file`` uses this: it works on any SVG, inside a catalog or not."""
     explicit = ctx.obj.get("catalog") if ctx.obj else None
     try:
         root = locate_catalog_root(Path.cwd(), explicit=explicit)
@@ -389,10 +377,8 @@ def _optional_catalog_config(ctx: typer.Context) -> CatalogConfig | None:
 
 
 def _format_location(finding: Finding) -> str:
-    """``finding``'s own location as CLI text -- its bbox when it has one,
-    or a plain marker when it does not (issue #41: a finding with no
-    geometry, such as an empty group, is still located by element reference
-    alone, never a made-up bbox)."""
+    """A finding's bbox as CLI text, or a marker when it has none (e.g. an
+    empty group, located by element reference alone)."""
     location = finding.location
     if location is None:
         return "(no bbox)"
@@ -404,11 +390,8 @@ def _echo_finding(finding: Finding) -> None:
 
 
 def _validate_file(file: Path, reference_size_in: float) -> None:
-    """``vpress validate --file`` (issue #41): validate any SVG on disk
-    against the same pure :func:`~vectorpress.validate.cut_file.
-    validate_cut_file` catalog validation uses, print the same report and
-    result, and write nothing -- no findings report, no provenance, no
-    asset involved at all."""
+    """Validate any SVG on disk with the same ``validate_cut_file`` asset
+    validation uses, print the report, and write nothing."""
     if not file.is_file():
         typer.echo(f"validate: {file} failed: no such file", err=True)
         raise typer.Exit(code=1)
@@ -416,7 +399,7 @@ def _validate_file(file: Path, reference_size_in: float) -> None:
     svg_bytes = file.read_bytes()
     try:
         validation = validate_cut_file(svg_bytes, reference_size_in)
-    except Exception as exc:  # any parse failure is a reported §35 validation failure
+    except Exception as exc:  # any parse failure is a reported validation failure (§35)
         typer.echo(f"validate: {file} failed: {exc}", err=True)
         raise typer.Exit(code=1) from exc
 
@@ -449,7 +432,7 @@ def validate(
         None,
         "--reference-size",
         help=(
-            "Physical reference size in inches, for --file only (§9.1). "
+            "Physical reference size in inches, for --file only. "
             "Defaults to the catalog default when run inside a catalog; "
             "required otherwise."
         ),
@@ -466,52 +449,21 @@ def validate(
         ),
     ),
 ) -> None:
-    """Validate one asset's ``cut_svg``, every loaded asset's with
-    ``--all``, or an arbitrary SVG on disk with ``--file`` (issue #41),
-    against every landed §9 detector (§9, §9.1, §9.2, ADR 0007, ADR 0008,
-    issue #37, issue #38), writing a findings report beside the file
-    (through ``catalog.findings``) and printing pass / needs review with
-    each finding's kind and location.
+    """Validate cut files and print pass / needs review with each finding's
+    kind and location.
 
-    Exactly one of ``asset_id``, ``--all`` or ``--file`` selects what is
-    checked; providing more than one, or none, is a usage error. An asset
-    whose cut file is ``missing`` or ``impossible`` is reported as such and
-    not validated (there is no file to check yet); an asset that failed to
-    load is skipped and named (§35), the same as ``vpress generate --all``.
-    ``vpress generate`` itself never calls this -- a findings report only
-    ever exists because ``validate`` was run.
-
-    ``--file`` (issue #41) validates any SVG on disk -- an override, a
-    stray file, anything -- through the exact same pure :func:`~
-    vectorpress.validate.cut_file.validate_cut_file` an asset's own
-    validation calls, never a duplicate. It writes nothing (no findings
-    report, no provenance) and does not accept ``--product``. Its
-    reference size (§9.1) is ``--reference-size`` when given, else the
-    catalog default when the current directory is inside a catalog, else a
-    usage error -- ``--file`` works outside a catalog entirely, the one
-    case in this command where that is not itself an error. It exits 0 for
-    ``pass`` or ``needs review``, 1 for a file it cannot read or parse
-    (§35).
-
-    ``--product`` combines with either ``asset_id`` or ``--all`` (issue
-    #38): it resolves the reference size to validate at from the named
-    product (:func:`~vectorpress.domain.reference_size.resolve_reference_size_in`)
-    instead of using the catalog default outright -- whether that asset
-    actually belongs to the product is left to a later PRD. An unknown
-    product slug, or one whose file failed to load, is the same two-outcome
-    actionable error ``asset_id`` itself gets, and stops the command before
-    any asset is validated. The resulting report is persisted at its own
-    reference-size-keyed path, never overwriting or invalidating the
-    catalog-default report for the same asset (issue #38's "a findings
-    report is per (cut file, reference size)") -- ``vpress asset`` always
-    keeps showing the catalog-default result.
-
-    A validation failure (an unparseable SVG -- most plausibly a hand-edited
-    override, since a generated cut file always parses) is reported on
-    stderr naming the asset, file and cause, and the run still tries every
-    other asset before exiting 1. A needs-review result is not a failure:
-    the command exits 0 as long as every asset it attempted to validate
-    parsed successfully.
+    Give exactly one of ASSET_ID, --all or --file. Validating an asset
+    writes a findings report beside its cut file; an asset whose cut file
+    is missing or impossible is reported and skipped. --file checks any SVG
+    on disk and writes nothing. Exits 0 for pass or needs review, 1 if any
+    file could not be read or parsed.
+    \f
+    Validation runs in the ``validate`` layer; this command only picks the
+    assets and reference size and formats the result. A ``--product``
+    report is saved at its own size-keyed path and never replaces the
+    catalog-default report, which is the one ``vpress asset`` shows.
+    ``vpress generate`` never validates: a findings report exists only
+    because this command ran.
     """
     selectors = [asset_id is not None, all_assets, file is not None]
     if sum(selectors) != 1:
@@ -542,42 +494,17 @@ def validate(
     root, config = _locate_and_load_config(ctx)
     inventory = load_assets(root, config)
 
-    resolved_product: Product | None = None
-    if product is not None:
-        product_inventory = load_products(root, config)
-        product_lookup = lookup_product(product_inventory, config, product)
-        if product_lookup.product is None:
-            if product_lookup.problems:
-                _echo_problems(product_lookup.problems)
-            else:
-                typer.echo(f"Unknown product: {product!r}", err=True)
-            raise typer.Exit(code=1)
-        resolved_product = product_lookup.product
-
+    # Resolve the product first: an unknown one stops the run before any
+    # asset is validated.
+    resolved_product = (
+        _lookup_product_or_exit(root, config, product) if product is not None else None
+    )
     reference_size_in = resolve_reference_size_in(config, resolved_product)
 
-    if all_assets:
-        for failed_id in failed_asset_ids(inventory, config):
-            typer.echo(f"{failed_id}\tskipped: failed to load")
-        targets = inventory.assets
-    else:
-        assert asset_id is not None  # usage-error branch above covers the None case
-        result = lookup_asset(inventory, config, asset_id)
-        if result.asset is None:
-            if result.problems:
-                _echo_problems(result.problems)
-            else:
-                typer.echo(f"Unknown asset: {asset_id!r}", err=True)
-            raise typer.Exit(code=1)
-        targets = [result.asset]
+    targets = _select_targets(inventory, config, asset_id)
 
     failure_count = 0
     for target in targets:
-        # The whole read-validate-persist cycle lives in the ``validate``
-        # layer (issue #37 fix round 1): this command only decides *which*
-        # assets to check, at *which* reference size (issue #38), and
-        # formats the result -- it never opens a catalog file itself (ADR
-        # 0006, CLAUDE.md's "cli stays thin").
         outcome = validate_asset_cut_file(root, config, target, reference_size_in)
 
         if outcome.outcome is AssetValidationOutcome.IMPOSSIBLE:
@@ -598,9 +525,6 @@ def validate(
         result_text = (
             "pass" if outcome.validation.outcome is ValidationOutcome.PASS else "needs review"
         )
-        # A product-resolved size gets its own visible marker (issue #38):
-        # the plain flow's own line stays exactly as it was before this
-        # issue, since every existing test locks that exact string.
         size_note = (
             f"\t(at {format_number(reference_size_in)}in, product {resolved_product.slug})"
             if resolved_product is not None
@@ -617,12 +541,10 @@ def validate(
 
 @app.command()
 def collections(ctx: typer.Context) -> None:
-    """List every loaded collection: slug, name, and membership form.
+    """List every collection that loaded: slug, name, and membership form.
 
-    Membership resolution (which assets actually match) is PRD 5's job;
-    this only reports the declared shape (issue #5). Metadata problems are
-    ``vpress status``'s report, not this command's; a catalog with a broken
-    collection still lists every collection that did load.
+    Membership is shown as declared; which assets match is not resolved
+    yet. Collections that failed to load are reported by 'vpress status'.
     """
     root, config = _locate_and_load_config(ctx)
     inventory = load_collections(root, config)
@@ -633,14 +555,11 @@ def collections(ctx: typer.Context) -> None:
 
 @app.command()
 def products(ctx: typer.Context) -> None:
-    """List every loaded product: slug, listing title, tier, and collection
-    reference.
+    """List every product that loaded: slug, listing title, tier, and
+    collection.
 
-    The listing title falls back to the slug when the product has no
-    ``[listing]`` yet (issue #7: a product can exist before PRD 7 drafts
-    one). Metadata problems are ``vpress status``'s report, not this
-    command's; a catalog with a broken product still lists every product
-    that did load.
+    The title falls back to the slug for a product with no listing yet.
+    Products that failed to load are reported by 'vpress status'.
     """
     root, config = _locate_and_load_config(ctx)
     inventory = load_products(root, config)

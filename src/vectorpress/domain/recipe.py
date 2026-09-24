@@ -67,11 +67,11 @@ RECIPES: dict[DerivativeType, Recipe] = {
             # Every cleanup threshold below is a physical measurement, not a
             # pixel count (ADR 0007, §9.1): "island", "hole" and "opening
             # width" are only meaningful at a known output size, and that
-            # size -- the catalog's (or, later, a product's) reference size
-            # -- is not part of this static declaration (issue #36: it is
-            # merged in at generation time as an *effective* parameter, by
-            # ``pipeline.generate``, so changing it alone still changes this
-            # recipe's identity without editing this dict).
+            # size -- the catalog's default reference size, never a
+            # product's (ADR 0009) -- is not part of this static
+            # declaration: ``pipeline.generate`` merges it in at generation
+            # time as an *effective* parameter, so changing it alone still
+            # changes this recipe's identity without editing this dict.
             "island_min_area_in2": 0.01,
             "hole_min_area_in2": 0.01,
             "opening_width_in": 0.06,

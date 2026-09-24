@@ -10,7 +10,10 @@ marketplace-ready packs. A local, single-user production tool.
 
 ## Status
 
-Scaffold only. See the PRD roadmap in `docs/PLAN.md` for what comes next.
+PRDs 1–3 are done: load and check a catalog (`vpress status`, `assets`, `asset`,
+`collections`, `products`), generate derivatives with provenance (`vpress generate`),
+and validate cut files into findings (`vpress validate`). Review, products and builds
+come next; see the PRD roadmap in `docs/PLAN.md`.
 
 ## Development
 
