@@ -13,18 +13,12 @@ from vectorpress.catalog.assets import asset_dir, failed_asset_ids, load_assets,
 from vectorpress.catalog.collections import load_collections
 from vectorpress.catalog.derivatives import DerivativeStateCounts
 from vectorpress.catalog.errors import CatalogConfigError, CatalogNotFoundError
-from vectorpress.catalog.findings import (
-    FindingsCurrencyState,
-    FindingsReport,
-    findings_currency,
-    write_findings_report,
-)
+from vectorpress.catalog.findings import FindingsCurrencyState, findings_currency
 from vectorpress.catalog.load import load_catalog, load_catalog_config
 from vectorpress.catalog.locate import locate_catalog_root
 from vectorpress.catalog.metadata_problem import MetadataProblem
 from vectorpress.catalog.products import load_products
-from vectorpress.catalog.provenance import DERIVED_DIRNAME, sha256_bytes
-from vectorpress.domain.asset import Asset
+from vectorpress.catalog.provenance import DERIVED_DIRNAME, read_derivative_bytes
 from vectorpress.domain.catalog_config import CatalogConfig
 from vectorpress.domain.derivative_state import DerivativeState
 from vectorpress.domain.derivative_type import DerivativeType
@@ -36,7 +30,8 @@ from vectorpress.pipeline.generate import (
     count_derivative_states,
     generate_asset,
 )
-from vectorpress.validate.cut_file import THRESHOLDS, validate_cut_file
+from vectorpress.validate.cut_file import THRESHOLDS
+from vectorpress.validate.validate_asset import AssetValidationOutcome, validate_asset_cut_file
 
 app = typer.Typer(
     name="vpress",
@@ -173,16 +168,6 @@ def assets(ctx: typer.Context) -> None:
         )
 
 
-def _cut_svg_status(asset: Asset, root: Path, config: CatalogConfig) -> DerivativeStatus:
-    """One asset's :class:`~vectorpress.pipeline.generate.DerivativeStatus`
-    for ``cut_svg`` specifically -- the one derivative type ``vpress
-    validate`` and the ``asset`` command's findings column both need (issue
-    #37); every recipe-bearing type always has exactly one entry, so this
-    never raises ``StopIteration``."""
-    statuses = asset_derivative_statuses(asset, asset_dir(root, config, asset.id), config)
-    return next(s for s in statuses if s.derivative_type is DerivativeType.CUT_SVG)
-
-
 def _findings_display(
     status: DerivativeStatus, root: Path, config: CatalogConfig, asset_id: str
 ) -> str:
@@ -197,14 +182,14 @@ def _findings_display(
 
     assert status.output_filename is not None  # CURRENT/STALE always carry a filename
     derived_dir = asset_dir(root, config, asset_id) / DERIVED_DIRNAME
-    svg_path = derived_dir / status.output_filename
-    if not svg_path.is_file():
+    svg_bytes = read_derivative_bytes(derived_dir, status.output_filename)
+    if svg_bytes is None:
         return "not validated"
 
     currency = findings_currency(
         derived_dir,
         status.output_filename,
-        svg_path.read_bytes(),
+        svg_bytes,
         config.reference_size_in,
         THRESHOLDS,
     )
@@ -442,41 +427,32 @@ def validate(
 
     failure_count = 0
     for target in targets:
-        status = _cut_svg_status(target, root, config)
-        if status.state in (DerivativeState.IMPOSSIBLE, DerivativeState.MISSING):
-            typer.echo(f"{target.id}\tcut_svg\t{status.state.value}")
+        # The whole read-validate-persist cycle lives in the ``validate``
+        # layer (issue #37 fix round 1): this command only decides *which*
+        # assets to check and formats the result -- it never opens a
+        # catalog file itself (ADR 0006, CLAUDE.md's "cli stays thin").
+        outcome = validate_asset_cut_file(root, config, target, config.reference_size_in)
+
+        if outcome.outcome is AssetValidationOutcome.IMPOSSIBLE:
+            typer.echo(f"{target.id}\tcut_svg\timpossible\t{outcome.reason}")
             continue
-
-        assert status.output_filename is not None  # CURRENT/STALE always carry a filename
-        derived_dir = asset_dir(root, config, target.id) / DERIVED_DIRNAME
-        svg_path = derived_dir / status.output_filename
-
-        try:
-            svg_bytes = svg_path.read_bytes()
-            validation = validate_cut_file(svg_bytes, config.reference_size_in)
-        except Exception as exc:
+        if outcome.outcome is AssetValidationOutcome.MISSING:
+            typer.echo(f"{target.id}\tcut_svg\tmissing")
+            continue
+        if outcome.outcome is AssetValidationOutcome.FAILED:
             failure_count += 1
             typer.echo(
-                f"validate: {target.id} cut_svg failed ({status.output_filename}): {exc}",
+                f"validate: {target.id} cut_svg failed ({outcome.filename}): {outcome.reason}",
                 err=True,
             )
             continue
 
-        write_findings_report(
-            derived_dir,
-            FindingsReport(
-                validated_file=status.output_filename,
-                content_hash=sha256_bytes(svg_bytes),
-                reference_size_in=config.reference_size_in,
-                thresholds=dict(THRESHOLDS),
-                result=validation.outcome,
-                findings=validation.findings,
-            ),
+        assert outcome.validation is not None  # set exactly when outcome is VALIDATED
+        result_text = (
+            "pass" if outcome.validation.outcome is ValidationOutcome.PASS else "needs review"
         )
-
-        result_text = "pass" if validation.outcome is ValidationOutcome.PASS else "needs review"
-        typer.echo(f"{target.id}\tcut_svg\t{status.output_filename}\t{result_text}")
-        for finding in validation.findings:
+        typer.echo(f"{target.id}\tcut_svg\t{outcome.filename}\t{result_text}")
+        for finding in outcome.validation.findings:
             location = finding.location
             typer.echo(
                 f"  {finding.kind.value}\t"

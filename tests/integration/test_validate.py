@@ -182,6 +182,71 @@ def test_findings_json_records_hash_reference_size_and_thresholds(
     assert isinstance(report.thresholds, dict)
 
 
+def _assert_at_most_four_decimal_places(value: object, where: str) -> None:
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        return
+    rounded = float(f"{float(value):.4f}")
+    assert value == rounded, f"{where} has more than 4 decimal places: {value!r}"
+
+
+@pytest.mark.integration
+def test_owl_limpets_findings_json_numbers_are_rounded_to_four_decimal_places(
+    monkeypatch: pytest.MonkeyPatch, temp_catalog_root: Path
+) -> None:
+    """Issue #37 fix round 1: ``owl_limpet``'s detached-piece bbox comes
+    from ``svgelements``' own numpy-backed curve sampling, which produced
+    raw, many-decimal floats (e.g. ``57.352975173611114``) before this fix --
+    exactly the cross-platform risk §36's fixed-precision rule exists to
+    prevent. Every number in the persisted findings JSON must round-trip
+    through the same 4-decimal-place rule
+    :mod:`vectorpress.pipeline.svg_document` already applies to SVG
+    coordinate text."""
+    monkeypatch.chdir(temp_catalog_root)
+    runner.invoke(app, ["generate", "--all"])
+
+    result = runner.invoke(app, ["validate", "owl_limpet"])
+    assert result.exit_code == 0, result.output
+
+    path = findings_path(_derived_dir(temp_catalog_root, "owl_limpet"), "owl-limpet-cut.svg")
+    data = json.loads(path.read_text(encoding="utf-8"))
+    assert data["findings"], "sanity: owl_limpet must have at least one finding to check"
+
+    location = data["findings"][0]["location"]
+    assert location["min_x"] == 75.8667
+    assert location["min_y"] == 39.678
+    assert location["max_x"] == 93.2
+    assert location["max_y"] == 57.353
+    for key, value in location.items():
+        _assert_at_most_four_decimal_places(value, f"location.{key}")
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("asset_id,filename", FIXTURE_CUT_FILES)
+def test_every_number_in_a_findings_json_has_at_most_four_decimal_places(
+    monkeypatch: pytest.MonkeyPatch, temp_catalog_root: Path, asset_id: str, filename: str
+) -> None:
+    """A general property, not just the one fixture that happened to expose
+    the bug: every numeric field written to any findings JSON -- location
+    coordinates, ``reference_size_in``, any future ``measured_value``/
+    ``threshold`` -- follows the same fixed-precision rule (§36, issue #37
+    fix round 1)."""
+    monkeypatch.chdir(temp_catalog_root)
+    runner.invoke(app, ["generate", "--all"])
+
+    result = runner.invoke(app, ["validate", asset_id])
+    assert result.exit_code == 0, result.output
+
+    path = findings_path(_derived_dir(temp_catalog_root, asset_id), filename)
+    data = json.loads(path.read_text(encoding="utf-8"))
+
+    _assert_at_most_four_decimal_places(data["reference_size_in"], "reference_size_in")
+    for finding in data["findings"]:
+        _assert_at_most_four_decimal_places(finding["measured_value"], "measured_value")
+        _assert_at_most_four_decimal_places(finding["threshold"], "threshold")
+        for key, value in finding["location"].items():
+            _assert_at_most_four_decimal_places(value, f"location.{key}")
+
+
 @pytest.mark.integration
 def test_nothing_is_written_inside_the_svg_or_any_toml_file(
     monkeypatch: pytest.MonkeyPatch, temp_catalog_root: Path

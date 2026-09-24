@@ -50,9 +50,9 @@
         'kind': 'disconnected_fragments',
         'location': dict({
           'max_x': 93.2,
-          'max_y': 57.352975173611114,
-          'min_x': 75.8666994140625,
-          'min_y': 39.67802222222223,
+          'max_y': 57.353,
+          'min_x': 75.8667,
+          'min_y': 39.678,
         }),
         'measured_value': None,
         'message': "disconnected fragment: path element 0, subpath 1 is separate from the design's largest piece",

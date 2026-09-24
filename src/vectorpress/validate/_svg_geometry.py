@@ -65,6 +65,7 @@ from dataclasses import dataclass
 import svgelements as se
 
 from vectorpress.domain.finding import BoundingBox
+from vectorpress.domain.numeric_format import round_number
 
 Point = tuple[float, float]
 
@@ -167,9 +168,24 @@ def _polygon_area(points: list[Point]) -> float:
 
 
 def _polygon_bbox(points: list[Point]) -> BoundingBox:
+    """``points``'s tight bounding box, rounded to
+    :data:`~vectorpress.domain.numeric_format.DECIMAL_PLACES` (issue #37 fix
+    round 1): a curved segment's flattened points come from
+    ``svgelements``' own ``numpy``-backed ``.point(t)`` sampling, which can
+    differ in its last bit between platforms' C libraries for identical
+    input the same way potrace's own curve fitting can -- rounded here, at
+    the point a finding's location is actually built, the same fixed-
+    precision rule :mod:`vectorpress.pipeline.svg_document` already applies
+    to SVG coordinate text keeps findings JSON byte-identical across
+    ubuntu and windows too (§36)."""
     xs = [x for x, _y in points]
     ys = [y for _x, y in points]
-    return BoundingBox(min_x=min(xs), min_y=min(ys), max_x=max(xs), max_y=max(ys))
+    return BoundingBox(
+        min_x=round_number(min(xs)),
+        min_y=round_number(min(ys)),
+        max_x=round_number(max(xs)),
+        max_y=round_number(max(ys)),
+    )
 
 
 def _polygon_representative_point(points: list[Point]) -> Point:

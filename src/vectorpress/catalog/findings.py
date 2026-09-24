@@ -32,6 +32,7 @@ from vectorpress.domain.finding import (
     PathReference,
     ValidationOutcome,
 )
+from vectorpress.domain.numeric_format import round_number
 
 #: A findings report for ``<name>`` is a plain-JSON file named
 #: ``<name>.findings.json`` beside it, so it never collides with the
@@ -67,23 +68,36 @@ class FindingsReport:
 
 
 def _finding_to_dict(finding: Finding) -> dict[str, object]:
+    """``finding`` as a JSON-ready dict, every number rounded to
+    :data:`~vectorpress.domain.numeric_format.DECIMAL_PLACES` (issue #37 fix
+    round 1's "every number written to findings" rule) -- a second,
+    belt-and-suspenders application of :func:`~vectorpress.domain.
+    numeric_format.round_number` at the one point every finding must pass
+    through to become JSON, on top of :mod:`vectorpress.validate.
+    _svg_geometry`'s own rounding at the point a location is first computed:
+    idempotent on an already-rounded number, so this holds the invariant
+    even for a future detector kind that forgets to round its own
+    ``measured_value``/``threshold`` before building a :class:`~vectorpress.
+    domain.finding.Finding`."""
     return {
         "kind": finding.kind.value,
         "classification": finding.classification.value,
         "message": finding.message,
         "location": {
-            "min_x": finding.location.min_x,
-            "min_y": finding.location.min_y,
-            "max_x": finding.location.max_x,
-            "max_y": finding.location.max_y,
+            "min_x": round_number(finding.location.min_x),
+            "min_y": round_number(finding.location.min_y),
+            "max_x": round_number(finding.location.max_x),
+            "max_y": round_number(finding.location.max_y),
         },
         "path_reference": {
             "element_index": finding.path_reference.element_index,
             "subpath_index": finding.path_reference.subpath_index,
             "id": finding.path_reference.id,
         },
-        "measured_value": finding.measured_value,
-        "threshold": finding.threshold,
+        "measured_value": (
+            None if finding.measured_value is None else round_number(finding.measured_value)
+        ),
+        "threshold": None if finding.threshold is None else round_number(finding.threshold),
     }
 
 

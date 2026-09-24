@@ -36,6 +36,15 @@ import math
 from collections.abc import Sequence
 from dataclasses import dataclass
 
+# ``format_number`` used to be defined in this module; it now lives in
+# ``domain.numeric_format`` (issue #37 fix round 1) so ``validate`` can
+# reuse the exact same fixed-precision rule for findings JSON numbers
+# without importing this module's layer (CLAUDE.md's layering guardrail) --
+# re-exported here under its original name so every existing caller in this
+# module (and every test importing it from here) is unchanged. See that
+# module for why the rule exists and what it guarantees.
+from vectorpress.domain.numeric_format import format_number
+
 Point = tuple[float, float]
 
 
@@ -185,29 +194,6 @@ def tight_viewbox(subpaths: Sequence[Subpath]) -> tuple[float, float, float, flo
     (looser) control-point polygon."""
     min_x, min_y, max_x, max_y = _bbox([p for sp in subpaths for p in _subpath_bbox_points(sp)])
     return min_x, min_y, max_x - min_x, max_y - min_y
-
-
-#: Decimal places kept when serialising a coordinate. Fixed, low precision
-#: is deliberate (not just tidy): it is what makes serialisation
-#: byte-identical across ubuntu and windows CI (the same concern
-#: ``pipeline.transparent_png``'s module docstring raises for PNG bytes).
-#: potrace's curve fitting runs ``math.sqrt``/``atan2``/``cos`` -- libm
-#: calls that can differ in their last bit between platforms' C libraries
-#: for the same input -- and any such difference is many orders of
-#: magnitude smaller than one ten-thousandth of a pixel, so rounding here
-#: absorbs it before it can reach the output text.
-_DECIMAL_PLACES = 4
-
-
-def format_number(value: float) -> str:
-    """``value`` formatted deterministically: fixed precision, then
-    trailing zeros (and a trailing ``.``) trimmed, and ``-0`` normalised to
-    ``0`` -- so identical geometry always serialises to identical text
-    (§36) regardless of which platform produced the float."""
-    text = f"{value:.{_DECIMAL_PLACES}f}"
-    if "." in text:
-        text = text.rstrip("0").rstrip(".")
-    return "0" if text in ("", "-0") else text
 
 
 def _format_point(point: Point) -> str:
