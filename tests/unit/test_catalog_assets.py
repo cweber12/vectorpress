@@ -7,6 +7,7 @@ import pytest
 
 from vectorpress.catalog.assets import (
     duplicate_slug_problems,  # pure helper, tested directly below
+    failed_asset_ids,
     find_asset,
     load_assets,
     lookup_asset,
@@ -624,3 +625,50 @@ def test_load_assets_excludes_duplicate_id_folders_from_assets(
         Path("assets/a/Sea_Otter/asset.toml"),
         Path("assets/b/sea_otter/asset.toml"),
     }
+
+
+# --- failed_asset_ids (issue #23's "generate --all names assets that failed
+# to load") ------------------------------------------------------------------
+
+
+def test_failed_asset_ids_is_empty_for_a_clean_catalog() -> None:
+    config = load_catalog_config(FIXTURE_CATALOG_ROOT)
+    inventory = load_assets(FIXTURE_CATALOG_ROOT, config)
+
+    assert failed_asset_ids(inventory, config) == []
+
+
+def test_failed_asset_ids_names_the_broken_asset_only(catalog_copy: Path) -> None:
+    path = _asset_toml(catalog_copy, "ochre_sea_star")
+    path.write_text(
+        path.read_text(encoding="utf-8").replace('subject_category = "Echinoderm"\n', ""),
+        encoding="utf-8",
+    )
+    config = load_catalog_config(catalog_copy)
+
+    inventory = load_assets(catalog_copy, config)
+
+    assert failed_asset_ids(inventory, config) == ["ochre_sea_star"]
+    # the two assets that loaded fine are not named as failed
+    assert [asset.id for asset in inventory.assets] == ["giant_green_anemone", "purple_sea_urchin"]
+
+
+def test_failed_asset_ids_names_every_broken_asset_sorted_and_deduplicated(
+    catalog_copy: Path,
+) -> None:
+    """A missing required field and a TOML syntax error both count as
+    "failed to load"; each broken asset is named once even though it can
+    contribute more than one ``MetadataProblem`` (e.g. several source
+    problems)."""
+    ochre = _asset_toml(catalog_copy, "ochre_sea_star")
+    ochre.write_text(
+        ochre.read_text(encoding="utf-8").replace('subject_category = "Echinoderm"\n', ""),
+        encoding="utf-8",
+    )
+    urchin = _asset_toml(catalog_copy, "purple_sea_urchin")
+    urchin.write_text('common_name = "unterminated\n', encoding="utf-8")
+    config = load_catalog_config(catalog_copy)
+
+    inventory = load_assets(catalog_copy, config)
+
+    assert failed_asset_ids(inventory, config) == ["ochre_sea_star", "purple_sea_urchin"]

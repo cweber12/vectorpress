@@ -138,6 +138,39 @@ def test_vpress_asset_shows_current_after_generation(
 
 
 @pytest.mark.integration
+def test_generate_all_skips_and_names_an_asset_that_failed_to_load(
+    monkeypatch: pytest.MonkeyPatch, temp_catalog_root: Path
+) -> None:
+    """The issue's "assets that failed to load are skipped and named": one
+    asset's ``asset.toml`` is broken (a missing required field), so it never
+    loads at all; ``generate --all`` still generates for the other two,
+    names the broken one as skipped, and exits 0 -- a broken asset is a
+    ``vpress status`` metadata problem, not a ``generate`` failure (§35: a
+    failure involving one asset does not stop the rest)."""
+    broken_toml = temp_catalog_root / "assets" / "ochre_sea_star" / "asset.toml"
+    broken_toml.write_text(
+        broken_toml.read_text(encoding="utf-8").replace('subject_category = "Echinoderm"\n', ""),
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(temp_catalog_root)
+
+    result = runner.invoke(app, ["generate", "--all"])
+
+    assert result.exit_code == 0, result.output
+    assert "ochre_sea_star\tskipped: failed to load" in result.stdout
+    # the broken asset generated nothing
+    assert not (temp_catalog_root / "assets" / "ochre_sea_star" / "derived").exists()
+
+    # the other two assets still generated
+    for asset_id, filename in FIXTURE_OUTPUTS:
+        if asset_id == "ochre_sea_star":
+            continue
+        assert f"{asset_id}\ttransparent_png\tgenerated\t{filename}" in result.stdout
+        output_path = temp_catalog_root / "assets" / asset_id / DERIVED_DIRNAME / filename
+        assert output_path.is_file()
+
+
+@pytest.mark.integration
 def test_vpress_status_missing_count_drops_after_generation(
     monkeypatch: pytest.MonkeyPatch, temp_catalog_root: Path
 ) -> None:
