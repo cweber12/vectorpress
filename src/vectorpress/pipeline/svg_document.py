@@ -24,6 +24,12 @@ module writes already satisfies §8 by construction --
 -- but is exercised as a single "build one clean compound path" function so
 a later derivative type (``flatcolor_svg``) has one place to call for the
 same guarantees instead of re-deriving them (:func:`render_svg`).
+
+``render_svg`` takes one or more :class:`Fill` groups rather than a single
+fill (issue #25): ``silhouette_svg`` still passes exactly one (its output is
+byte-identical to before), and ``flatcolor_svg`` passes one per traced
+color, each rendered as its own ``<path>`` in the order given -- so a color
+meant to sit on top of another (an enclosed region) is listed after it.
 """
 
 import math
@@ -65,6 +71,19 @@ class Subpath:
 
     start: Point
     segments: tuple[Segment, ...]
+
+
+@dataclass(frozen=True)
+class Fill:
+    """One filled region of a rendered document: a fill color and the
+    subpaths that make it up (issue #25). ``render_svg`` renders each as its
+    own ``<path>``, in the order given -- the caller's job to order them
+    (:mod:`vectorpress.pipeline.flatcolor_svg` orders by traced area
+    descending so a smaller, enclosed region's path comes after, and so
+    paints on top of, the larger region enclosing it)."""
+
+    fill: str
+    subpaths: Sequence[Subpath]
 
 
 def _quadratic_roots_in_unit_interval(a: float, b: float, c: float) -> list[float]:
@@ -217,37 +236,54 @@ def render_path_d(subpaths: Sequence[Subpath]) -> str:
     return "".join(parts)
 
 
-def render_svg(subpaths: Sequence[Subpath], *, fill: str, fill_rule: str = "evenodd") -> bytes:
-    """A complete, §8-clean SVG document: one ``<path>`` (compound when
-    ``subpaths`` has more than one entry), filled with ``fill``, no stroke,
-    root ``viewBox`` tight to the geometry.
+def render_svg(fills: Sequence[Fill], *, fill_rule: str = "evenodd") -> bytes:
+    """A complete, §8-clean SVG document: one ``<path>`` per entry in
+    ``fills`` (each compound when its own subpaths number more than one),
+    each filled with its own color, no stroke, root ``viewBox`` tight to
+    every fill's combined geometry.
 
-    ``fill_rule`` defaults to ``"evenodd"``: potrace's own reference SVG
-    backend uses it for exactly this reason -- unlike ``"nonzero"``, it
-    keeps a hole a hole regardless of which winding direction potrace
-    happened to trace each subpath in, so this module never has to inspect
-    or normalise winding to get holes right (§8: "a fill rule and winding
-    under which holes stay holes").
+    A single-entry ``fills`` renders exactly the single-color document this
+    function always has (``silhouette_svg``'s call is byte-identical to
+    before issue #25 gave this function several fills); several entries
+    render several ``<path>`` elements, one per color, in the order given.
 
-    Raises ``ValueError`` if every subpath is degenerate (or there are
-    none): there is no clean document bounds to compute (§8) and nothing
-    would be visible anyway.
+    ``fill_rule`` defaults to ``"evenodd"`` and applies to every path alike:
+    potrace's own reference SVG backend uses it for exactly this reason --
+    unlike ``"nonzero"``, it keeps a hole a hole regardless of which winding
+    direction potrace happened to trace each subpath in, so this module
+    never has to inspect or normalise winding to get holes right (§8: "a
+    fill rule and winding under which holes stay holes").
+
+    Raises ``ValueError`` if every subpath, across every fill, is degenerate
+    (or there are none at all): there is no clean document bounds to
+    compute (§8) and nothing would be visible anyway. A fill whose own
+    subpaths are all degenerate is silently dropped rather than emitted as
+    an empty ``<path>`` (§8: "no invisible elements").
     """
-    visible = [sp for sp in subpaths if not _is_degenerate(sp)]
-    if not visible:
+    visible_fills = [
+        Fill(fill=fill.fill, subpaths=visible)
+        for fill in fills
+        if (visible := [sp for sp in fill.subpaths if not _is_degenerate(sp)])
+    ]
+    all_visible_subpaths = [sp for fill in visible_fills for sp in fill.subpaths]
+    if not all_visible_subpaths:
         raise ValueError("no non-degenerate geometry to render as an SVG")
 
-    min_x, min_y, width, height = tight_viewbox(visible)
+    min_x, min_y, width, height = tight_viewbox(all_visible_subpaths)
     view_box = (
         f"{format_number(min_x)} {format_number(min_y)} "
         f"{format_number(width)} {format_number(height)}"
     )
-    path_d = render_path_d(visible)
+    paths = "".join(
+        f'<path fill="{fill.fill}" fill-rule="{fill_rule}" stroke="none" '
+        f'd="{render_path_d(fill.subpaths)}"/>'
+        for fill in visible_fills
+    )
 
     svg = (
         '<svg xmlns="http://www.w3.org/2000/svg" '
         f'viewBox="{view_box}" width="{format_number(width)}" height="{format_number(height)}">'
-        f'<path fill="{fill}" fill-rule="{fill_rule}" stroke="none" d="{path_d}"/>'
+        f"{paths}"
         "</svg>"
     )
     return svg.encode("utf-8")

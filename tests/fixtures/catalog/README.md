@@ -40,8 +40,8 @@ committed fixture never contains `derived/`. Later slices add `overrides/`
 Three tide-pool subjects from §30, each with valid metadata and one or more source
 images tagged with a role (§4.1, ADR 0003):
 
-- `ochre_sea_star` — `silhouette` (a solid blob) and `lineart` (a plain placeholder)
-  sources
+- `ochre_sea_star` — `silhouette` (a solid blob), `lineart` (a plain placeholder), and
+  `flatcolor` (three concentric rings plus a detached island, four flat colors) sources
 - `purple_sea_urchin` — a `silhouette` source (a ring: a solid shape with a hole)
 - `giant_green_anemone` — a `silhouette` source (a blob plus a detached island)
 
@@ -50,6 +50,16 @@ background, not a solid-color square (issue #23): the transparent PNG generator'
 crop-to-content and hole-preserving behaviour need actual content to crop and an
 actual hole to preserve. Still tiny (16x16), and regenerated deterministically with
 `uv run python tests/fixtures/catalog/generate_source_pngs.py`.
+
+`ochre_sea_star`'s `flatcolor.png` is the only flatcolor source in the fixture
+(issue #25): the other two assets deliberately have none, so `flatcolor_svg`
+stays `impossible` for them. Its four flat, distinct colors (an outer ring, a
+middle ring, an inner disk fully enclosed by the ring around it, and a small
+detached island) exercise `flatcolor_svg`'s quantize-then-trace-per-color
+generator, including a color region nested inside another. Because the
+`transparent_png` recipe prefers `flatcolor` over `silhouette` (§6.1's
+accepted-roles order), `ochre_sea_star`'s transparent PNG is now built from
+this file instead of `silhouette.png`.
 
 ## Brand
 

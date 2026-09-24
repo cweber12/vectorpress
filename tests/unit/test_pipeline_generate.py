@@ -112,10 +112,12 @@ def test_generate_asset_reports_impossible_with_a_reason(tmp_path: Path) -> None
     assert "flatcolor" in result.detail
 
 
-def test_generate_asset_reports_no_generator_for_a_recipe_without_one(tmp_path: Path) -> None:
-    """flatcolor_svg has a recipe but no generator yet (PRD 3 lands it,
-    issue #25): with a selectable flatcolor source it is reported, not
-    silently skipped, and nothing is written for it."""
+def test_generate_asset_generates_flatcolor_svg_with_customer_facing_filename(
+    tmp_path: Path,
+) -> None:
+    """Issue #25: ``flatcolor_svg`` now has a landed generator -- with a
+    selectable flatcolor source it is generated, not reported ``no
+    generator``."""
     asset_dir = _make_asset_dir(tmp_path)
     _write_source_png(asset_dir / SOURCES_DIRNAME / "flatcolor.png")
     asset = _asset(
@@ -128,11 +130,12 @@ def test_generate_asset_reports_no_generator_for_a_recipe_without_one(tmp_path: 
     results = {r.derivative_type: r for r in generate_asset(asset, asset_dir)}
 
     result = results[DerivativeType.FLATCOLOR_SVG]
-    assert result.outcome is GenerationOutcome.NO_GENERATOR
-    assert result.detail == ""
-    assert not (asset_dir / DERIVED_DIRNAME).exists() or not any(
-        (asset_dir / DERIVED_DIRNAME).glob("*color.svg")
-    )
+    assert result.outcome is GenerationOutcome.GENERATED
+    assert result.detail == "ochre-sea-star-color.svg"
+
+    output_path = asset_dir / DERIVED_DIRNAME / "ochre-sea-star-color.svg"
+    assert output_path.is_file()
+    assert b"<image" not in output_path.read_bytes()
 
 
 def test_generate_asset_generates_silhouette_svg_with_customer_facing_filename(

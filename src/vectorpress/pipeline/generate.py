@@ -64,9 +64,11 @@ def asset_derivative_statuses(asset: Asset, asset_dir_path: Path) -> list[Deriva
     ``MISSING`` to ``CURRENT`` where generation has already produced a
     matching, up-to-date file (issue #23).
 
-    A type whose recipe has no generator yet (``silhouette_svg``,
-    ``flatcolor_svg`` this slice) can never be ``CURRENT``: it stays
-    ``MISSING``, the same as before generation existed at all.
+    A type whose recipe has no generator yet can never be ``CURRENT``: it
+    stays ``MISSING``, the same as before generation existed at all. Every
+    type this PRD covers (``transparent_png``, ``silhouette_svg``,
+    ``flatcolor_svg``) now has one; a later PRD's types are the ones this
+    still applies to.
     """
     statuses: list[DerivativeStatus] = []
     for selection in select_derivatives(asset):
