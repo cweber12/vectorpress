@@ -13,7 +13,7 @@ import xml.etree.ElementTree as ET
 import pytest
 
 from vectorpress.domain.derivative_type import DerivativeType
-from vectorpress.domain.finding import BoundingBox, FindingKind, ValidationOutcome
+from vectorpress.domain.finding import BoundingBox, Finding, FindingKind, ValidationOutcome
 from vectorpress.domain.recipe import RECIPES
 from vectorpress.validate import excessive_complexity
 from vectorpress.validate._pieces import Piece
@@ -60,14 +60,18 @@ _WIDTH_HEIGHT_ONLY_NO_VIEWBOX = (
 
 
 def test_one_piece_svg_passes_with_no_findings() -> None:
-    result = validate_cut_file(_ONE_PIECE, REFERENCE_SIZE_IN)
+    result = validate_cut_file(
+        _ONE_PIECE, REFERENCE_SIZE_IN, catalog_reference_size_in=REFERENCE_SIZE_IN
+    )
 
     assert result.outcome is ValidationOutcome.PASS
     assert result.findings == ()
 
 
 def test_two_piece_svg_reports_exactly_one_disconnected_fragment_finding() -> None:
-    result = validate_cut_file(_TWO_PIECE, REFERENCE_SIZE_IN)
+    result = validate_cut_file(
+        _TWO_PIECE, REFERENCE_SIZE_IN, catalog_reference_size_in=REFERENCE_SIZE_IN
+    )
 
     assert result.outcome is ValidationOutcome.NEEDS_REVIEW
     assert len(result.findings) == 1
@@ -80,7 +84,9 @@ def test_two_piece_finding_is_located_at_the_smaller_pieces_own_bbox() -> None:
     (10x10 = 100 area units for the first, 8x6 = 48 for the second -- the
     second is smaller, so it is the reported fragment, located at its own
     bounding box, not the larger piece's)."""
-    result = validate_cut_file(_TWO_PIECE, REFERENCE_SIZE_IN)
+    result = validate_cut_file(
+        _TWO_PIECE, REFERENCE_SIZE_IN, catalog_reference_size_in=REFERENCE_SIZE_IN
+    )
 
     finding = result.findings[0]
     assert finding.location is not None
@@ -94,7 +100,9 @@ def test_two_piece_finding_names_its_path_reference() -> None:
     """A path reference so an editor can navigate to it: the
     element (this SVG's only ``<path>``, so index 0) and the offending
     subpath's index within it (the second subpath, index 1)."""
-    result = validate_cut_file(_TWO_PIECE, REFERENCE_SIZE_IN)
+    result = validate_cut_file(
+        _TWO_PIECE, REFERENCE_SIZE_IN, catalog_reference_size_in=REFERENCE_SIZE_IN
+    )
 
     reference = result.findings[0].path_reference
     assert reference.element_index == 0
@@ -102,7 +110,9 @@ def test_two_piece_finding_names_its_path_reference() -> None:
 
 
 def test_three_pieces_report_two_findings_neither_for_the_largest() -> None:
-    result = validate_cut_file(_THREE_PIECE, REFERENCE_SIZE_IN)
+    result = validate_cut_file(
+        _THREE_PIECE, REFERENCE_SIZE_IN, catalog_reference_size_in=REFERENCE_SIZE_IN
+    )
 
     assert result.outcome is ValidationOutcome.NEEDS_REVIEW
     assert len(result.findings) == 2
@@ -113,7 +123,9 @@ def test_three_pieces_report_two_findings_neither_for_the_largest() -> None:
 def test_findings_are_in_a_deterministic_document_order() -> None:
     """Findings are ordered by path reference (element, then subpath index),
     not by area or any other incidental ordering."""
-    result = validate_cut_file(_THREE_PIECE, REFERENCE_SIZE_IN)
+    result = validate_cut_file(
+        _THREE_PIECE, REFERENCE_SIZE_IN, catalog_reference_size_in=REFERENCE_SIZE_IN
+    )
 
     ordered = [f.path_reference.subpath_index for f in result.findings]
     assert all(index is not None for index in ordered)  # every finding here names a piece
@@ -124,7 +136,9 @@ def test_a_hole_in_a_ring_is_not_a_disconnected_fragment() -> None:
     """A donut is one physical piece with a hole cut out of it, not two
     pieces -- the hole must not itself be flagged (ADR 0007's "the design is
     more than one separate cut piece", not "more than one subpath")."""
-    result = validate_cut_file(_RING_WITH_A_HOLE, REFERENCE_SIZE_IN)
+    result = validate_cut_file(
+        _RING_WITH_A_HOLE, REFERENCE_SIZE_IN, catalog_reference_size_in=REFERENCE_SIZE_IN
+    )
 
     assert result.outcome is ValidationOutcome.PASS
     assert result.findings == ()
@@ -135,20 +149,30 @@ def test_a_hole_in_a_ring_is_not_a_disconnected_fragment() -> None:
 
 def test_svg_with_no_viewbox_and_no_width_or_height_fails_visibly() -> None:
     with pytest.raises(ValueError):
-        validate_cut_file(_NO_VIEWBOX_NO_SIZE, REFERENCE_SIZE_IN)
+        validate_cut_file(
+            _NO_VIEWBOX_NO_SIZE, REFERENCE_SIZE_IN, catalog_reference_size_in=REFERENCE_SIZE_IN
+        )
 
 
 def test_width_and_height_alone_are_enough_without_a_viewbox() -> None:
     """Falls back to ``width``/``height`` -- only the *absence of both*
     fails."""
-    result = validate_cut_file(_WIDTH_HEIGHT_ONLY_NO_VIEWBOX, REFERENCE_SIZE_IN)
+    result = validate_cut_file(
+        _WIDTH_HEIGHT_ONLY_NO_VIEWBOX,
+        REFERENCE_SIZE_IN,
+        catalog_reference_size_in=REFERENCE_SIZE_IN,
+    )
 
     assert result.outcome is ValidationOutcome.PASS
 
 
 def test_unparseable_svg_fails_visibly() -> None:
     with pytest.raises(ET.ParseError):
-        validate_cut_file(b"not an svg document at all", REFERENCE_SIZE_IN)
+        validate_cut_file(
+            b"not an svg document at all",
+            REFERENCE_SIZE_IN,
+            catalog_reference_size_in=REFERENCE_SIZE_IN,
+        )
 
 
 # --- accidental dot, tiny isolated shape, small hole -------------------------------------
@@ -237,7 +261,9 @@ _ONE_OF_EACH_KIND = (
 
 
 def test_dot_below_threshold_yields_exactly_one_accidental_dot_finding() -> None:
-    result = validate_cut_file(_DOT_BELOW_THRESHOLD, REFERENCE_SIZE_IN)
+    result = validate_cut_file(
+        _DOT_BELOW_THRESHOLD, REFERENCE_SIZE_IN, catalog_reference_size_in=REFERENCE_SIZE_IN
+    )
 
     assert result.outcome is ValidationOutcome.NEEDS_REVIEW
     assert len(result.findings) == 1
@@ -258,7 +284,11 @@ def test_dot_sized_piece_above_threshold_is_never_reported_as_a_dot() -> None:
     real extra piece, so it is reported as a disconnected fragment instead
     (ADR 0007's "no bridging": a kept extra piece is always flagged
     *somehow*, just never as noise once it clears both thresholds)."""
-    result = validate_cut_file(_DOT_SIZED_PIECE_ABOVE_THRESHOLD, REFERENCE_SIZE_IN)
+    result = validate_cut_file(
+        _DOT_SIZED_PIECE_ABOVE_THRESHOLD,
+        REFERENCE_SIZE_IN,
+        catalog_reference_size_in=REFERENCE_SIZE_IN,
+    )
 
     kinds = {finding.kind for finding in result.findings}
     assert FindingKind.ACCIDENTAL_DOT not in kinds
@@ -275,7 +305,9 @@ def test_sliver_below_threshold_yields_exactly_one_tiny_isolated_shape_finding()
     tiny_isolated_shape and disconnected_fragments), so it fires alongside
     tiny_isolated_shape rather than competing with it -- see
     ``test_sliver_below_threshold_is_also_a_narrow_feature`` below."""
-    result = validate_cut_file(_SLIVER_BELOW_THRESHOLD, REFERENCE_SIZE_IN)
+    result = validate_cut_file(
+        _SLIVER_BELOW_THRESHOLD, REFERENCE_SIZE_IN, catalog_reference_size_in=REFERENCE_SIZE_IN
+    )
 
     assert result.outcome is ValidationOutcome.NEEDS_REVIEW
     finding = next(f for f in result.findings if f.kind is FindingKind.TINY_ISOLATED_SHAPE)
@@ -293,7 +325,9 @@ def test_sliver_below_threshold_is_also_a_narrow_feature() -> None:
     same piece -- this sliver is both small in area and narrow in width, so
     it carries exactly one finding of each kind, never a conflict between
     them."""
-    result = validate_cut_file(_SLIVER_BELOW_THRESHOLD, REFERENCE_SIZE_IN)
+    result = validate_cut_file(
+        _SLIVER_BELOW_THRESHOLD, REFERENCE_SIZE_IN, catalog_reference_size_in=REFERENCE_SIZE_IN
+    )
 
     assert len(result.findings) == 2
     kinds = {finding.kind for finding in result.findings}
@@ -308,7 +342,11 @@ def test_sliver_sized_piece_above_threshold_is_never_reported_as_tiny() -> None:
     width threshold (10 units), so it also carries a NARROW_FEATURE finding
     (an independent axis, not part of the three-way piece classification
     the first two assertions describe)."""
-    result = validate_cut_file(_SLIVER_SIZED_PIECE_ABOVE_THRESHOLD, REFERENCE_SIZE_IN)
+    result = validate_cut_file(
+        _SLIVER_SIZED_PIECE_ABOVE_THRESHOLD,
+        REFERENCE_SIZE_IN,
+        catalog_reference_size_in=REFERENCE_SIZE_IN,
+    )
 
     kinds = {finding.kind for finding in result.findings}
     assert FindingKind.TINY_ISOLATED_SHAPE not in kinds
@@ -317,7 +355,9 @@ def test_sliver_sized_piece_above_threshold_is_never_reported_as_tiny() -> None:
 
 
 def test_pinhole_below_threshold_yields_exactly_one_small_hole_finding() -> None:
-    result = validate_cut_file(_PINHOLE_BELOW_THRESHOLD, REFERENCE_SIZE_IN)
+    result = validate_cut_file(
+        _PINHOLE_BELOW_THRESHOLD, REFERENCE_SIZE_IN, catalog_reference_size_in=REFERENCE_SIZE_IN
+    )
 
     assert result.outcome is ValidationOutcome.NEEDS_REVIEW
     assert len(result.findings) == 1
@@ -336,7 +376,11 @@ def test_hole_above_threshold_yields_no_findings_at_all() -> None:
     """Unlike the dot/sliver "above threshold" cases, a hole has no other
     detector competing for it -- a genuinely kept hole in an otherwise
     unremarkable single piece yields nothing at all, a clean pass."""
-    result = validate_cut_file(_PINHOLE_SIZED_HOLE_ABOVE_THRESHOLD, REFERENCE_SIZE_IN)
+    result = validate_cut_file(
+        _PINHOLE_SIZED_HOLE_ABOVE_THRESHOLD,
+        REFERENCE_SIZE_IN,
+        catalog_reference_size_in=REFERENCE_SIZE_IN,
+    )
 
     assert result.outcome is ValidationOutcome.PASS
     assert result.findings == ()
@@ -353,7 +397,9 @@ def test_mutual_exclusion_across_dot_tiny_shape_and_disconnected_fragment() -> N
     part of that three-way exclusion -- so it carries a fifth finding,
     NARROW_FEATURE, on the very same piece as its own TINY_ISOLATED_SHAPE
     finding."""
-    result = validate_cut_file(_ONE_OF_EACH_KIND, REFERENCE_SIZE_IN)
+    result = validate_cut_file(
+        _ONE_OF_EACH_KIND, REFERENCE_SIZE_IN, catalog_reference_size_in=REFERENCE_SIZE_IN
+    )
 
     assert result.outcome is ValidationOutcome.NEEDS_REVIEW
     assert len(result.findings) == 5
@@ -435,7 +481,9 @@ _DUMBBELL_WIDE_NECK = (
 
 
 def test_dumbbell_with_a_narrow_neck_yields_one_narrow_feature_finding_at_the_neck() -> None:
-    result = validate_cut_file(_DUMBBELL_NARROW_NECK, REFERENCE_SIZE_IN)
+    result = validate_cut_file(
+        _DUMBBELL_NARROW_NECK, REFERENCE_SIZE_IN, catalog_reference_size_in=REFERENCE_SIZE_IN
+    )
 
     assert result.outcome is ValidationOutcome.NEEDS_REVIEW
     assert len(result.findings) == 1
@@ -460,7 +508,9 @@ def test_dumbbell_with_a_wide_neck_yields_no_narrow_feature_finding() -> None:
     """The same dumbbell, only the neck widened above the threshold: no
     NARROW_FEATURE finding -- and
     nothing else either, since this shape trips no other §9 kind."""
-    result = validate_cut_file(_DUMBBELL_WIDE_NECK, REFERENCE_SIZE_IN)
+    result = validate_cut_file(
+        _DUMBBELL_WIDE_NECK, REFERENCE_SIZE_IN, catalog_reference_size_in=REFERENCE_SIZE_IN
+    )
 
     assert result.outcome is ValidationOutcome.PASS
     assert result.findings == ()
@@ -491,7 +541,9 @@ def test_a_path_with_far_too_many_nodes_for_its_size_yields_one_excessive_comple
         b'<path d="' + jagged_d.encode() + b'"/></svg>'
     )
 
-    result = validate_cut_file(jagged_svg, REFERENCE_SIZE_IN)
+    result = validate_cut_file(
+        jagged_svg, REFERENCE_SIZE_IN, catalog_reference_size_in=REFERENCE_SIZE_IN
+    )
 
     assert result.outcome is ValidationOutcome.NEEDS_REVIEW
     assert len(result.findings) == 1
@@ -518,7 +570,9 @@ def test_a_simple_path_of_the_same_size_yields_no_excessive_complexity_finding()
         b'<path d="M0,0 L20,0 L20,20 L0,20 Z"/></svg>'
     )
 
-    result = validate_cut_file(simple_svg, REFERENCE_SIZE_IN)
+    result = validate_cut_file(
+        simple_svg, REFERENCE_SIZE_IN, catalog_reference_size_in=REFERENCE_SIZE_IN
+    )
 
     kinds = {finding.kind for finding in result.findings}
     assert FindingKind.EXCESSIVE_COMPLEXITY not in kinds
@@ -545,10 +599,82 @@ def test_a_small_plain_square_below_the_min_perimeter_yields_no_finding_even_tho
         b'<path d="M0,0 L2,0 L2,2 L0,2 Z"/></svg>'
     )
 
-    result = validate_cut_file(small_square_svg, REFERENCE_SIZE_IN)
+    result = validate_cut_file(
+        small_square_svg, REFERENCE_SIZE_IN, catalog_reference_size_in=REFERENCE_SIZE_IN
+    )
 
     assert result.outcome is ValidationOutcome.PASS
     assert result.findings == ()
+
+
+def _jagged_square_svg(side: float) -> bytes:
+    """A ``side``-unit square whose top edge is a 40-tooth sawtooth of tiny
+    (0.05-unit) amplitude: 44 nodes, far more than a plain square needs, in
+    this file's usual 300x100 viewBox."""
+    teeth = 40
+    points = ["M0,0"]
+    for i in range(teeth):
+        y = 0.05 if i % 2 == 0 else -0.05
+        points.append(f"L{side * i / teeth:.4f},{y:.4f}")
+    points.append(f"L{side},0 L{side},{side} L0,{side} Z")
+    return (
+        b'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 100" width="300" height="100">'
+        b'<path d="' + " ".join(points).encode() + b'"/></svg>'
+    )
+
+
+def _complexity_findings(
+    svg: bytes, reference_size_in: float, catalog_size_in: float
+) -> list[Finding]:
+    result = validate_cut_file(svg, reference_size_in, catalog_reference_size_in=catalog_size_in)
+    return [f for f in result.findings if f.kind is FindingKind.EXCESSIVE_COMPLEXITY]
+
+
+def test_excessive_complexity_depends_on_the_catalog_size_not_the_validation_size() -> None:
+    """ADR 0010: a cut file is traced once at the catalog size, so its node
+    density is judged there. The same SVG validated at 3in, 1in or 9in with
+    a 3in catalog size yields the same complexity finding and value; only
+    changing the catalog size changes it (by exactly the size ratio)."""
+    svg = _jagged_square_svg(20)
+
+    at_catalog, at_small, at_large = (
+        _complexity_findings(svg, size, catalog_size_in=3.0) for size in (3.0, 1.0, 9.0)
+    )
+
+    assert len(at_catalog) == 1
+    assert at_small == at_catalog
+    assert at_large == at_catalog
+    assert at_catalog[0].measured_value == pytest.approx(54.7001)
+
+    at_larger_catalog = _complexity_findings(svg, 3.0, catalog_size_in=9.0)
+    assert len(at_larger_catalog) == 1
+    assert at_larger_catalog[0].measured_value == pytest.approx(54.7001 / 3, abs=1e-3)
+
+
+def test_the_min_perimeter_exemption_is_judged_at_the_catalog_size() -> None:
+    """A 10-unit jagged square: perimeter ~0.40in at a 3in catalog size
+    (below ``excessive_complexity_min_perimeter_in``, so density is exempt),
+    ~1.21in at 9in (judged, and ~36 nodes/in would trip). Validating at 9in
+    with a 3in catalog keeps the exemption; validating at 3in with a 9in
+    catalog does not."""
+    svg = _jagged_square_svg(10)
+
+    assert _complexity_findings(svg, 9.0, catalog_size_in=3.0) == []
+
+    judged = _complexity_findings(svg, 3.0, catalog_size_in=9.0)
+    assert len(judged) == 1
+    assert judged[0].threshold == pytest.approx(THRESHOLDS["excessive_complexity_max_nodes_per_in"])
+
+
+def test_every_other_detector_still_judges_at_the_validation_size() -> None:
+    """Only excessive_complexity moves to the catalog size: the narrow
+    dumbbell neck (0.05in at 3in) is judged at the size being validated, so
+    at 9in it is 0.15in and passes whatever the catalog size is."""
+    at_three = validate_cut_file(_DUMBBELL_NARROW_NECK, 3.0, catalog_reference_size_in=9.0)
+    at_nine = validate_cut_file(_DUMBBELL_NARROW_NECK, 9.0, catalog_reference_size_in=3.0)
+
+    assert [f.kind for f in at_three.findings] == [FindingKind.NARROW_FEATURE]
+    assert at_nine.findings == ()
 
 
 def test_the_absolute_node_cap_still_applies_to_a_piece_below_the_min_perimeter() -> None:

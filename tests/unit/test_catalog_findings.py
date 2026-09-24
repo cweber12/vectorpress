@@ -47,6 +47,7 @@ def _report(**overrides: object) -> FindingsReport:
         "validated_file": "ochre-sea-star-cut.svg",
         "content_hash": sha256_bytes(SVG_BYTES),
         "reference_size_in": 3.0,
+        "excessive_complexity_reference_size_in": 3.0,
         "thresholds": {},
         "result": ValidationOutcome.NEEDS_REVIEW,
         "findings": (_finding(),),
@@ -82,6 +83,23 @@ def test_findings_report_lives_beside_the_derivative_never_inside_it(tmp_path: P
     data = json.loads(path.read_text(encoding="utf-8"))
     assert data["content_hash"] == report.content_hash
     assert data["reference_size_in"] == 3.0
+
+
+def test_a_report_written_before_adr_0010_reads_its_complexity_size_as_its_reference_size(
+    tmp_path: Path,
+) -> None:
+    """A report from before ``excessive_complexity_reference_size_in``
+    existed measured complexity at its own reference size."""
+    report = _report(reference_size_in=1.0, excessive_complexity_reference_size_in=1.0)
+    write_findings_report(tmp_path, report)
+    path = findings_path(tmp_path, report.validated_file)
+    data = json.loads(path.read_text(encoding="utf-8"))
+    del data["excessive_complexity_reference_size_in"]
+    path.write_text(json.dumps(data), encoding="utf-8")
+
+    reread = read_findings_report(tmp_path, report.validated_file)
+
+    assert reread == report
 
 
 def test_a_pass_report_with_no_findings_round_trips_too(tmp_path: Path) -> None:

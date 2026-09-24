@@ -115,7 +115,9 @@ def validate_asset_cut_file(
         )
 
     try:
-        validation = validate_cut_file(svg_bytes, reference_size_in)
+        validation = validate_cut_file(
+            svg_bytes, reference_size_in, catalog_reference_size_in=config.reference_size_in
+        )
     except Exception as exc:  # any parse failure is a reported §35 validation failure, not a crash
         return AssetValidationResult(
             asset_id=asset.id,
@@ -135,6 +137,7 @@ def validate_asset_cut_file(
             validated_file=filename,
             content_hash=sha256_bytes(svg_bytes),
             reference_size_in=reference_size_in,
+            excessive_complexity_reference_size_in=config.reference_size_in,
             thresholds=dict(THRESHOLDS),
             result=validation.outcome,
             findings=validation.findings,

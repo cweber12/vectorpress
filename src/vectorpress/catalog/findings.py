@@ -85,11 +85,17 @@ class FindingsReport:
     and ``thresholds`` are recorded verbatim (§9.1's "the reference size
     used should be recorded with the validation result") so a later change
     to either is detectable the same way a recipe change is for provenance.
+
+    ``excessive_complexity_reference_size_in`` is the catalog reference size
+    that kind alone was measured at (ADR 0010) -- equal to
+    ``reference_size_in`` for a catalog-default report, the catalog default
+    for a product-size one.
     """
 
     validated_file: str
     content_hash: str
     reference_size_in: float
+    excessive_complexity_reference_size_in: float
     thresholds: dict[str, float]
     result: ValidationOutcome
     findings: tuple[Finding, ...]
@@ -218,6 +224,7 @@ def _report_payload(report: FindingsReport) -> bytes:
         "validated_file": report.validated_file,
         "content_hash": report.content_hash,
         "reference_size_in": report.reference_size_in,
+        "excessive_complexity_reference_size_in": report.excessive_complexity_reference_size_in,
         "thresholds": report.thresholds,
         "result": report.result.value,
         "findings": [finding_to_dict(finding) for finding in report.findings],
@@ -239,6 +246,11 @@ def read_findings_report(
         validated_file=data["validated_file"],
         content_hash=data["content_hash"],
         reference_size_in=data["reference_size_in"],
+        # A report written before ADR 0010 lacks the key; every such report
+        # measured complexity at its own reference size.
+        excessive_complexity_reference_size_in=data.get(
+            "excessive_complexity_reference_size_in", data["reference_size_in"]
+        ),
         thresholds=data["thresholds"],
         result=ValidationOutcome(data["result"]),
         findings=tuple(_finding_from_dict(f) for f in data["findings"]),

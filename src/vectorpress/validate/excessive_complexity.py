@@ -2,12 +2,22 @@
 
 A path whose node count is out of proportion to its own physical size is
 hard to cut cleanly and hard for a human to review or hand-edit -- the
-measure is **nodes per inch of perimeter** at the reference size (§9.1): a
+measure is **nodes per inch of perimeter** at the *catalog's* reference size
+(§9.1, ADR 0010): a
 piece's own authored node count (:attr:`~vectorpress.validate._pieces.
 Piece.node_count` -- every ``Move``/``Line``/curve/``Arc`` segment, never
 the fixed-step curve *sampling* :func:`vectorpress.validate._svg_document.
 flatten_subpath` produces) divided by its own flattened perimeter's
 physical length.
+
+**Measured at the catalog reference size, not the size being validated at**
+(ADR 0010): a cut file is traced once, at the catalog default (ADR 0009), so
+its node count is fixed by that size. Judging density at a smaller product
+size would inflate it by exactly the size ratio -- every outline would read
+as more complex purely from being printed smaller -- so both the density and
+its ``min_perimeter_in`` exemption take the catalog scale, whatever reference
+size every other detector is judging at. The absolute cap is a count and
+needs no scale at all.
 
 **Density alone grows without bound as a piece shrinks**: a plain 4-6 node
 dot or sliver a few hundredths of an inch across already reads as "tens of
@@ -73,13 +83,14 @@ def _perimeter(ring: tuple[tuple[float, float], ...]) -> float:
 
 def detect(
     pieces: list[Piece],
-    scale_user_units_per_inch: float,
+    catalog_scale_user_units_per_inch: float,
     max_nodes_per_inch: float,
     min_perimeter_in: float,
     max_node_count: float,
 ) -> list[Finding]:
     """One finding per piece whose node density (nodes per physical inch of
-    its own perimeter, §9.1) exceeds ``max_nodes_per_inch`` -- judged only
+    its own perimeter at the catalog reference size, §9.1, ADR 0010 --
+    ``catalog_scale_user_units_per_inch`` user units per inch) exceeds ``max_nodes_per_inch`` -- judged only
     when the piece's own perimeter is at or above ``min_perimeter_in``, so a
     piece too small for "per inch" to mean anything is never judged by
     density at all -- or whose raw node count exceeds ``max_node_count``
@@ -92,7 +103,7 @@ def detect(
     """
     findings: list[Finding] = []
     for piece in pieces:
-        perimeter_in = _perimeter(piece.outer_ring) / scale_user_units_per_inch
+        perimeter_in = _perimeter(piece.outer_ring) / catalog_scale_user_units_per_inch
         nodes_per_inch = piece.node_count / perimeter_in if perimeter_in > 0 else 0.0
         density_judged = perimeter_in >= min_perimeter_in
 

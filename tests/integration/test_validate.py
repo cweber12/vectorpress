@@ -179,7 +179,7 @@ def test_owl_limpets_detached_piece_is_flagged_at_its_own_real_bbox(
     monkeypatch.chdir(temp_catalog_root)
     runner.invoke(app, ["generate", "--all"])
     svg_path = _derived_dir(temp_catalog_root, "owl_limpet") / "owl-limpet-cut.svg"
-    expected = validate_cut_file(svg_path.read_bytes(), 3.0)
+    expected = validate_cut_file(svg_path.read_bytes(), 3.0, catalog_reference_size_in=3.0)
     assert len(expected.findings) == 1  # sanity: the fixture really has one extra piece
     expected_bbox = expected.findings[0].location
     assert expected_bbox is not None
@@ -733,6 +733,60 @@ def test_validate_with_product_resolves_the_products_reference_size(
     assert sized_report.reference_size_in == 1.0
 
 
+def _complexity_values(
+    root: Path, asset_id: str, filename: str, at_size: float | None
+) -> list[float | None]:
+    report = read_findings_report(_derived_dir(root, asset_id), filename, at_size=at_size)
+    assert report is not None
+    return [f.measured_value for f in report.findings if f.kind is FindingKind.EXCESSIVE_COMPLEXITY]
+
+
+@pytest.mark.integration
+def test_excessive_complexity_is_judged_at_the_catalog_size_under_a_product_override(
+    monkeypatch: pytest.MonkeyPatch, temp_catalog_root: Path
+) -> None:
+    """Issue #52, ADR 0010: the cut file is traced at the catalog's 3in
+    default, so ``excessive_complexity`` is judged there even under
+    ``kelp_forest_mini_pack``'s 1in override. ``coralline_algae`` reads the
+    same ~13.4 nodes/in at both sizes; the real-art subjects, whose density
+    used to rise ~3x at 1in, are never flagged for complexity. Their other
+    1in findings (the urchin's narrow spines) are still judged at 1in."""
+    monkeypatch.chdir(temp_catalog_root)
+    runner.invoke(app, ["generate", "--all"])
+    assert runner.invoke(app, ["validate", "--all"]).exit_code == 0
+    at_product = runner.invoke(app, ["validate", "--all", "--product", "kelp_forest_mini_pack"])
+    assert at_product.exit_code == 0, at_product.output
+    assert "(excessive_complexity at the 3in catalog size)" in at_product.stdout
+
+    coralline_default = _complexity_values(
+        temp_catalog_root, "coralline_algae", "coralline-algae-cut.svg", None
+    )
+    coralline_product = _complexity_values(
+        temp_catalog_root, "coralline_algae", "coralline-algae-cut.svg", 1.0
+    )
+    assert len(coralline_default) == 1
+    assert coralline_product == coralline_default
+    assert coralline_default[0] == pytest.approx(13.4, abs=0.05)
+
+    for asset_id, filename in [
+        ("ochre_sea_star", "ochre-sea-star-cut.svg"),
+        ("giant_green_anemone", "giant-green-anemone-cut.svg"),
+        ("purple_sea_urchin", "purple-sea-urchin-cut.svg"),
+    ]:
+        assert _complexity_values(temp_catalog_root, asset_id, filename, None) == []
+        assert _complexity_values(temp_catalog_root, asset_id, filename, 1.0) == []
+
+    urchin = read_findings_report(
+        _derived_dir(temp_catalog_root, "purple_sea_urchin"),
+        "purple-sea-urchin-cut.svg",
+        at_size=1.0,
+    )
+    assert urchin is not None
+    assert urchin.reference_size_in == 1.0
+    assert urchin.excessive_complexity_reference_size_in == 3.0
+    assert FindingKind.NARROW_FEATURE in {f.kind for f in urchin.findings}
+
+
 @pytest.mark.integration
 def test_validate_with_product_never_touches_the_catalog_default_report(
     monkeypatch: pytest.MonkeyPatch, temp_catalog_root: Path
@@ -885,7 +939,7 @@ def test_every_generated_fixture_cut_file_trips_none_of_issue_41s_five_kinds(
     for asset_id, filename in FIXTURE_CUT_FILES:
         svg_bytes = read_derivative_bytes(_derived_dir(temp_catalog_root, asset_id), filename)
         assert svg_bytes is not None, asset_id
-        result = validate_cut_file(svg_bytes, 3.0)
+        result = validate_cut_file(svg_bytes, 3.0, catalog_reference_size_in=3.0)
         tripped = {finding.kind for finding in result.findings} & ISSUE_41_KINDS
         assert not tripped, (asset_id, tripped)
 
