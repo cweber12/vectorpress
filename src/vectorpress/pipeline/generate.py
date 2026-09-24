@@ -44,11 +44,11 @@ from vectorpress.pipeline.registry import get_generator
 def _effective_parameters(recipe: Recipe, config: CatalogConfig | None) -> Mapping[str, object]:
     """``recipe.parameters``, augmented with catalog-level values a
     generator needs but that are not part of a recipe's own static
-    declaration (issue #36): currently only ``cut_svg``'s reference size --
-    its cleanup thresholds are physical (§9.1), and the reference size they
-    are measured against is a catalog setting (a later issue adds a product
-    override), not something ``domain.recipe`` has any business knowing
-    about (ADR 0006).
+    declaration: currently only ``cut_svg``'s reference size -- its cleanup
+    thresholds are physical (§9.1), and the reference size they are measured
+    against is the catalog default, never a product override (ADR 0009), and
+    not something ``domain.recipe`` has any business knowing about (ADR
+    0006).
 
     ``config`` is ``None`` for a caller with no catalog in hand at all (a
     unit test exercising generation directly against a fabricated asset
