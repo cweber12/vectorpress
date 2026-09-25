@@ -140,7 +140,7 @@ def test_status_reports_the_collection_count(monkeypatch: pytest.MonkeyPatch) ->
     result = runner.invoke(app, ["status"])
 
     assert result.exit_code == 0
-    assert "Collections: 2" in result.stdout
+    assert "Collections: 3" in result.stdout
 
 
 def test_status_reports_the_product_count(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -553,7 +553,7 @@ def test_asset_with_missing_source_file_lists_the_problem_with_file_and_field(
     assert "missing.png" in result.output
 
 
-def test_collections_lists_both_fixture_collections_with_slug_name_and_form(
+def test_collections_lists_every_fixture_collection_with_slug_name_and_form(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.chdir(FIXTURE_CATALOG_ROOT)
@@ -564,6 +564,7 @@ def test_collections_lists_both_fixture_collections_with_slug_name_and_form(
     for slug, name, form in [
         ("pacific_coast_tide_pool", "Pacific Coast Tide Pool", "explicit"),
         ("kelp_forest_ecosystem", "Kelp Forest Ecosystem", "rule"),
+        ("pacific_coast_marine", "Pacific Coast Marine", "mixed"),
     ]:
         assert slug in result.stdout
         assert name in result.stdout
@@ -586,7 +587,8 @@ def test_collections_member_count_column_reflects_current_resolution(
 ) -> None:
     """The explicit fixture collection resolves to 3 members; the rule
     collection resolves to 1 (purple_sea_urchin, the only fixture asset
-    whose ecosystems include "Kelp forest")."""
+    whose ecosystems include "Kelp forest"); the union collection resolves
+    to 4 -- the de-duplicated union of both plus turban_snail (§13)."""
     monkeypatch.chdir(FIXTURE_CATALOG_ROOT)
 
     result = runner.invoke(app, ["collections"])
@@ -595,6 +597,7 @@ def test_collections_member_count_column_reflects_current_resolution(
     lines = {line.split("\t")[0]: line for line in result.stdout.splitlines() if line.strip()}
     assert lines["pacific_coast_tide_pool"].split("\t")[-1] == "3"
     assert lines["kelp_forest_ecosystem"].split("\t")[-1] == "1"
+    assert lines["pacific_coast_marine"].split("\t")[-1] == "4"
 
 
 # --- vpress collection <slug> (§11, §34) -------------------------------------------
@@ -628,6 +631,32 @@ def test_collection_on_the_fixture_lists_exactly_the_kelp_forest_asset_as_rule(
     assert result.exit_code == 0, result.output
     assert "Members: 1" in result.stdout
     assert "purple_sea_urchin\trule" in result.stdout
+
+
+def test_collection_on_the_fixture_union_lists_the_deduplicated_members(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Acceptance criterion 1: ``pacific_coast_marine`` -- a union of
+    ``pacific_coast_tide_pool`` and ``kelp_forest_ecosystem`` plus
+    ``turban_snail`` explicitly -- lists the de-duplicated members of both
+    collections; ``purple_sea_urchin``, in both, appears once with both
+    "via" ways in (§13)."""
+    monkeypatch.chdir(FIXTURE_CATALOG_ROOT)
+
+    result = runner.invoke(app, ["collection", "pacific_coast_marine"])
+
+    assert result.exit_code == 0, result.output
+    assert "Membership form: mixed" in result.stdout
+    assert "Members: 4" in result.stdout
+    assert "turban_snail\texplicit" in result.stdout
+    assert "ochre_sea_star\tvia pacific_coast_tide_pool" in result.stdout
+    assert "giant_green_anemone\tvia pacific_coast_tide_pool" in result.stdout
+    urchin_line = next(
+        line for line in result.stdout.splitlines() if line.strip().startswith("purple_sea_urchin")
+    )
+    assert "via kelp_forest_ecosystem" in urchin_line
+    assert "via pacific_coast_tide_pool" in urchin_line
+    assert "Reference problems: none" in result.stdout
 
 
 def test_collection_header_shows_the_rule_field_and_values(

@@ -192,14 +192,17 @@ wave logo, downscaled to 300x300 and committed as-is. Populated by issue #3.
 
 ## Collections
 
-Two valid collections (§11, ADR 0008), populated by issue #5:
+Three valid collections (§11, §13, ADR 0008), resolved live by
+`domain`/`catalog`'s `collection_resolution` (ADR 0011):
 
 - `pacific_coast_tide_pool` — explicit membership, listing all three fixture
   assets by ID.
 - `kelp_forest_ecosystem` — rule-based membership, matching assets whose
   `ecosystems` include "Kelp forest" (currently `purple_sea_urchin`).
-  Resolving the rule into actual members is PRD 5's job; this fixture only
-  exercises shape.
+- `pacific_coast_marine` — mixed membership: `turban_snail` explicitly, plus
+  a union of the two collections above, recursively resolved and
+  de-duplicated. `purple_sea_urchin` is in both, so it appears once here,
+  with both `via` ways in.
 
 ## Products
 

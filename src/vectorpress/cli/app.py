@@ -1357,7 +1357,7 @@ def collections(ctx: typer.Context) -> None:
     known_assets = load_assets(root, config).assets
 
     for loaded in inventory.collections:
-        resolved = resolve_collection(loaded, config, known_assets)
+        resolved = resolve_collection(loaded, config, known_assets, inventory.collections)
         typer.echo(
             f"{loaded.slug}\t{loaded.name}\t{loaded.membership.form.value}\t{len(resolved.members)}"
         )

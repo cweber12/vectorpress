@@ -30,13 +30,14 @@ def _collection_toml(root: Path, slug: str) -> Path:
     return root / "collections" / f"{slug}.toml"
 
 
-def test_fixture_catalog_loads_two_valid_collections() -> None:
+def test_fixture_catalog_loads_three_valid_collections() -> None:
     config = load_catalog_config(FIXTURE_CATALOG_ROOT)
 
     inventory = load_collections(FIXTURE_CATALOG_ROOT, config)
 
     assert [c.slug for c in inventory.collections] == [
         "kelp_forest_ecosystem",
+        "pacific_coast_marine",
         "pacific_coast_tide_pool",
     ]
     assert inventory.problems == []
@@ -188,7 +189,7 @@ def test_toml_syntax_error_is_a_problem_naming_the_file(catalog_copy: Path) -> N
 
     inventory = load_collections(catalog_copy, config)
 
-    assert len(inventory.collections) == 1
+    assert len(inventory.collections) == 2
     assert len(inventory.problems) == 1
     assert "kelp_forest_ecosystem" in str(inventory.problems[0].path)
 
@@ -236,7 +237,7 @@ def test_committed_fixture_catalog_is_unmodified_by_mutating_tests() -> None:
 
     inventory = load_collections(FIXTURE_CATALOG_ROOT, config)
 
-    assert len(inventory.collections) == 2
+    assert len(inventory.collections) == 3
     assert inventory.problems == []
 
 

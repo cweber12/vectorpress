@@ -1,7 +1,8 @@
 """catalog.collection_resolution: wiring the domain's pure membership
-resolution (explicit list and rule) to a loaded catalog's assets and
-collections, and turning unknown explicit asset IDs into reference problems
-(§11, §12, §34).
+resolution (explicit list, rule, and collection union) to a loaded
+catalog's assets and collections, and turning an unknown explicit asset ID,
+an unknown collection slug, or a cycle into a reference problem (§11, §12,
+§13, §34).
 """
 
 import shutil
@@ -12,6 +13,7 @@ import pytest
 from vectorpress.catalog.assets import load_assets
 from vectorpress.catalog.collection_resolution import (
     MEMBERSHIP_ASSET_IDS_FIELD,
+    MEMBERSHIP_COLLECTION_SLUGS_FIELD,
     collection_toml_path,
     lookup_and_resolve_collection,
     resolve_collection,
@@ -73,7 +75,7 @@ def test_resolving_the_explicit_fixture_collection_lists_exactly_its_three_membe
     assert collection is not None
 
     resolved = resolve_collection(
-        collection, config, known_assets=_known_assets(*PACIFIC_COAST_MEMBERS)
+        collection, config, known_assets=_known_assets(*PACIFIC_COAST_MEMBERS), known_collections=[]
     )
 
     assert {member.asset_id for member in resolved.members} == PACIFIC_COAST_MEMBERS
@@ -93,7 +95,9 @@ def test_resolving_the_rule_fixture_collection_lists_the_kelp_forest_asset() -> 
     assert collection is not None
     known_assets = load_assets(FIXTURE_CATALOG_ROOT, config).assets
 
-    resolved = resolve_collection(collection, config, known_assets=known_assets)
+    resolved = resolve_collection(
+        collection, config, known_assets=known_assets, known_collections=[]
+    )
 
     assert [member.asset_id for member in resolved.members] == ["purple_sea_urchin"]
     assert resolved.members[0].ways_in == (WayIn(WayInKind.RULE),)
@@ -107,7 +111,7 @@ def test_a_rule_matching_no_asset_resolves_to_no_members_and_no_problem() -> Non
     assert collection is not None
 
     resolved = resolve_collection(
-        collection, config, known_assets=_known_assets("some_other_asset")
+        collection, config, known_assets=_known_assets("some_other_asset"), known_collections=[]
     )
 
     assert resolved.members == []
@@ -131,7 +135,7 @@ def test_an_unknown_asset_id_is_a_reference_problem_and_the_rest_still_resolve(
     assert collection is not None
 
     resolved = resolve_collection(
-        collection, config, known_assets=_known_assets(*PACIFIC_COAST_MEMBERS)
+        collection, config, known_assets=_known_assets(*PACIFIC_COAST_MEMBERS), known_collections=[]
     )
 
     assert {member.asset_id for member in resolved.members} == PACIFIC_COAST_MEMBERS
@@ -154,7 +158,10 @@ def test_an_asset_id_whose_own_file_failed_to_load_is_also_a_reference_problem()
     # purple_sea_urchin omitted from known_assets, as if its own asset.toml
     # had failed to load.
     resolved = resolve_collection(
-        collection, config, known_assets=_known_assets("ochre_sea_star", "giant_green_anemone")
+        collection,
+        config,
+        known_assets=_known_assets("ochre_sea_star", "giant_green_anemone"),
+        known_collections=[],
     )
 
     assert {member.asset_id for member in resolved.members} == {
@@ -175,7 +182,9 @@ def test_resolve_collections_gathers_every_collections_own_problems(catalog_copy
     inventory = load_collections(catalog_copy, config)
 
     resolved_all = resolve_collections(
-        inventory.collections, config, known_assets=_known_assets(*PACIFIC_COAST_MEMBERS)
+        inventory.collections,
+        config,
+        known_assets=_known_assets(*PACIFIC_COAST_MEMBERS, "turban_snail"),
     )
 
     total_problems = [p for r in resolved_all for p in r.reference_problems]
@@ -210,13 +219,219 @@ def test_mixed_membership_lists_the_deduplicated_union_with_both_ways_in(
 
     known_assets = load_assets(catalog_copy, config).assets
 
-    resolved = resolve_collection(collection, config, known_assets=known_assets)
+    resolved = resolve_collection(
+        collection, config, known_assets=known_assets, known_collections=[]
+    )
 
     members_by_id = {member.asset_id: member.ways_in for member in resolved.members}
     assert members_by_id == {
         "owl_limpet": (WayIn(WayInKind.EXPLICIT),),
         "purple_sea_urchin": (WayIn(WayInKind.EXPLICIT), WayIn(WayInKind.RULE)),
     }
+
+
+# --- union and mixed collections: membership.collection_slugs (§11, §13) ----------
+
+
+def _write_collection_toml(root: Path, slug: str, membership_toml: str) -> None:
+    """A minimal, valid collection file naming only the parts a union test
+    needs to vary."""
+    path = _collection_toml(root, slug)
+    path.write_text(
+        f'name = "{slug}"\n'
+        f'description = "test collection"\n'
+        f'marketplace_category = "Nature & Wildlife"\n\n'
+        f"{membership_toml}\n",
+        encoding="utf-8",
+    )
+
+
+def test_resolving_the_union_fixture_collection_lists_the_deduplicated_members(
+    catalog_copy: Path,
+) -> None:
+    """``pacific_coast_marine`` unions ``pacific_coast_tide_pool`` and
+    ``kelp_forest_ecosystem`` plus ``turban_snail`` explicitly:
+    ``purple_sea_urchin`` -- a member of both unioned collections -- appears
+    once, with both "via" ways in (§13), the acceptance walkthrough ``vpress
+    collection pacific_coast_marine`` runs."""
+    config = load_catalog_config(catalog_copy)
+    inventory = load_collections(catalog_copy, config)
+    collection = find_collection(inventory, "pacific_coast_marine")
+    assert collection is not None
+    known_assets = load_assets(catalog_copy, config).assets
+
+    resolved = resolve_collection(collection, config, known_assets, inventory.collections)
+
+    members_by_id = {member.asset_id: member.ways_in for member in resolved.members}
+    assert members_by_id == {
+        "turban_snail": (WayIn(WayInKind.EXPLICIT),),
+        "ochre_sea_star": (WayIn(WayInKind.VIA, "pacific_coast_tide_pool"),),
+        "giant_green_anemone": (WayIn(WayInKind.VIA, "pacific_coast_tide_pool"),),
+        "purple_sea_urchin": (
+            WayIn(WayInKind.VIA, "kelp_forest_ecosystem"),
+            WayIn(WayInKind.VIA, "pacific_coast_tide_pool"),
+        ),
+    }
+    assert resolved.reference_problems == []
+
+
+def test_a_newly_added_matching_asset_appears_in_the_union_without_editing_either_file(
+    catalog_copy: Path,
+) -> None:
+    """Adding a new kelp-forest asset to the catalog makes it appear in
+    ``pacific_coast_marine`` too -- through ``kelp_forest_ecosystem``'s own
+    live rule resolution -- without touching either collection's file
+    (§11, §12, §13)."""
+    kelp_before = _collection_toml(catalog_copy, "kelp_forest_ecosystem").read_text(
+        encoding="utf-8"
+    )
+    marine_before = _collection_toml(catalog_copy, "pacific_coast_marine").read_text(
+        encoding="utf-8"
+    )
+    source_dir = catalog_copy / "assets" / "bat_star"
+    new_dir = catalog_copy / "assets" / "sunflower_star"
+    shutil.copytree(source_dir, new_dir)
+    asset_toml = new_dir / "asset.toml"
+    original = asset_toml.read_text(encoding="utf-8")
+    target = 'ecosystems = ["Subtidal", "Rocky reef"]'
+    assert target in original  # guards against a silent no-op if bat_star's fixture changes
+    asset_toml.write_text(
+        original.replace(target, 'ecosystems = ["kelp forest"]'), encoding="utf-8"
+    )
+    config = load_catalog_config(catalog_copy)
+    inventory = load_collections(catalog_copy, config)
+    collection = find_collection(inventory, "pacific_coast_marine")
+    assert collection is not None
+    known_assets = load_assets(catalog_copy, config).assets
+
+    resolved = resolve_collection(collection, config, known_assets, inventory.collections)
+
+    assert "sunflower_star" in {member.asset_id for member in resolved.members}
+    assert (
+        _collection_toml(catalog_copy, "kelp_forest_ecosystem").read_text(encoding="utf-8")
+        == kelp_before
+    )
+    assert (
+        _collection_toml(catalog_copy, "pacific_coast_marine").read_text(encoding="utf-8")
+        == marine_before
+    )
+
+
+def test_an_unknown_collection_slug_is_a_reference_problem_and_the_rest_still_resolve(
+    catalog_copy: Path,
+) -> None:
+    path = _collection_toml(catalog_copy, "pacific_coast_marine")
+    target = 'collection_slugs = ["pacific_coast_tide_pool", "kelp_forest_ecosystem"]'
+    text = path.read_text(encoding="utf-8")
+    assert target in text
+    path.write_text(
+        text.replace(
+            target,
+            'collection_slugs = ["pacific_coast_tide_pool", "kelp_forest_ecosystem",'
+            ' "not_a_real_collection"]',
+        ),
+        encoding="utf-8",
+    )
+    config = load_catalog_config(catalog_copy)
+    inventory = load_collections(catalog_copy, config)
+    collection = find_collection(inventory, "pacific_coast_marine")
+    assert collection is not None
+    known_assets = load_assets(catalog_copy, config).assets
+
+    resolved = resolve_collection(collection, config, known_assets, inventory.collections)
+
+    assert {member.asset_id for member in resolved.members} >= PACIFIC_COAST_MEMBERS
+    assert len(resolved.reference_problems) == 1
+    problem = resolved.reference_problems[0]
+    assert problem.path == Path("collections") / "pacific_coast_marine.toml"
+    assert problem.field == MEMBERSHIP_COLLECTION_SLUGS_FIELD
+    assert "not_a_real_collection" in problem.message
+
+
+def test_a_union_slug_whose_own_file_failed_to_load_is_also_a_reference_problem(
+    catalog_copy: Path,
+) -> None:
+    """A collection slug named in a union is unknown two ways: a slug no
+    file names at all (the test above), or a slug whose own file exists but
+    failed to load -- absent from ``known_collections`` either way, so it
+    reads the same as a genuinely unknown slug. The rest of the union (here,
+    the tide-pool collection's own members) still resolves."""
+    path = _collection_toml(catalog_copy, "kelp_forest_ecosystem")
+    target = 'name = "Kelp Forest Ecosystem"'
+    text = path.read_text(encoding="utf-8")
+    assert target in text
+    path.write_text(text.replace(target, "name = unterminated"), encoding="utf-8")
+    config = load_catalog_config(catalog_copy)
+    inventory = load_collections(catalog_copy, config)
+    assert find_collection(inventory, "kelp_forest_ecosystem") is None  # confirms it failed to load
+    collection = find_collection(inventory, "pacific_coast_marine")
+    assert collection is not None
+    known_assets = load_assets(catalog_copy, config).assets
+
+    resolved = resolve_collection(collection, config, known_assets, inventory.collections)
+
+    assert {member.asset_id for member in resolved.members} >= PACIFIC_COAST_MEMBERS
+    assert len(resolved.reference_problems) == 1
+    problem = resolved.reference_problems[0]
+    assert problem.path == Path("collections") / "pacific_coast_marine.toml"
+    assert problem.field == MEMBERSHIP_COLLECTION_SLUGS_FIELD
+    assert "unknown collection: 'kelp_forest_ecosystem'" in problem.message
+
+
+def test_a_self_cycle_terminates_and_is_a_reference_problem(catalog_copy: Path) -> None:
+    _write_collection_toml(catalog_copy, "loop", '[membership]\ncollection_slugs = ["loop"]')
+    config = load_catalog_config(catalog_copy)
+    inventory = load_collections(catalog_copy, config)
+    collection = find_collection(inventory, "loop")
+    assert collection is not None
+
+    resolved = resolve_collection(
+        collection, config, known_assets=[], known_collections=inventory.collections
+    )
+
+    assert resolved.members == []
+    assert len(resolved.reference_problems) == 1
+    problem = resolved.reference_problems[0]
+    assert problem.field == MEMBERSHIP_COLLECTION_SLUGS_FIELD
+    assert "loop -> loop" in problem.message
+
+
+def test_a_two_collection_cycle_terminates_and_is_a_reference_problem(catalog_copy: Path) -> None:
+    _write_collection_toml(catalog_copy, "cycle_a", '[membership]\ncollection_slugs = ["cycle_b"]')
+    _write_collection_toml(catalog_copy, "cycle_b", '[membership]\ncollection_slugs = ["cycle_a"]')
+    config = load_catalog_config(catalog_copy)
+    inventory = load_collections(catalog_copy, config)
+    collection_a = find_collection(inventory, "cycle_a")
+    assert collection_a is not None
+
+    resolved = resolve_collection(
+        collection_a, config, known_assets=[], known_collections=inventory.collections
+    )
+
+    assert resolved.members == []
+    assert len(resolved.reference_problems) == 1
+    assert "cycle_a -> cycle_b -> cycle_a" in resolved.reference_problems[0].message
+
+
+def test_resolve_collections_resolves_the_union_within_the_same_catalog_pass() -> None:
+    """``resolve_collections`` (plural) supplies every collection it loaded
+    as the ``known_collections`` each one's union resolves against, so
+    ``vpress status``/``vpress attention`` see a fully resolved union with
+    no extra wiring."""
+    config = load_catalog_config(FIXTURE_CATALOG_ROOT)
+    inventory = load_collections(FIXTURE_CATALOG_ROOT, config)
+    known_assets = load_assets(FIXTURE_CATALOG_ROOT, config).assets
+
+    resolved_all = resolve_collections(inventory.collections, config, known_assets)
+
+    marine = next(r for r in resolved_all if r.collection.slug == "pacific_coast_marine")
+    assert {member.asset_id for member in marine.members} == {
+        "turban_snail",
+        "ochre_sea_star",
+        "giant_green_anemone",
+        "purple_sea_urchin",
+    }
+    assert marine.reference_problems == []
 
 
 # --- collection_toml_path -----------------------------------------------------------
