@@ -29,7 +29,8 @@ from pathlib import Path
 from vectorpress.catalog.assets import asset_dir
 from vectorpress.catalog.derivatives import select_source
 from vectorpress.catalog.findings import FindingsReport, write_findings_report
-from vectorpress.catalog.provenance import DERIVED_DIRNAME, read_derivative_bytes, sha256_bytes
+from vectorpress.catalog.overrides import effective_derivative, ensure_override_provenance
+from vectorpress.catalog.provenance import DERIVED_DIRNAME, sha256_bytes
 from vectorpress.domain.asset import Asset
 from vectorpress.domain.catalog_config import CatalogConfig
 from vectorpress.domain.derivative_state import DerivativeState
@@ -63,7 +64,9 @@ class AssetValidationResult:
     qualifies, so there is no filename to name at all).
     ``reason`` is set for ``IMPOSSIBLE`` (why no source qualifies) and
     ``FAILED`` (the parse error). ``validation`` is set exactly when
-    ``outcome`` is ``VALIDATED``.
+    ``outcome`` is ``VALIDATED``. ``is_override`` is true exactly when
+    ``VALIDATED`` checked the override rather than the generated file
+    (§6.8, CONTEXT.md "Effective derivative").
     """
 
     asset_id: str
@@ -71,6 +74,7 @@ class AssetValidationResult:
     filename: str | None = None
     reason: str | None = None
     validation: ValidationResult | None = None
+    is_override: bool = False
 
 
 def validate_asset_cut_file(
@@ -85,6 +89,17 @@ def validate_asset_cut_file(
     explicitly into validation functions" -- the caller decides which
     reference size applies, typically via :func:`vectorpress.domain.
     reference_size.resolve_reference_size_in`.
+
+    Checks the *effective* derivative (§6.8, CONTEXT.md "Effective
+    derivative"): the override under ``overrides/`` when one exists for
+    ``cut_svg``, else the generated file under ``derived/`` --
+    :func:`~vectorpress.catalog.overrides.effective_derivative` is the one
+    place every consumer resolves that through. An override's findings
+    report is persisted at its own coexisting path
+    (:func:`vectorpress.catalog.findings.findings_path`'s ``is_override``),
+    so it never overwrites or is overwritten by the generated file's own
+    report, and this also records the override's provenance the first time
+    it is seen (:func:`~vectorpress.catalog.overrides.ensure_override_provenance`).
 
     The findings report is persisted at the catalog-default path
     (``<file>.findings.json``, unchanged from before issue #38) exactly when
@@ -104,15 +119,20 @@ def validate_asset_cut_file(
         )
 
     filename = derivative_filename(asset.display_name, DerivativeType.CUT_SVG)
-    derived_dir = asset_dir(root, config, asset.id) / DERIVED_DIRNAME
+    asset_dir_path = asset_dir(root, config, asset.id)
+    derived_dir = asset_dir_path / DERIVED_DIRNAME
 
-    svg_bytes = read_derivative_bytes(derived_dir, filename)
-    if svg_bytes is None:
+    effective = effective_derivative(asset_dir_path, filename)
+    if effective is None:
         return AssetValidationResult(
             asset_id=asset.id,
             outcome=AssetValidationOutcome.MISSING,
             filename=filename,
         )
+    svg_bytes = effective.bytes
+
+    if effective.is_override:
+        ensure_override_provenance(asset, asset_dir_path, recipe, filename, svg_bytes)
 
     try:
         validation = validate_cut_file(
@@ -124,6 +144,7 @@ def validate_asset_cut_file(
             outcome=AssetValidationOutcome.FAILED,
             filename=filename,
             reason=str(exc),
+            is_override=effective.is_override,
         )
 
     # The catalog-default path stays exactly what it was before issue #38
@@ -143,6 +164,7 @@ def validate_asset_cut_file(
             findings=validation.findings,
         ),
         at_size=at_size,
+        is_override=effective.is_override,
     )
 
     return AssetValidationResult(
@@ -150,4 +172,5 @@ def validate_asset_cut_file(
         outcome=AssetValidationOutcome.VALIDATED,
         filename=filename,
         validation=validation,
+        is_override=effective.is_override,
     )

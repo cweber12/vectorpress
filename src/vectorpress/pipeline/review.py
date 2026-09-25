@@ -16,8 +16,14 @@ from enum import StrEnum
 from pathlib import Path
 
 from vectorpress.catalog.assets import asset_dir
-from vectorpress.catalog.provenance import DERIVED_DIRNAME, read_derivative_bytes, sha256_bytes
-from vectorpress.catalog.status import asset_derivative_status, write_status
+from vectorpress.catalog.overrides import (
+    effective_derivative,
+    effective_derivative_status,
+    ensure_override_provenance,
+    write_override_status,
+)
+from vectorpress.catalog.provenance import DERIVED_DIRNAME, sha256_bytes
+from vectorpress.catalog.status import write_status
 from vectorpress.domain.asset import Asset
 from vectorpress.domain.catalog_config import CatalogConfig
 from vectorpress.domain.derivative_state import DerivativeState
@@ -32,17 +38,25 @@ def _reviewable_output_hash(
     asset_dir_path: Path,
     derivative_type: DerivativeType,
     config: CatalogConfig | None,
-) -> tuple[str | None, str | None]:
-    """The output hash of ``derivative_type`` to write a status against, or
-    the reason it cannot be reviewed right now (§10): shared by
+) -> tuple[str | None, bool, str | None]:
+    """The output hash of the *effective* derivative of ``derivative_type``
+    to write a status against, whether it is an override, or the reason it
+    cannot be reviewed right now (§6.8, §10): shared by
     :func:`approve_derivative`, :func:`reject_derivative` and
     :func:`regenerate_derivative`, since all three need the same answer to
-    "does this derivative have a file to attach a status to."
+    "does this derivative have a file to attach a status to, and which
+    status store does that status belong in."
 
-    A derivative type with no recipe yet, or one that is ``missing`` or
-    ``impossible`` for this asset, has no output file -- an error. A
-    ``current`` or ``stale`` derivative (its output file exists either way)
-    can be reviewed.
+    A derivative type with no recipe yet, or one whose *generated* file is
+    ``missing`` or ``impossible`` for this asset, has no output file -- an
+    error, even when an override happens to sit under ``overrides/`` with no
+    generated counterpart (this PRD slice gates reviewability on the
+    generated file's own state, the same as before overrides existed). A
+    ``current`` or ``stale`` generated derivative can be reviewed; when an
+    override is present for it, this resolves to the override instead
+    (CONTEXT.md "Effective derivative") and, as a side effect, records the
+    override's provenance the first time it is seen (:func:`~vectorpress.
+    catalog.overrides.ensure_override_provenance`).
     """
     status = next(
         (
@@ -53,15 +67,19 @@ def _reviewable_output_hash(
         None,
     )
     if status is None:
-        return None, f"{derivative_type.value} has no recipe yet"
+        return None, False, f"{derivative_type.value} has no recipe yet"
     if status.state not in (DerivativeState.CURRENT, DerivativeState.STALE):
-        return None, f"{derivative_type.value} is {status.state.value}"
+        return None, False, f"{derivative_type.value} is {status.state.value}"
 
     assert status.output_filename is not None  # CURRENT/STALE always carry a filename
-    derived_dir = asset_dir_path / DERIVED_DIRNAME
-    output_bytes = read_derivative_bytes(derived_dir, status.output_filename)
-    assert output_bytes is not None  # CURRENT/STALE means the file exists on disk
-    return sha256_bytes(output_bytes), None
+    effective = effective_derivative(asset_dir_path, status.output_filename)
+    assert effective is not None  # CURRENT/STALE means the generated file exists on disk
+
+    if effective.is_override:
+        ensure_override_provenance(
+            asset, asset_dir_path, RECIPES[derivative_type], status.output_filename, effective.bytes
+        )
+    return sha256_bytes(effective.bytes), effective.is_override, None
 
 
 class ApproveOutcome(StrEnum):
@@ -100,18 +118,25 @@ def approve_derivative(
     error, nothing written. Approving a repeat of an already-approved,
     unchanged derivative writes nothing new (the same idempotence
     :func:`~vectorpress.catalog.status.write_status` gives every status
-    write).
+    write). When an override exists, this approves *it* instead of the
+    generated file (§6.8, CONTEXT.md "Effective derivative"), writing to
+    the override's own status store
+    (:func:`~vectorpress.catalog.overrides.write_override_status`) so the
+    generated file's own status is untouched.
     """
-    output_hash, error = _reviewable_output_hash(asset, asset_dir_path, derivative_type, config)
+    output_hash, is_override, error = _reviewable_output_hash(
+        asset, asset_dir_path, derivative_type, config
+    )
     if output_hash is None:
         assert error is not None  # _reviewable_output_hash always pairs one with the other
         return ApproveResult(ApproveOutcome.ERROR, error)
 
-    write_status(
-        asset_dir_path / DERIVED_DIRNAME,
-        derivative_type,
-        StatusRecord(status=Status.APPROVED, note=note, output_hash=output_hash),
-    )
+    record = StatusRecord(status=Status.APPROVED, note=note, output_hash=output_hash)
+    derived_dir = asset_dir_path / DERIVED_DIRNAME
+    if is_override:
+        write_override_status(derived_dir, derivative_type, record)
+    else:
+        write_status(derived_dir, derivative_type, record)
     return ApproveResult(ApproveOutcome.APPROVED, None)
 
 
@@ -146,18 +171,22 @@ def reject_derivative(
 
     Same eligibility as :func:`approve_derivative`: a derivative type with
     no recipe yet, or one that is ``missing`` or ``impossible``, is an
-    error, nothing written.
+    error, nothing written. Same effective-derivative targeting too: an
+    override, when present, is what gets rejected.
     """
-    output_hash, error = _reviewable_output_hash(asset, asset_dir_path, derivative_type, config)
+    output_hash, is_override, error = _reviewable_output_hash(
+        asset, asset_dir_path, derivative_type, config
+    )
     if output_hash is None:
         assert error is not None  # _reviewable_output_hash always pairs one with the other
         return RejectResult(RejectOutcome.ERROR, error)
 
-    write_status(
-        asset_dir_path / DERIVED_DIRNAME,
-        derivative_type,
-        StatusRecord(status=Status.REJECTED, note=note, output_hash=output_hash),
-    )
+    record = StatusRecord(status=Status.REJECTED, note=note, output_hash=output_hash)
+    derived_dir = asset_dir_path / DERIVED_DIRNAME
+    if is_override:
+        write_override_status(derived_dir, derivative_type, record)
+    else:
+        write_status(derived_dir, derivative_type, record)
     return RejectResult(RejectOutcome.REJECTED, None)
 
 
@@ -199,18 +228,26 @@ def regenerate_derivative(
 
     Same eligibility as :func:`approve_derivative`: a derivative type with
     no recipe yet, or one that is ``missing`` or ``impossible``, is an
-    error, nothing written.
+    error, nothing written. Same effective-derivative targeting too: marking
+    an overridden type for regeneration marks the override's own status --
+    it does not force the override itself to be regenerated (overrides are
+    never overwritten, §6.8); ``vpress generate`` only ever reads the
+    *generated* file's own status (:func:`~vectorpress.pipeline.generate.
+    _regenerate_requested`), never ``overrides/``.
     """
-    output_hash, error = _reviewable_output_hash(asset, asset_dir_path, derivative_type, config)
+    output_hash, is_override, error = _reviewable_output_hash(
+        asset, asset_dir_path, derivative_type, config
+    )
     if output_hash is None:
         assert error is not None  # _reviewable_output_hash always pairs one with the other
         return RegenerateResult(RegenerateOutcome.ERROR, error)
 
-    write_status(
-        asset_dir_path / DERIVED_DIRNAME,
-        derivative_type,
-        StatusRecord(status=Status.REGENERATE, note=note, output_hash=output_hash),
-    )
+    record = StatusRecord(status=Status.REGENERATE, note=note, output_hash=output_hash)
+    derived_dir = asset_dir_path / DERIVED_DIRNAME
+    if is_override:
+        write_override_status(derived_dir, derivative_type, record)
+    else:
+        write_status(derived_dir, derivative_type, record)
     return RegenerateResult(RegenerateOutcome.REGENERATE, None)
 
 
@@ -271,9 +308,11 @@ def select_review_targets(
     one skip entry per asset in scope, the bulk equivalent of the "has no
     recipe yet" error a single-target action gives. ``status`` narrows to
     derivatives whose *current* status (ADR 0004's "status follows the
-    bytes", the same computation ``vpress asset`` displays) matches; a
-    derivative excluded by ``status`` is not named -- narrowing further is
-    not a problem to report, unlike missing or impossible.
+    bytes", the same computation ``vpress asset`` displays) matches -- the
+    override's own status when one is present (CONTEXT.md "Effective
+    derivative"), else the generated file's; a derivative excluded by
+    ``status`` is not named -- narrowing further is not a problem to report,
+    unlike missing or impossible.
     """
     targets: list[ReviewTarget] = []
     skipped: list[SkippedTarget] = []
@@ -286,7 +325,6 @@ def select_review_targets(
             continue
 
         asset_dir_path = asset_dir(root, config, asset.id)
-        derived_dir = asset_dir_path / DERIVED_DIRNAME
         for derivative_status in asset_derivative_statuses(asset, asset_dir_path, config):
             if (
                 derivative_type is not None
@@ -303,10 +341,12 @@ def select_review_targets(
 
             assert derivative_status.output_filename is not None  # CURRENT/STALE carry a filename
             if status is not None:
-                output_bytes = read_derivative_bytes(derived_dir, derivative_status.output_filename)
-                assert output_bytes is not None  # CURRENT/STALE means the file exists on disk
-                record = asset_derivative_status(
-                    derived_dir, derivative_status.derivative_type, output_bytes
+                effective = effective_derivative(asset_dir_path, derivative_status.output_filename)
+                assert (
+                    effective is not None
+                )  # CURRENT/STALE means the generated file exists on disk
+                record = effective_derivative_status(
+                    asset_dir_path, derivative_status.derivative_type, effective
                 )
                 if record.status is not status:
                     continue
@@ -338,19 +378,19 @@ def count_derivative_statuses(
     Only a derivative that exists on disk (``current`` or ``stale``) has a
     status to count; ``missing`` and ``impossible`` derivatives contribute
     nothing, the same as :func:`~vectorpress.catalog.derivatives.tally_derivative_states`
-    does for state counts.
+    does for state counts. An overridden type counts the override's own
+    status (CONTEXT.md "Effective derivative"), not the generated file's.
     """
     counts = dict.fromkeys(Status, 0)
     for asset in assets:
         asset_dir_path = asset_dir(root, config, asset.id)
-        derived_dir = asset_dir_path / DERIVED_DIRNAME
         for status in asset_derivative_statuses(asset, asset_dir_path, config):
             if status.state not in (DerivativeState.CURRENT, DerivativeState.STALE):
                 continue
             assert status.output_filename is not None  # CURRENT/STALE always carry a filename
-            output_bytes = read_derivative_bytes(derived_dir, status.output_filename)
-            assert output_bytes is not None  # CURRENT/STALE means the file exists on disk
-            record = asset_derivative_status(derived_dir, status.derivative_type, output_bytes)
+            effective = effective_derivative(asset_dir_path, status.output_filename)
+            assert effective is not None  # CURRENT/STALE means the generated file exists on disk
+            record = effective_derivative_status(asset_dir_path, status.derivative_type, effective)
             counts[record.status] += 1
     return StatusCounts(
         needs_review=counts[Status.NEEDS_REVIEW],

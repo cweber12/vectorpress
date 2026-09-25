@@ -51,27 +51,42 @@ _FINDINGS_SUFFIX = ".findings.json"
 _SIZED_FINDINGS_INFIX = ".findings.at-"
 _SIZED_FINDINGS_SUFFIX = "in.json"
 
+#: An override's findings report (ADR 0007's "validated the same way as
+#: generated files") is keyed by this infix instead, so it coexists
+#: beside the generated derivative's own report rather than colliding with
+#: or overwriting it -- the effective derivative's findings currency follows
+#: the override's bytes, never the generated file's.
+_OVERRIDE_FINDINGS_INFIX = ".override"
+
 
 def findings_path(
-    derived_dir: Path, validated_filename: str, *, at_size: float | None = None
+    derived_dir: Path,
+    validated_filename: str,
+    *,
+    at_size: float | None = None,
+    is_override: bool = False,
 ) -> Path:
     """Where one derivative's findings report lives, beside it.
 
-    ``at_size`` is ``None`` for the one report every existing caller already
-    reads and writes -- ``<name>.findings.json``, byte-identical to before
-    this issue (issue #38's "the catalog-default report must stay
-    byte-identical where it is"). Given a reference size, the path is keyed
+    ``is_override`` (§6.8) selects the override's own coexisting report
+    instead of the generated derivative's -- the effective derivative is
+    validated the same way either way, only the path differs, so the two
+    never collide and neither invalidates the other. ``at_size`` is ``None``
+    for the one report every existing caller already reads and writes --
+    ``<name>.findings.json`` (``<name>.override.findings.json`` when
+    ``is_override``), unchanged for the non-override case (issue #38's "the
+    catalog-default report must stay byte-identical where it is"). Given a
+    reference size, the path is keyed
     by it instead (``<name>.findings.at-<size>in.json``), so a report
     computed at any other size than the caller's usual one coexists beside
-    it rather than colliding with or overwriting it.
+    it rather than colliding with or overwriting it; both keys combine when
+    both apply.
     """
+    stem = f"{validated_filename}{_OVERRIDE_FINDINGS_INFIX}" if is_override else validated_filename
     if at_size is None:
-        return derived_dir / f"{validated_filename}{_FINDINGS_SUFFIX}"
+        return derived_dir / f"{stem}{_FINDINGS_SUFFIX}"
     size_token = format_number(at_size)
-    return (
-        derived_dir
-        / f"{validated_filename}{_SIZED_FINDINGS_INFIX}{size_token}{_SIZED_FINDINGS_SUFFIX}"
-    )
+    return derived_dir / f"{stem}{_SIZED_FINDINGS_INFIX}{size_token}{_SIZED_FINDINGS_SUFFIX}"
 
 
 @dataclass(frozen=True)
@@ -233,12 +248,16 @@ def _report_payload(report: FindingsReport) -> bytes:
 
 
 def read_findings_report(
-    derived_dir: Path, validated_filename: str, *, at_size: float | None = None
+    derived_dir: Path,
+    validated_filename: str,
+    *,
+    at_size: float | None = None,
+    is_override: bool = False,
 ) -> FindingsReport | None:
     """The findings report for one derivative, or ``None`` if it has never
-    been validated at that path (issue #38's ``at_size``, see
-    :func:`findings_path`)."""
-    path = findings_path(derived_dir, validated_filename, at_size=at_size)
+    been validated at that path (issue #38's ``at_size``, ``is_override``
+    per §6.8, see :func:`findings_path`)."""
+    path = findings_path(derived_dir, validated_filename, at_size=at_size, is_override=is_override)
     if not path.is_file():
         return None
     data = json.loads(path.read_text(encoding="utf-8"))
@@ -258,7 +277,11 @@ def read_findings_report(
 
 
 def write_findings_report(
-    derived_dir: Path, report: FindingsReport, *, at_size: float | None = None
+    derived_dir: Path,
+    report: FindingsReport,
+    *,
+    at_size: float | None = None,
+    is_override: bool = False,
 ) -> None:
     """Persist one findings report (§35, §36, issue #37).
 
@@ -271,8 +294,13 @@ def write_findings_report(
     (issue #38, see :func:`findings_path`) -- the caller already knows
     whether this report is "the" catalog-default one or a size-keyed one;
     this never re-derives that from ``report.reference_size_in`` itself,
-    since a product's override can equal the catalog default too."""
-    path = findings_path(derived_dir, report.validated_file, at_size=at_size)
+    since a product's override can equal the catalog default too.
+    ``is_override`` (§6.8) selects the override's own coexisting path
+    instead of the generated derivative's -- the caller already knows which
+    file it validated."""
+    path = findings_path(
+        derived_dir, report.validated_file, at_size=at_size, is_override=is_override
+    )
     payload = _report_payload(report)
     if not (path.is_file() and path.read_bytes() == payload):
         atomic_write_bytes(path, payload)
@@ -308,13 +336,16 @@ def findings_currency(
     svg_bytes: bytes,
     reference_size_in: float,
     thresholds: Mapping[str, float],
+    *,
+    is_override: bool = False,
 ) -> FindingsCurrency:
     """A findings report is current iff its recorded content hash,
     reference size and thresholds all match ``svg_bytes``,
     ``reference_size_in`` and ``thresholds`` as given (issue #37's "A
     findings report is current iff its recorded SVG hash, reference size and
-    threshold identity all match")."""
-    report = read_findings_report(derived_dir, validated_filename)
+    threshold identity all match"). ``is_override`` (§6.8) checks the
+    override's own coexisting report instead of the generated derivative's."""
+    report = read_findings_report(derived_dir, validated_filename, is_override=is_override)
     if report is None:
         return FindingsCurrency(FindingsCurrencyState.NOT_VALIDATED, None)
 
