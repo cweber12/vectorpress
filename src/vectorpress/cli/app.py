@@ -39,12 +39,14 @@ from vectorpress.domain.asset import Asset
 from vectorpress.domain.catalog_config import CatalogConfig
 from vectorpress.domain.derivative_state import DerivativeState
 from vectorpress.domain.derivative_type import DerivativeType, derivative_filename
+from vectorpress.domain.eligibility import EligibilityResult
 from vectorpress.domain.finding import Finding, ValidationOutcome
 from vectorpress.domain.numeric_format import format_number
 from vectorpress.domain.product import Product
 from vectorpress.domain.recipe import RECIPES
 from vectorpress.domain.reference_size import resolve_reference_size_in
 from vectorpress.domain.status import Status
+from vectorpress.pipeline.eligibility import asset_eligibility_for, possible_derivative_types
 from vectorpress.pipeline.generate import (
     DerivativeStatus,
     GenerationOutcome,
@@ -360,13 +362,39 @@ def _echo_stale_override_resolutions(asset_id: str, derivative_type: DerivativeT
     )
 
 
+def _echo_eligibility(derivative_types: list[DerivativeType], result: EligibilityResult) -> None:
+    """``vpress asset``'s eligibility section (§10, §10.1): eligible or
+    blocked for the shown set of types, one indented line per blocking
+    reason, then every warning -- ``none`` when there are none, so scripts
+    have a fixed line to grep for either way."""
+    type_list = ", ".join(derivative_type.value for derivative_type in derivative_types)
+    typer.echo(f"Eligibility ({type_list}): {result.eligibility.value}")
+    for reason in result.blocking_reasons:
+        typer.echo(f"  {reason}")
+    if result.warnings:
+        typer.echo("Warnings:")
+        for warning in result.warnings:
+            typer.echo(f"  {warning}")
+    else:
+        typer.echo("Warnings: none")
+
+
 @app.command()
 def asset(
     ctx: typer.Context,
     asset_id: str = typer.Argument(help="The asset's ID (its folder name under assets/)."),
+    types: str | None = typer.Option(
+        None,
+        "--types",
+        help=(
+            "Comma-separated derivative types to show eligibility for "
+            "(default: every type this asset can have)."
+        ),
+    ),
 ) -> None:
-    """Show one asset: metadata, sources with their roles, and each
-    derivative type's state (current, stale, missing or impossible).
+    """Show one asset: metadata, sources with their roles, each derivative
+    type's state (current, stale, missing or impossible), and publication
+    eligibility.
 
     The cut_svg line also shows its findings result: pass, needs review,
     findings stale, or not validated. A type overridden under overrides/
@@ -376,6 +404,11 @@ def asset(
     suggesting the three resolutions: keep, re-edit, or discard. A file
     under overrides/ that matches no derivative type is reported, never an
     error. An asset that failed to load shows its metadata problems instead.
+
+    Eligibility (§10, §10.1) covers every derivative type this asset can
+    have (not impossible) by default, or --types's comma-separated list
+    instead: blocked names one reason per cause, and any warnings (which
+    never block) follow.
     """
     root, config = _locate_and_load_config(ctx)
     found = _lookup_asset_or_exit(load_assets(root, config), config, asset_id)
@@ -440,6 +473,14 @@ def asset(
         typer.echo("Unrecognized overrides:")
         for name in unrecognized:
             typer.echo(f"  {name}\tignored")
+
+    requested_types = (
+        _parse_types_option_or_exit(types)
+        if types is not None
+        else possible_derivative_types(found, asset_dir_path, config)
+    )
+    result = asset_eligibility_for(found, asset_dir_path, requested_types, config)
+    _echo_eligibility(requested_types, result)
 
 
 def _select_targets(
@@ -550,6 +591,19 @@ def _parse_derivative_type_or_exit(value: str) -> DerivativeType:
     except ValueError:
         typer.echo(f"Unknown derivative type: {value!r}", err=True)
         raise typer.Exit(code=1) from None
+
+
+def _parse_types_option_or_exit(value: str) -> list[DerivativeType]:
+    """``vpress asset --types``'s comma-separated list, parsed and
+    validated (§10.1): each name goes through
+    :func:`_parse_derivative_type_or_exit`, so an unknown one exits 1 the
+    same way a single-target ``approve``/``reject``/``regenerate`` does."""
+    names = [part.strip() for part in value.split(",") if part.strip()]
+    if not names:
+        raise typer.BadParameter(
+            "--types must name at least one derivative type.", param_hint="--types"
+        )
+    return [_parse_derivative_type_or_exit(name) for name in names]
 
 
 def _parse_status_or_exit(value: str) -> Status:

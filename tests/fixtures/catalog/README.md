@@ -80,7 +80,11 @@ images tagged with a role (§4.1, ADR 0003):
   default 3in reference size (about 0.15in against a 0.2in threshold). Its cut
   file's findings report holds exactly one finding: `accidental_dot`. Its
   `ecosystems` deliberately match neither fixture collection, the same as
-  `owl_limpet`/`acorn_barnacle`.
+  `owl_limpet`/`acorn_barnacle`. Also the permanently rights-blocked fixture
+  for publication eligibility (§10.1): `rights_status = "do_not_publish"`, so
+  approving every one of its derivatives still leaves it blocked, unlike
+  `acorn_barnacle`, whose derivatives can never become approved effective
+  derivatives at all.
 - `bat_star` — a `silhouette` source only, on its own larger (300x300) canvas: the
   `tiny_isolated_shape` fixture (issue #39). A main body plus one small, detached
   rectangle -- a broken-off arm tip, 7px wide by 20px long -- wide enough to
@@ -148,10 +152,10 @@ images tagged with a role (§4.1, ADR 0003):
   half-written output, no corrupted provenance, and every other asset's derivatives
   generate normally. Its `ecosystems` deliberately match neither fixture collection
   (`kelp_forest_ecosystem`'s rule, or `pacific_coast_tide_pool`'s explicit list), so
-  it never becomes a collection member by accident. A later PRD that adds
-  publication blocking gets a permanently-blocked asset from this one for free
-  (its derivatives can never become approved effective derivatives), with no extra
-  fixture setup.
+  it never becomes a collection member by accident. Its derivatives can never
+  become approved effective derivatives at all, which publication eligibility
+  (§10.1) also blocks on -- distinct from `gumboot_chiton`'s rights block
+  above, which stays blocked even once every derivative is approved.
 
 Populated by PRD 1. Each `silhouette.png` is a real shape on a transparent
 background, not a solid-color square: the transparent PNG generator's crop-to-content

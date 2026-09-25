@@ -409,6 +409,58 @@ def test_asset_lists_derivatives_for_the_asset_with_a_flatcolor_source(
     assert "flatcolor_svg\tmissing\tflatcolor.png (flatcolor)" in result.stdout
 
 
+def test_asset_default_eligibility_covers_every_type_the_asset_can_have(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """ochre_sea_star has a flatcolor source, so all four recipe-bearing
+    types are non-impossible and shown by default (§10.1)."""
+    monkeypatch.chdir(FIXTURE_CATALOG_ROOT)
+
+    result = runner.invoke(app, ["asset", "ochre_sea_star"])
+
+    assert result.exit_code == 0
+    eligibility_line = next(
+        line for line in result.stdout.splitlines() if line.startswith("Eligibility")
+    )
+    assert eligibility_line.startswith(
+        "Eligibility (transparent_png, silhouette_svg, cut_svg, flatcolor_svg):"
+    )
+
+
+def test_asset_with_types_option_narrows_eligibility_to_the_named_types(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.chdir(FIXTURE_CATALOG_ROOT)
+
+    result = runner.invoke(app, ["asset", "purple_sea_urchin", "--types", "transparent_png"])
+
+    assert result.exit_code == 0
+    assert "Eligibility (transparent_png): blocked" in result.stdout
+    assert "transparent_png: missing" in result.stdout
+
+
+def test_asset_with_an_unknown_type_in_types_exits_non_zero_and_names_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.chdir(FIXTURE_CATALOG_ROOT)
+
+    result = runner.invoke(app, ["asset", "ochre_sea_star", "--types", "not_a_real_type"])
+
+    assert result.exit_code == 1
+    assert "not_a_real_type" in result.output
+
+
+def test_asset_with_an_empty_types_option_is_a_usage_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.chdir(FIXTURE_CATALOG_ROOT)
+
+    result = runner.invoke(app, ["asset", "ochre_sea_star", "--types", " , "])
+
+    assert result.exit_code == 2
+    assert "Usage:" in result.output
+
+
 def test_asset_with_unknown_id_exits_non_zero_and_names_the_id(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
