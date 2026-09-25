@@ -1,12 +1,14 @@
-"""Resolving a loaded collection into its current members (§11, §34, ADR 0011).
+"""Resolving a loaded collection into its current members (§11, §12, §34,
+ADR 0011).
 
 Reads nothing beyond what catalog loading already read, and writes nothing
 (ADR 0005): this wires the domain's pure :func:`~vectorpress.domain.
-collection_resolution.resolve_explicit` to the assets and collections the
-``catalog`` layer already loaded, and turns an unknown asset ID into a
-:class:`~vectorpress.catalog.metadata_problem.MetadataProblem` naming the
-collection's file and the ``membership.asset_ids`` field -- a reference
-problem does not stop the rest of the collection's members from resolving.
+collection_resolution.resolve_membership` to the assets and collections the
+``catalog`` layer already loaded, and turns an unknown explicit asset ID
+into a :class:`~vectorpress.catalog.metadata_problem.MetadataProblem`
+naming the collection's file and the ``membership.asset_ids`` field -- a
+reference problem does not stop the rest of the collection's members from
+resolving. A rule matching no asset is not a reference problem.
 
 A reference problem is just a :class:`~vectorpress.catalog.metadata_problem.
 MetadataProblem`: file, field, message. Any other unresolved reference a
@@ -19,10 +21,10 @@ from pathlib import Path
 
 from vectorpress.catalog.collections import CollectionInventory, find_collection
 from vectorpress.catalog.metadata_problem import MetadataProblem
-from vectorpress.domain.asset import AssetId
+from vectorpress.domain.asset import Asset
 from vectorpress.domain.catalog_config import CatalogConfig
 from vectorpress.domain.collection import Collection, CollectionSlug
-from vectorpress.domain.collection_resolution import ResolvedMember, resolve_explicit
+from vectorpress.domain.collection_resolution import ResolvedMember, resolve_membership
 
 COLLECTION_CONFIG_SUFFIX = ".toml"
 
@@ -38,9 +40,9 @@ class ResolvedCollection:
     resolving it.
 
     ``members`` is sorted by asset ID (:func:`~vectorpress.domain.
-    collection_resolution.resolve_explicit`'s own order). Only
-    ``membership.asset_ids`` is resolved here; a rule or union member
-    contributes nothing yet.
+    collection_resolution.resolve_membership`'s own order). Both
+    ``membership.asset_ids`` and ``membership.rule`` are resolved here; a
+    union member contributes nothing yet.
     """
 
     collection: Collection
@@ -57,32 +59,33 @@ def collection_toml_path(config: CatalogConfig, slug: CollectionSlug) -> Path:
 
 
 def resolve_collection(
-    collection: Collection, config: CatalogConfig, known_asset_ids: set[AssetId]
+    collection: Collection, config: CatalogConfig, known_assets: list[Asset]
 ) -> ResolvedCollection:
     """Resolve one loaded collection's membership into its current members.
 
-    ``known_asset_ids`` is every asset ID that actually loaded (never a
-    failed one, per ``resolve_explicit``'s own contract) -- the catalog
-    layer's ``{asset.id for asset in loaded_assets}``.
+    ``known_assets`` is every asset that actually loaded (never a failed
+    one) -- the catalog layer's ``loaded_assets`` -- supplying both the ID
+    set the explicit list resolves against and the classification values a
+    rule matches against.
     """
-    explicit = resolve_explicit(collection.membership.asset_ids, known_asset_ids)
+    resolution = resolve_membership(collection.membership, known_assets)
     path = collection_toml_path(config, collection.slug)
     reference_problems = [
         MetadataProblem(path, MEMBERSHIP_ASSET_IDS_FIELD, f"unknown asset ID: {asset_id!r}")
-        for asset_id in explicit.unknown_asset_ids
+        for asset_id in resolution.unknown_asset_ids
     ]
     return ResolvedCollection(
-        collection=collection, members=explicit.members, reference_problems=reference_problems
+        collection=collection, members=resolution.members, reference_problems=reference_problems
     )
 
 
 def resolve_collections(
-    collections: list[Collection], config: CatalogConfig, known_asset_ids: set[AssetId]
+    collections: list[Collection], config: CatalogConfig, known_assets: list[Asset]
 ) -> list[ResolvedCollection]:
     """Resolve every loaded collection (``vpress status``'s and ``vpress
     attention``'s catalog-wide reference problems; ``vpress collections``'
     member-count column)."""
-    return [resolve_collection(c, config, known_asset_ids) for c in collections]
+    return [resolve_collection(c, config, known_assets) for c in collections]
 
 
 @dataclass(frozen=True)
@@ -104,7 +107,7 @@ class CollectionResolutionLookup:
 def lookup_and_resolve_collection(
     inventory: CollectionInventory,
     config: CatalogConfig,
-    known_asset_ids: set[AssetId],
+    known_assets: list[Asset],
     slug: CollectionSlug,
 ) -> CollectionResolutionLookup:
     """Resolve one collection slug, distinguishing "no such file" from
@@ -119,5 +122,5 @@ def lookup_and_resolve_collection(
         return CollectionResolutionLookup(resolved=None, problems=problems)
 
     return CollectionResolutionLookup(
-        resolved=resolve_collection(collection, config, known_asset_ids), problems=[]
+        resolved=resolve_collection(collection, config, known_assets), problems=[]
     )

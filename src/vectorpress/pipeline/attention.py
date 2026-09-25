@@ -304,8 +304,7 @@ def build_attention_report(catalog: LoadedCatalog, root: Path) -> AttentionRepor
     awaiting_review_count = 0
 
     if catalog.config is not None:
-        known_asset_ids = {asset.id for asset in catalog.assets}
-        for resolved in resolve_collections(catalog.collections, catalog.config, known_asset_ids):
+        for resolved in resolve_collections(catalog.collections, catalog.config, catalog.assets):
             reference_problems.extend(resolved.reference_problems)
 
         for asset in catalog.assets:
