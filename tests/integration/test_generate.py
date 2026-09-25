@@ -769,7 +769,13 @@ def test_generate_stale_regenerates_only_stale_and_a_second_run_regenerates_noth
             continue
         assert f"{asset_id}\tsilhouette_svg\tcurrent\t{filename}" in stale_result.stdout
     for entry, (data, mtime) in before.items():
-        if "purple-sea-urchin" in entry.name:
+        # Filtered by the asset folder in the path, not the filename: unlike
+        # a provenance/findings/output file (always named from the asset's
+        # slug), a status record's filename (``_state.json``) is generic,
+        # so a name-only filter would miss that this asset's own status
+        # legitimately changed too (its regenerated derivatives' recorded
+        # output hashes).
+        if "purple_sea_urchin" in entry.parts:
             continue
         assert entry.read_bytes() == data
         assert entry.stat().st_mtime_ns == mtime

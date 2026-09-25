@@ -25,6 +25,7 @@ from vectorpress.catalog.locate import locate_catalog_root
 from vectorpress.catalog.metadata_problem import MetadataProblem
 from vectorpress.catalog.products import load_products, lookup_product
 from vectorpress.catalog.provenance import DERIVED_DIRNAME, read_derivative_bytes
+from vectorpress.catalog.status import asset_derivative_status
 from vectorpress.domain.asset import Asset
 from vectorpress.domain.catalog_config import CatalogConfig
 from vectorpress.domain.derivative_state import DerivativeState
@@ -39,6 +40,12 @@ from vectorpress.pipeline.generate import (
     asset_derivative_statuses,
     count_derivative_states,
     generate_asset,
+)
+from vectorpress.pipeline.review import (
+    ApproveOutcome,
+    StatusCounts,
+    approve_derivative,
+    count_derivative_statuses,
 )
 from vectorpress.validate.cut_file import THRESHOLDS, validate_cut_file
 from vectorpress.validate.validate_asset import AssetValidationOutcome, validate_asset_cut_file
@@ -172,11 +179,17 @@ def status(ctx: typer.Context) -> None:
     typer.echo(f"Products: {len(catalog.products)}")
     if catalog.config is not None:
         counts = count_derivative_states(catalog.assets, root, catalog.config)
+        status_counts = count_derivative_statuses(catalog.assets, root, catalog.config)
     else:
         counts = DerivativeStateCounts(missing=0, impossible=0, stale=0)
+        status_counts = StatusCounts(needs_review=0, approved=0, rejected=0, regenerate=0)
     typer.echo(f"Missing derivatives: {counts.missing}")
     typer.echo(f"Impossible derivatives: {counts.impossible}")
     typer.echo(f"Stale derivatives: {counts.stale}")
+    typer.echo(f"Needs review: {status_counts.needs_review}")
+    typer.echo(f"Approved: {status_counts.approved}")
+    typer.echo(f"Rejected: {status_counts.rejected}")
+    typer.echo(f"Regenerate: {status_counts.regenerate}")
     _echo_problems(catalog.problems)
 
     if catalog.problems:
@@ -232,6 +245,29 @@ def _findings_display(
     return "pass" if currency.result is ValidationOutcome.PASS else "needs review"
 
 
+def _status_display(
+    status: DerivativeStatus, root: Path, config: CatalogConfig, asset_id: str
+) -> str:
+    """The status column on ``vpress asset``'s derivative line: ``needs
+    review`` / ``approved`` / ``rejected`` / ``regenerate``, with its note
+    in parentheses when one is present; empty for a derivative that does
+    not exist yet (missing or impossible -- nothing to review)."""
+    if status.state not in (DerivativeState.CURRENT, DerivativeState.STALE):
+        return ""
+
+    assert status.output_filename is not None  # CURRENT/STALE always carry a filename
+    derived_dir = asset_dir(root, config, asset_id) / DERIVED_DIRNAME
+    output_bytes = read_derivative_bytes(derived_dir, status.output_filename)
+    if output_bytes is None:
+        return ""
+
+    record = asset_derivative_status(derived_dir, status.derivative_type, output_bytes)
+    text = record.status.value.replace("_", " ")
+    if record.note:
+        text += f" ({record.note})"
+    return text
+
+
 @app.command()
 def asset(
     ctx: typer.Context,
@@ -269,6 +305,9 @@ def asset(
                 f"  {status.derivative_type.value}\t{status.state.value}\t"
                 f"{status.source.file} ({status.source.role})"
             )
+        status_text = _status_display(status, root, config, found.id)
+        if status_text:
+            line += f"\t{status_text}"
         # Only cut_svg is validated, so only its line carries a findings result.
         if status.derivative_type is DerivativeType.CUT_SVG:
             line += f"\t{_findings_display(status, root, config, found.id)}"
@@ -359,6 +398,38 @@ def generate(
     if failure_count:
         typer.echo(f"generate: {failure_count} derivative(s) failed", err=True)
         raise typer.Exit(code=1)
+
+
+@app.command()
+def approve(
+    ctx: typer.Context,
+    asset_id: str = typer.Argument(help="The asset's ID (its folder name under assets/)."),
+    derivative_type: str = typer.Argument(help="The derivative type to approve, e.g. cut_svg."),
+    note: str | None = typer.Option(
+        None, "--note", help="An optional note to record with the approval."
+    ),
+) -> None:
+    """Approve one derivative, recording it approved with an optional note.
+
+    Errors with exit 1 and writes nothing for an unknown asset, an unknown
+    derivative type, or a derivative that is missing or impossible.
+    """
+    root, config = _locate_and_load_config(ctx)
+    found = _lookup_asset_or_exit(load_assets(root, config), config, asset_id)
+
+    try:
+        parsed_type = DerivativeType(derivative_type)
+    except ValueError:
+        typer.echo(f"Unknown derivative type: {derivative_type!r}", err=True)
+        raise typer.Exit(code=1) from None
+
+    result = approve_derivative(found, asset_dir(root, config, found.id), parsed_type, note, config)
+    if result.outcome is ApproveOutcome.ERROR:
+        typer.echo(f"approve: {asset_id} {derivative_type} failed: {result.error}", err=True)
+        raise typer.Exit(code=1)
+
+    note_suffix = f"\t{note}" if note else ""
+    typer.echo(f"{asset_id}\t{derivative_type}\tapproved{note_suffix}")
 
 
 def _optional_catalog_config(ctx: typer.Context) -> CatalogConfig | None:

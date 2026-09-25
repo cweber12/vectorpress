@@ -208,11 +208,13 @@ def test_vpress_asset_shows_the_findings_result(
 
     ochre = runner.invoke(app, ["asset", "ochre_sea_star"])
     assert ochre.exit_code == 0, ochre.output
-    assert "cut_svg\tcurrent\tochre-sea-star-cut.svg\tpass" in ochre.stdout
+    # the review-status column ("needs review", never approved) sits before
+    # the findings result ("pass") -- distinct columns, PRD 4.
+    assert "cut_svg\tcurrent\tochre-sea-star-cut.svg\tneeds review\tpass" in ochre.stdout
 
     limpet = runner.invoke(app, ["asset", "owl_limpet"])
     assert limpet.exit_code == 0, limpet.output
-    assert "cut_svg\tcurrent\towl-limpet-cut.svg\tneeds review" in limpet.stdout
+    assert "cut_svg\tcurrent\towl-limpet-cut.svg\tneeds review\tneeds review" in limpet.stdout
 
 
 # --- issue #39: area-based findings (accidental dot, tiny isolated shape, small hole) -----
@@ -520,7 +522,7 @@ def test_hand_editing_the_cut_file_makes_its_findings_stale(
     validated = runner.invoke(app, ["validate", "ochre_sea_star"])
     assert validated.exit_code == 0, validated.output
     before = runner.invoke(app, ["asset", "ochre_sea_star"])
-    assert "cut_svg\tcurrent\tochre-sea-star-cut.svg\tpass" in before.stdout
+    assert "cut_svg\tcurrent\tochre-sea-star-cut.svg\tneeds review\tpass" in before.stdout
 
     svg_path = _derived_dir(temp_catalog_root, "ochre_sea_star") / "ochre-sea-star-cut.svg"
     svg_path.write_text(
@@ -531,8 +533,11 @@ def test_hand_editing_the_cut_file_makes_its_findings_stale(
     after = runner.invoke(app, ["asset", "ochre_sea_star"])
 
     assert after.exit_code == 0, after.output
-    assert "cut_svg\tstale (output changed on disk)\tochre-sea-star-cut.svg\tfindings stale" in (
-        after.stdout
+    # the derivative's own status also follows the bytes (ADR 0004): still
+    # "needs review" here since it was never approved.
+    assert (
+        "cut_svg\tstale (output changed on disk)\tochre-sea-star-cut.svg\t"
+        "needs review\tfindings stale" in after.stdout
     )
 
     revalidated = runner.invoke(app, ["validate", "ochre_sea_star"])
@@ -552,7 +557,7 @@ def test_regenerating_with_a_changed_recipe_makes_findings_stale(
     runner.invoke(app, ["generate", "--all"])
     runner.invoke(app, ["validate", "giant_green_anemone"])
     before = runner.invoke(app, ["asset", "giant_green_anemone"])
-    assert "giant-green-anemone-cut.svg\tpass" in before.stdout
+    assert "giant-green-anemone-cut.svg\tneeds review\tpass" in before.stdout
 
     original = recipe_module.RECIPES[DerivativeType.CUT_SVG]
     changed = Recipe(
@@ -813,7 +818,7 @@ def test_validate_with_product_never_touches_the_catalog_default_report(
     assert result.exit_code == 0, result.output
     assert default_path.read_bytes() == default_bytes_before
     asset_result = runner.invoke(app, ["asset", "purple_sea_urchin"])
-    assert "cut_svg\tcurrent\tpurple-sea-urchin-cut.svg\tpass" in asset_result.stdout
+    assert "cut_svg\tcurrent\tpurple-sea-urchin-cut.svg\tneeds review\tpass" in asset_result.stdout
     assert "findings stale" not in asset_result.stdout
 
 
@@ -910,7 +915,9 @@ def test_generate_still_never_validates(
     for asset_id, filename in FIXTURE_CUT_FILES:
         assert not findings_path(_derived_dir(temp_catalog_root, asset_id), filename).exists()
     asset_result = runner.invoke(app, ["asset", "ochre_sea_star"])
-    assert "cut_svg\tcurrent\tochre-sea-star-cut.svg\tnot validated" in asset_result.stdout
+    assert "cut_svg\tcurrent\tochre-sea-star-cut.svg\tneeds review\tnot validated" in (
+        asset_result.stdout
+    )
 
 
 # --- issue #41: none of the five new kinds ever trips on a generated cut file --------------

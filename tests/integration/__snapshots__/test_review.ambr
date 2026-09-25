@@ -1,0 +1,25 @@
+# serializer version: 1
+# name: test_state_json_shape_is_locked_by_snapshot
+  dict({
+    'cut_svg': dict({
+      'note': 'clean',
+      'output_hash': '8b9ba0291c089ef4877a9bbf20df3fe6834a2ee1aa63e0eb8ab71f1158b81d81',
+      'status': 'approved',
+    }),
+    'flatcolor_svg': dict({
+      'note': None,
+      'output_hash': 'a881d0505726eec97269b3b638917ac485055df2c8537e27bcdf218f38e85860',
+      'status': 'needs_review',
+    }),
+    'silhouette_svg': dict({
+      'note': None,
+      'output_hash': 'a1f6fc13887e78ba8a691285cb53f2fcfb86fec856a2225da05615249fd16a3a',
+      'status': 'needs_review',
+    }),
+    'transparent_png': dict({
+      'note': None,
+      'output_hash': '6a1fa93fdbb79bae533c9441323a0f454d72bd24658ae5d57de1057e2dfb2c04',
+      'status': 'needs_review',
+    }),
+  })
+# ---
