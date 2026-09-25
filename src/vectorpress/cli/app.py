@@ -509,6 +509,14 @@ def validate(
 
     targets = _select_targets(inventory, config, asset_id)
 
+    if reference_size_in != config.reference_size_in:
+        # Said once per run, not per asset: excessive_complexity alone is
+        # judged at the catalog size (ADR 0010).
+        typer.echo(
+            f"excessive_complexity is measured at the "
+            f"{format_number(config.reference_size_in)}in catalog size"
+        )
+
     failure_count = 0
     for target in targets:
         outcome = validate_asset_cut_file(root, config, target, reference_size_in)
@@ -536,12 +544,6 @@ def validate(
             if resolved_product is not None
             else ""
         )
-        if reference_size_in != config.reference_size_in:
-            # excessive_complexity is judged at the catalog size (ADR 0010).
-            size_note += (
-                f"\t(excessive_complexity at the "
-                f"{format_number(config.reference_size_in)}in catalog size)"
-            )
         typer.echo(f"{target.id}\tcut_svg\t{outcome.filename}\t{result_text}{size_note}")
         for finding in outcome.validation.findings:
             _echo_finding(finding)

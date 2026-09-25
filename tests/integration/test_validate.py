@@ -753,10 +753,15 @@ def test_excessive_complexity_is_judged_at_the_catalog_size_under_a_product_over
     1in findings (the urchin's narrow spines) are still judged at 1in."""
     monkeypatch.chdir(temp_catalog_root)
     runner.invoke(app, ["generate", "--all"])
-    assert runner.invoke(app, ["validate", "--all"]).exit_code == 0
+    at_default = runner.invoke(app, ["validate", "--all"])
+    assert at_default.exit_code == 0, at_default.output
+    assert "catalog size" not in at_default.stdout
     at_product = runner.invoke(app, ["validate", "--all", "--product", "kelp_forest_mini_pack"])
     assert at_product.exit_code == 0, at_product.output
-    assert "(excessive_complexity at the 3in catalog size)" in at_product.stdout
+    header = "excessive_complexity is measured at the 3in catalog size"
+    lines = at_product.stdout.splitlines()
+    assert lines[0] == header
+    assert at_product.stdout.count(header) == 1
 
     coralline_default = _complexity_values(
         temp_catalog_root, "coralline_algae", "coralline-algae-cut.svg", None
