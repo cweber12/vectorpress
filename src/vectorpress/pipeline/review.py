@@ -22,8 +22,46 @@ from vectorpress.domain.asset import Asset
 from vectorpress.domain.catalog_config import CatalogConfig
 from vectorpress.domain.derivative_state import DerivativeState
 from vectorpress.domain.derivative_type import DerivativeType
+from vectorpress.domain.recipe import RECIPES
 from vectorpress.domain.status import Status, StatusRecord
 from vectorpress.pipeline.generate import asset_derivative_statuses
+
+
+def _reviewable_output_hash(
+    asset: Asset,
+    asset_dir_path: Path,
+    derivative_type: DerivativeType,
+    config: CatalogConfig | None,
+) -> tuple[str | None, str | None]:
+    """The output hash of ``derivative_type`` to write a status against, or
+    the reason it cannot be reviewed right now (§10): shared by
+    :func:`approve_derivative`, :func:`reject_derivative` and
+    :func:`regenerate_derivative`, since all three need the same answer to
+    "does this derivative have a file to attach a status to."
+
+    A derivative type with no recipe yet, or one that is ``missing`` or
+    ``impossible`` for this asset, has no output file -- an error. A
+    ``current`` or ``stale`` derivative (its output file exists either way)
+    can be reviewed.
+    """
+    status = next(
+        (
+            s
+            for s in asset_derivative_statuses(asset, asset_dir_path, config)
+            if s.derivative_type is derivative_type
+        ),
+        None,
+    )
+    if status is None:
+        return None, f"{derivative_type.value} has no recipe yet"
+    if status.state not in (DerivativeState.CURRENT, DerivativeState.STALE):
+        return None, f"{derivative_type.value} is {status.state.value}"
+
+    assert status.output_filename is not None  # CURRENT/STALE always carry a filename
+    derived_dir = asset_dir_path / DERIVED_DIRNAME
+    output_bytes = read_derivative_bytes(derived_dir, status.output_filename)
+    assert output_bytes is not None  # CURRENT/STALE means the file exists on disk
+    return sha256_bytes(output_bytes), None
 
 
 class ApproveOutcome(StrEnum):
@@ -55,42 +93,227 @@ def approve_derivative(
 ) -> ApproveResult:
     """Approve one asset's derivative of ``derivative_type`` (§10): writes
     an ``approved`` status record against the derivative's current output
-    hash, with ``note`` if given.
+    hash, with ``note`` if given, replacing any previous note.
 
     A derivative type with no recipe yet, or one that is ``missing`` or
     ``impossible`` for this asset, has no output file to approve -- an
-    error, nothing written. A ``current`` or ``stale`` derivative (its
-    output file exists either way) can be approved; approving a repeat of
-    an already-approved, unchanged derivative writes nothing new (the same
-    idempotence :func:`~vectorpress.catalog.status.write_status` gives
-    every status write).
+    error, nothing written. Approving a repeat of an already-approved,
+    unchanged derivative writes nothing new (the same idempotence
+    :func:`~vectorpress.catalog.status.write_status` gives every status
+    write).
     """
-    status = next(
-        (
-            s
-            for s in asset_derivative_statuses(asset, asset_dir_path, config)
-            if s.derivative_type is derivative_type
-        ),
-        None,
-    )
-    if status is None:
-        return ApproveResult(ApproveOutcome.ERROR, f"{derivative_type.value} has no recipe yet")
-    if status.state not in (DerivativeState.CURRENT, DerivativeState.STALE):
-        return ApproveResult(
-            ApproveOutcome.ERROR, f"{derivative_type.value} is {status.state.value}"
-        )
-
-    assert status.output_filename is not None  # CURRENT/STALE always carry a filename
-    derived_dir = asset_dir_path / DERIVED_DIRNAME
-    output_bytes = read_derivative_bytes(derived_dir, status.output_filename)
-    assert output_bytes is not None  # CURRENT/STALE means the file exists on disk
+    output_hash, error = _reviewable_output_hash(asset, asset_dir_path, derivative_type, config)
+    if output_hash is None:
+        assert error is not None  # _reviewable_output_hash always pairs one with the other
+        return ApproveResult(ApproveOutcome.ERROR, error)
 
     write_status(
-        derived_dir,
+        asset_dir_path / DERIVED_DIRNAME,
         derivative_type,
-        StatusRecord(status=Status.APPROVED, note=note, output_hash=sha256_bytes(output_bytes)),
+        StatusRecord(status=Status.APPROVED, note=note, output_hash=output_hash),
     )
     return ApproveResult(ApproveOutcome.APPROVED, None)
+
+
+class RejectOutcome(StrEnum):
+    """One ``vpress reject`` outcome -- the same two cases as
+    :class:`ApproveOutcome`, for the ``rejected`` status instead."""
+
+    REJECTED = "rejected"
+    ERROR = "error"
+
+
+@dataclass(frozen=True)
+class RejectResult:
+    """The outcome of one reject attempt. ``error`` is set exactly when
+    ``outcome`` is :attr:`RejectOutcome.ERROR`, naming why nothing was
+    written."""
+
+    outcome: RejectOutcome
+    error: str | None
+
+
+def reject_derivative(
+    asset: Asset,
+    asset_dir_path: Path,
+    derivative_type: DerivativeType,
+    note: str | None,
+    config: CatalogConfig | None = None,
+) -> RejectResult:
+    """Reject one asset's derivative of ``derivative_type`` (§10): writes a
+    ``rejected`` status record against the derivative's current output
+    hash, with ``note`` if given, replacing any previous note.
+
+    Same eligibility as :func:`approve_derivative`: a derivative type with
+    no recipe yet, or one that is ``missing`` or ``impossible``, is an
+    error, nothing written.
+    """
+    output_hash, error = _reviewable_output_hash(asset, asset_dir_path, derivative_type, config)
+    if output_hash is None:
+        assert error is not None  # _reviewable_output_hash always pairs one with the other
+        return RejectResult(RejectOutcome.ERROR, error)
+
+    write_status(
+        asset_dir_path / DERIVED_DIRNAME,
+        derivative_type,
+        StatusRecord(status=Status.REJECTED, note=note, output_hash=output_hash),
+    )
+    return RejectResult(RejectOutcome.REJECTED, None)
+
+
+class RegenerateOutcome(StrEnum):
+    """One ``vpress regenerate`` outcome -- the same two cases as
+    :class:`ApproveOutcome`, for the ``regenerate`` status instead."""
+
+    REGENERATE = "regenerate"
+    ERROR = "error"
+
+
+@dataclass(frozen=True)
+class RegenerateResult:
+    """The outcome of one mark-for-regeneration attempt. ``error`` is set
+    exactly when ``outcome`` is :attr:`RegenerateOutcome.ERROR`, naming why
+    nothing was written."""
+
+    outcome: RegenerateOutcome
+    error: str | None
+
+
+def regenerate_derivative(
+    asset: Asset,
+    asset_dir_path: Path,
+    derivative_type: DerivativeType,
+    note: str | None,
+    config: CatalogConfig | None = None,
+) -> RegenerateResult:
+    """Mark one asset's derivative of ``derivative_type`` for regeneration
+    (§24): writes a ``regenerate`` status record against the derivative's
+    current output hash, with ``note`` if given, replacing any previous
+    note. Does **not** regenerate anything itself -- the next
+    ``vpress generate`` for this asset treats a ``regenerate``-marked
+    derivative as due for generation even when it is ``current``, as if
+    ``--force`` applied to that derivative alone
+    (:func:`~vectorpress.pipeline.generate.generate_asset`), and the
+    derivative ends up ``needs_review`` afterward whether or not its bytes
+    changed (:func:`~vectorpress.domain.status.status_after_generation`).
+
+    Same eligibility as :func:`approve_derivative`: a derivative type with
+    no recipe yet, or one that is ``missing`` or ``impossible``, is an
+    error, nothing written.
+    """
+    output_hash, error = _reviewable_output_hash(asset, asset_dir_path, derivative_type, config)
+    if output_hash is None:
+        assert error is not None  # _reviewable_output_hash always pairs one with the other
+        return RegenerateResult(RegenerateOutcome.ERROR, error)
+
+    write_status(
+        asset_dir_path / DERIVED_DIRNAME,
+        derivative_type,
+        StatusRecord(status=Status.REGENERATE, note=note, output_hash=output_hash),
+    )
+    return RegenerateResult(RegenerateOutcome.REGENERATE, None)
+
+
+@dataclass(frozen=True)
+class ReviewTarget:
+    """One (asset, derivative type) a bulk approve/reject/regenerate should
+    act on."""
+
+    asset: Asset
+    derivative_type: DerivativeType
+
+
+@dataclass(frozen=True)
+class SkippedTarget:
+    """One (asset, derivative type) a bulk approve/reject/regenerate left
+    untouched, and why -- never a failure (§10, §24: "skipped and named,
+    never failed on")."""
+
+    asset_id: str
+    derivative_type: DerivativeType
+    reason: str
+
+
+@dataclass(frozen=True)
+class TargetSelection:
+    """What a bulk approve/reject/regenerate should act on
+    (:attr:`targets`), and what it is leaving alone and why
+    (:attr:`skipped`)."""
+
+    targets: list[ReviewTarget]
+    skipped: list[SkippedTarget]
+
+
+def select_review_targets(
+    assets: Iterable[Asset],
+    root: Path,
+    config: CatalogConfig,
+    *,
+    derivative_type: DerivativeType | None = None,
+    status: Status | None = None,
+) -> TargetSelection:
+    """Every (asset, derivative type) a bulk approve/reject/regenerate acts
+    on, across ``assets`` (§10, §24) -- the targeting shape ``approve``,
+    ``reject`` and ``regenerate`` share: one asset's every existing
+    derivative (``assets`` holding just that one asset, ``derivative_type``
+    ``None``), or the whole catalog (``assets`` holding every loaded asset),
+    optionally narrowed to one ``derivative_type`` and/or one current
+    ``status``.
+
+    Below ``cli`` (CLAUDE.md's layering guardrail) so a future ``ui`` calls
+    the same function; ``assets`` is exactly what the caller already
+    resolved (asset lookup and "failed to load" reporting stay the CLI's
+    job, the same as ``vpress generate --all``'s).
+
+    A derivative that is ``missing`` or ``impossible`` for its asset is
+    named in :attr:`TargetSelection.skipped`, never a failure. So is
+    ``derivative_type`` itself when it names a type with no recipe yet --
+    one skip entry per asset in scope, the bulk equivalent of the "has no
+    recipe yet" error a single-target action gives. ``status`` narrows to
+    derivatives whose *current* status (ADR 0004's "status follows the
+    bytes", the same computation ``vpress asset`` displays) matches; a
+    derivative excluded by ``status`` is not named -- narrowing further is
+    not a problem to report, unlike missing or impossible.
+    """
+    targets: list[ReviewTarget] = []
+    skipped: list[SkippedTarget] = []
+    type_has_recipe = derivative_type is None or derivative_type in RECIPES
+
+    for asset in assets:
+        if not type_has_recipe:
+            assert derivative_type is not None  # type_has_recipe is only False when it is set
+            skipped.append(SkippedTarget(asset.id, derivative_type, "has no recipe yet"))
+            continue
+
+        asset_dir_path = asset_dir(root, config, asset.id)
+        derived_dir = asset_dir_path / DERIVED_DIRNAME
+        for derivative_status in asset_derivative_statuses(asset, asset_dir_path, config):
+            if (
+                derivative_type is not None
+                and derivative_status.derivative_type is not derivative_type
+            ):
+                continue
+            if derivative_status.state not in (DerivativeState.CURRENT, DerivativeState.STALE):
+                skipped.append(
+                    SkippedTarget(
+                        asset.id, derivative_status.derivative_type, derivative_status.state.value
+                    )
+                )
+                continue
+
+            assert derivative_status.output_filename is not None  # CURRENT/STALE carry a filename
+            if status is not None:
+                output_bytes = read_derivative_bytes(derived_dir, derivative_status.output_filename)
+                assert output_bytes is not None  # CURRENT/STALE means the file exists on disk
+                record = asset_derivative_status(
+                    derived_dir, derivative_status.derivative_type, output_bytes
+                )
+                if record.status is not status:
+                    continue
+
+            targets.append(ReviewTarget(asset, derivative_status.derivative_type))
+
+    return TargetSelection(targets=targets, skipped=skipped)
 
 
 @dataclass(frozen=True)

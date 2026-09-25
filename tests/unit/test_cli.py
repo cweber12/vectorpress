@@ -693,3 +693,121 @@ def test_generate_with_force_alone_is_a_usage_error(
     assert "Provide exactly one of: an asset ID, --all, --stale." in _normalized_output(
         result.output
     )
+
+
+# --- approve/reject/regenerate targeting usage errors (§10, §24) ------------------
+#
+# ``approve``, ``reject`` and ``regenerate`` share one targeting shape
+# (``pipeline.review._validate_review_targeting``); these run against the
+# read-only fixture, the same as ``generate``'s usage-error tests above --
+# a usage error is caught, and nothing loaded or written, before the
+# catalog is ever touched. End-to-end bulk behaviour (what gets approved,
+# skipped, and the summary line) lives in
+# ``tests/integration/test_review.py``, against a temporary catalog copy.
+
+_TARGETING_ERROR = "Give exactly one of: ASSET_ID DERIVATIVE_TYPE, ASSET_ID --all-types, or --all."
+
+
+@pytest.mark.parametrize("command", ["approve", "reject", "regenerate"])
+def test_review_command_with_no_targeting_at_all_is_a_usage_error(
+    command: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(FIXTURE_CATALOG_ROOT)
+
+    result = runner.invoke(app, [command])
+
+    assert result.exit_code == 2
+    assert "Usage:" in result.output
+    assert _TARGETING_ERROR in _normalized_output(result.output)
+
+
+@pytest.mark.parametrize("command", ["approve", "reject", "regenerate"])
+def test_review_command_with_an_asset_id_alone_is_a_usage_error(
+    command: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An asset ID with neither a derivative type nor --all-types is
+    ambiguous, the same as no targeting at all."""
+    monkeypatch.chdir(FIXTURE_CATALOG_ROOT)
+
+    result = runner.invoke(app, [command, "ochre_sea_star"])
+
+    assert result.exit_code == 2
+    assert _TARGETING_ERROR in _normalized_output(result.output)
+
+
+@pytest.mark.parametrize("command", ["approve", "reject", "regenerate"])
+def test_review_command_with_an_asset_id_and_all_is_a_usage_error(
+    command: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(FIXTURE_CATALOG_ROOT)
+
+    result = runner.invoke(app, [command, "ochre_sea_star", "--all"])
+
+    assert result.exit_code == 2
+    assert _TARGETING_ERROR in _normalized_output(result.output)
+
+
+@pytest.mark.parametrize("command", ["approve", "reject", "regenerate"])
+def test_review_command_with_an_asset_id_type_and_all_types_is_a_usage_error(
+    command: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(FIXTURE_CATALOG_ROOT)
+
+    result = runner.invoke(app, [command, "ochre_sea_star", "cut_svg", "--all-types"])
+
+    assert result.exit_code == 2
+    assert _TARGETING_ERROR in _normalized_output(result.output)
+
+
+@pytest.mark.parametrize("command", ["approve", "reject", "regenerate"])
+def test_review_command_with_all_types_alone_is_a_usage_error(
+    command: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """--all-types needs an asset ID -- on its own it targets nothing."""
+    monkeypatch.chdir(FIXTURE_CATALOG_ROOT)
+
+    result = runner.invoke(app, [command, "--all-types"])
+
+    assert result.exit_code == 2
+    assert _TARGETING_ERROR in _normalized_output(result.output)
+
+
+@pytest.mark.parametrize("command", ["approve", "reject", "regenerate"])
+def test_review_command_with_a_type_filter_but_no_all_is_a_usage_error(
+    command: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """--type only means something alongside --all."""
+    monkeypatch.chdir(FIXTURE_CATALOG_ROOT)
+
+    result = runner.invoke(app, [command, "ochre_sea_star", "cut_svg", "--type", "cut_svg"])
+
+    assert result.exit_code == 2
+    assert "--type only narrows --all." in _normalized_output(result.output)
+
+
+@pytest.mark.parametrize("command", ["approve", "reject", "regenerate"])
+def test_review_command_with_a_status_filter_but_no_all_is_a_usage_error(
+    command: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """--status only means something alongside --all."""
+    monkeypatch.chdir(FIXTURE_CATALOG_ROOT)
+
+    result = runner.invoke(
+        app, [command, "ochre_sea_star", "--all-types", "--status", "needs_review"]
+    )
+
+    assert result.exit_code == 2
+    assert "--status only narrows --all." in _normalized_output(result.output)
+
+
+@pytest.mark.parametrize("command", ["approve", "reject", "regenerate"])
+def test_review_command_with_an_unknown_asset_id_exits_non_zero_and_names_the_id(
+    command: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(FIXTURE_CATALOG_ROOT)
+
+    result = runner.invoke(app, [command, "not_a_real_asset", "cut_svg"])
+
+    assert result.exit_code == 1
+    assert "not_a_real_asset" in result.output
+    assert "Unknown asset" in result.output

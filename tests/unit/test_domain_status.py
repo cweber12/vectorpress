@@ -41,15 +41,29 @@ def test_a_changed_output_hash_returns_to_needs_review_from_every_prior_status(
     assert record == StatusRecord(status=Status.NEEDS_REVIEW, note=None, output_hash=HASH_B)
 
 
-@pytest.mark.parametrize("previous_status", list(Status))
+@pytest.mark.parametrize(
+    "previous_status", [status for status in Status if status is not Status.REGENERATE]
+)
 def test_an_unchanged_output_hash_preserves_status_and_note(previous_status: Status) -> None:
     """ADR 0004: "unchanged keeps status" -- the whole prior record, note
-    included, is returned untouched."""
+    included, is returned untouched. REGENERATE is covered separately
+    below: it is the one status an unchanged hash does not preserve."""
     previous = StatusRecord(status=previous_status, note="clean", output_hash=HASH_A)
 
     record = status_after_generation(previous, HASH_A)
 
     assert record == previous
+
+
+def test_a_regenerate_status_returns_to_needs_review_even_with_an_unchanged_hash() -> None:
+    """§24: the next generate after ``vpress regenerate`` leaves the
+    derivative needs_review whether or not the output actually changed --
+    a human asked for a new take, so the old status no longer applies."""
+    previous = StatusRecord(status=Status.REGENERATE, note="please redo", output_hash=HASH_A)
+
+    record = status_after_generation(previous, HASH_A)
+
+    assert record == StatusRecord(status=Status.NEEDS_REVIEW, note=None, output_hash=HASH_A)
 
 
 # --- effective_status (ADR 0004's "status follows the bytes") ----------------------
