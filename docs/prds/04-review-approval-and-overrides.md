@@ -1,6 +1,6 @@
 # PRD 4 — Review, Approval, and Overrides
 
-Status: not started
+Status: complete
 Depends on: see `docs/PLAN.md` Part 3 dependency graph
 
 **Goal.** Every derivative has an explicit status, humans control it, hand edits are

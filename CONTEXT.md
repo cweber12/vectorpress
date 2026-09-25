@@ -162,4 +162,5 @@ generated ──► needs_review ──► approved
               regenerate ──► (regeneration) ──► generated
 ```
 
-Unchanged output on regeneration keeps its status (§22.1).
+Unchanged output on regeneration keeps its status (§22.1), except a derivative marked
+`regenerate`: a human asked for a new take, so it returns to `needs_review` either way.
