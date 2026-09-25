@@ -26,6 +26,9 @@ from earlier merged issues that the issue body cannot know; "none" if none>
   and explained in the PR.
 - Every acceptance criterion accounted for: a test, or a sentence in your report
   saying why a test is impossible.
+- Every new or changed test must be seen failing without the change that makes it
+  pass. Your report quotes that failing run per test (the red step, or a revert of
+  the fix); a test with no red evidence is treated as one that cannot fail.
 - Comments and docstrings say what the code does and why, briefly. They never
   narrate history: no "issue #N", no "review fix round", no "before this issue".
   Git and the issue thread already hold that. Cite a § or an ADR only where it

@@ -21,7 +21,8 @@ Everything else you **rule** on: decide, record the ruling, keep going.
 
 1. Read the PRD once. Note Goal, Scope, Out of scope, Acceptance. The PRD is the
    binding authority; each issue is its argument.
-2. List its issues: `gh issue list --state open --search "[PRD NN]" --json number,title,body`.
+2. List its issues by exact title prefix; `--search` is fuzzy and has missed issues:
+   `gh issue list --state open --limit 200 --json number,title,body --jq '[.[] | select(.title | startswith("[PRD NN]"))]'`.
    Build the order from each body's **Blocked by** section. If no open issues exist,
    stop: the PRD has not been expanded (`/to-issues`).
 3. Recover state from GitHub, never from memory: an issue with an open PR is in
@@ -47,7 +48,8 @@ then have the other rebase before its review.
    Record BASE = `git rev-parse main`.
 2. **Dispatch the implementer** with [implementer.md](implementer.md), model `sonnet`.
    The prompt carries: the issue number, the worktree path, the report path
-   (`.runs/prd-NN/issue-K/report.md`), and one to three lines of interfaces or
+   (`.runs/prd-NN/issue-K/wt/.runs/report.md`: inside the worktree, so the
+   implementer may write it, and git-ignored there), and one to three lines of interfaces or
    rulings from earlier merged issues the issue body cannot know. Nothing else: no
    session history, no pasted PRD. Keep the implementer's agent id; fix rounds 1–3
    resume it. Never dispatch two implementers into one worktree.
@@ -78,8 +80,12 @@ then have the other rebase before its review.
    report against the PRD's Scope and Out-of-scope. Ask one question: does `main`
    plus this PR still lead to the PRD's Acceptance paragraph? If the PR narrows,
    widens, or contradicts the PRD, that is a Spec finding: back to step 7.
-9. **Merge.** `gh pr merge <pr> --squash --delete-branch`, then
-   `git worktree remove .runs/prd-NN/issue-K/wt`. Ledger the merge commit. Next issue.
+9. **Merge.** `gh pr merge <pr> --squash --delete-branch`. Copy the report to
+   `.runs/prd-NN/issue-K/report.md` so it survives, then
+   `git worktree remove .runs/prd-NN/issue-K/wt`. On Windows a busy or
+   permission-denied failure is common: run `git worktree remove --force <wt>`, then
+   `git worktree prune`, and if the directory still stands, note it in the ledger and
+   move on rather than retrying unchanged. Ledger the merge commit. Next issue.
 
 ## Finish
 
@@ -92,4 +98,6 @@ then have the other rebase before its review.
 2. Open one small PR that changes the PRD's `Status:` line to `complete`; merge it.
 3. Report to the user: issues merged with commits, deferred minors, and every
    `Ruling:` from the ledgers in the order made, each with its cost if wrong. A
-   ruling absent from this list was a decision made in secret.
+   ruling absent from this list was a decision made in secret. End with **Try it**:
+   the acceptance reviewer's `uv run vpress …` commands against the fixture
+   catalog, in order, each with one line on what it shows.
