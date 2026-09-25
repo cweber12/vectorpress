@@ -1,4 +1,4 @@
-"""Resolving a loaded collection into its current members (§11, §34).
+"""Resolving a loaded collection into its current members (§11, §34, ADR 0011).
 
 Reads nothing beyond what catalog loading already read, and writes nothing
 (ADR 0005): this wires the domain's pure :func:`~vectorpress.domain.
@@ -8,11 +8,10 @@ collection_resolution.resolve_explicit` to the assets and collections the
 collection's file and the ``membership.asset_ids`` field -- a reference
 problem does not stop the rest of the collection's members from resolving.
 
-Built as the one mechanism a metadata rule (unknown classification value is
-never a reference problem, so nothing to add there), a union (unknown
-collection slug, a cycle), and a product (unknown ``collection_slug``) can
-each extend by adding another message under the same file + field + message
-shape, not by restructuring :class:`ResolvedCollection`.
+A reference problem is just a :class:`~vectorpress.catalog.metadata_problem.
+MetadataProblem`: file, field, message. Any other unresolved reference a
+membership or a product can name renders the same way, under whatever field
+it names.
 """
 
 from dataclasses import dataclass
@@ -39,8 +38,8 @@ class ResolvedCollection:
     resolving it.
 
     ``members`` is sorted by asset ID (:func:`~vectorpress.domain.
-    collection_resolution.resolve_explicit`'s own order). This slice
-    resolves only ``membership.asset_ids``; a rule or union member
+    collection_resolution.resolve_explicit`'s own order). Only
+    ``membership.asset_ids`` is resolved here; a rule or union member
     contributes nothing yet.
     """
 

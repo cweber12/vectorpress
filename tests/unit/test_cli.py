@@ -611,6 +611,7 @@ def test_collection_on_the_fixture_lists_exactly_its_three_explicit_members(
     assert "Members: 3" in result.stdout
     for asset_id in ("giant_green_anemone", "ochre_sea_star", "purple_sea_urchin"):
         assert f"{asset_id}\texplicit" in result.stdout
+    assert "Reference problems: none" in result.stdout
 
 
 def test_collection_prints_description_tags_and_marketplace_category(

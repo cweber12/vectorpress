@@ -59,6 +59,7 @@ def test_collection_names_the_file_field_and_unknown_id(
     result = runner.invoke(app, ["collection", "pacific_coast_tide_pool"])
 
     assert result.exit_code == 0, result.output
+    assert "Reference problems: 1" in result.stdout
     assert str(Path("collections") / "pacific_coast_tide_pool.toml") in result.stdout
     assert "membership.asset_ids" in result.stdout
     assert "not_a_real_asset" in result.stdout
@@ -68,11 +69,16 @@ def test_collection_names_the_file_field_and_unknown_id(
 def test_status_shows_the_reference_problem_without_changing_its_exit_code(
     monkeypatch: pytest.MonkeyPatch, temp_catalog_root: Path
 ) -> None:
+    """The reference problem is printed under its own "Reference problems"
+    count, separate from "Metadata problems": only the metadata count is
+    non-zero-checked for the exit code, and it stays at zero here."""
     monkeypatch.chdir(temp_catalog_root)
 
     result = runner.invoke(app, ["status"])
 
     assert result.exit_code == 0, result.output
+    assert "Metadata problems: none" in result.stdout
+    assert "Reference problems: 1" in result.stdout
     assert "membership.asset_ids" in result.stdout
     assert "not_a_real_asset" in result.stdout
 

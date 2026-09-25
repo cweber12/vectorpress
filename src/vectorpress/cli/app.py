@@ -148,14 +148,16 @@ def _locate_and_load_config(ctx: typer.Context) -> tuple[Path, CatalogConfig]:
     return root, config
 
 
-def _echo_problems(problems: list[MetadataProblem]) -> None:
-    """Render metadata problems grouped by file. The catalog layer produces
-    them; this only formats them."""
+def _echo_problems_under(heading: str, problems: list[MetadataProblem]) -> None:
+    """Render a list of file+field+message problems grouped by file, under
+    ``heading``. Shared body for ``_echo_problems`` (load-time metadata
+    problems) and ``_echo_reference_problems`` (resolution-time reference
+    problems): same shape, different count and never the same list."""
     if not problems:
-        typer.echo("Metadata problems: none")
+        typer.echo(f"{heading}: none")
         return
 
-    typer.echo(f"Metadata problems: {len(problems)}")
+    typer.echo(f"{heading}: {len(problems)}")
     by_file: dict[Path, list[MetadataProblem]] = {}
     for problem in problems:
         by_file.setdefault(problem.path, []).append(problem)
@@ -167,6 +169,22 @@ def _echo_problems(problems: list[MetadataProblem]) -> None:
                 typer.echo(f"  {problem.field}: {problem.message}")
             else:
                 typer.echo(f"  {problem.message}")
+
+
+def _echo_problems(problems: list[MetadataProblem]) -> None:
+    """Render metadata problems (a hand-authored file that failed to load)
+    grouped by file. The catalog layer produces them; this only formats
+    them."""
+    _echo_problems_under("Metadata problems", problems)
+
+
+def _echo_reference_problems(problems: list[MetadataProblem]) -> None:
+    """Render reference problems (a membership names an asset ID no loaded
+    asset has) grouped by file, under their own heading and count so they
+    are never mistaken for -- or counted toward -- a load-time metadata
+    problem: a reference problem never stops a collection from loading or
+    resolving, and never drives an exit code."""
+    _echo_problems_under("Reference problems", problems)
 
 
 def _lookup_asset_or_exit(inventory: AssetInventory, config: CatalogConfig, asset_id: str) -> Asset:
@@ -230,10 +248,11 @@ def status(ctx: typer.Context) -> None:
     'vpress attention' renders, so the two always agree.
 
     Collection reference problems (an asset ID in a collection's
-    membership.asset_ids that no loaded asset has) are printed alongside
-    metadata problems but never drive the exit code: resolution does not
-    stop the rest of a collection's members from resolving, so it is not
-    itself a load failure (§11).
+    membership.asset_ids that no loaded asset has) are printed under their
+    own "Reference problems" count, separate from "Metadata problems": only
+    the metadata problem count drives the exit code, since resolution does
+    not stop the rest of a collection's members from resolving and so is
+    never itself a load failure (§11).
     """
     root = _locate_root(ctx)
     catalog = load_catalog(root)
@@ -275,7 +294,8 @@ def status(ctx: typer.Context) -> None:
         known_asset_ids = {loaded.id for loaded in catalog.assets}
         for resolved in resolve_collections(catalog.collections, catalog.config, known_asset_ids):
             reference_problems.extend(resolved.reference_problems)
-    _echo_problems([*catalog.problems, *reference_problems])
+    _echo_problems(catalog.problems)
+    _echo_reference_problems(reference_problems)
 
     if catalog.problems:
         raise typer.Exit(code=1)
@@ -1353,10 +1373,9 @@ def collection(
 ) -> None:
     """Show one collection: metadata and its currently resolved members.
 
-    Each member line names how it got in ('explicit' for this release).
-    An asset ID in the collection's list that no loaded asset has is a
-    reference problem, listed after the members; it does not stop the rest
-    from resolving.
+    Each member line names how it got in. An asset ID in the collection's
+    list that no loaded asset has is a reference problem, listed after the
+    members; it does not stop the rest from resolving.
     """
     root, config = _locate_and_load_config(ctx)
     resolved = _lookup_and_resolve_collection_or_exit(root, config, slug)
@@ -1372,7 +1391,7 @@ def collection(
         ways_in = ", ".join(str(way) for way in member.ways_in)
         typer.echo(f"  {member.asset_id}\t{ways_in}")
 
-    _echo_problems(resolved.reference_problems)
+    _echo_reference_problems(resolved.reference_problems)
 
 
 @app.command()

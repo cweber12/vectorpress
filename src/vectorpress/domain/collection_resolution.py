@@ -1,17 +1,18 @@
 """Turning a membership's ``asset_ids`` into current members (§11, §34).
 
-No I/O here (ADR 0006): resolution is pure over already-loaded data -- the
-declared asset IDs and the set of asset IDs that actually loaded. Finding
-which collections and assets loaded, and turning an unknown asset ID into a
+No I/O here: resolution is pure over already-loaded data -- the declared
+asset IDs and the set of asset IDs that actually loaded. Finding which
+collections and assets loaded, and turning an unknown asset ID into a
 reference problem naming a file and field, is the ``catalog`` layer's job
-(CONTEXT.md "Collection": "the catalog layer supplies the loaded assets and
-collections").
+(ADR 0011).
 
-A member's way in is a set, not a single value, because a later membership
-form can add another route into the same collection without displacing an
-existing one: a metadata rule match (a later slice) gets ``RULE``, and a
-union member (a later slice) gets ``VIA`` naming the contributing
-collection's slug. This slice only ever produces ``EXPLICIT``.
+A member's way in is a set, not a single value: a membership can match the
+same asset through more than one route (an explicit ID plus a metadata rule,
+or several contributing collections in a union), and every route it matched
+through stays visible rather than one overwriting another. ``WayInKind``
+covers ``EXPLICIT`` (an asset ID named directly), ``RULE`` (a metadata rule
+match), and ``VIA`` (a union member, naming the contributing collection);
+this module currently only ever produces ``EXPLICIT``.
 """
 
 from dataclasses import dataclass
@@ -51,7 +52,7 @@ class ResolvedMember:
     """One asset currently in a collection, and every way it got there.
 
     ``ways_in`` is sorted and de-duplicated so display is deterministic
-    even once a later slice can add a second way in for the same asset.
+    even when the same asset matched through more than one route.
     """
 
     asset_id: AssetId
