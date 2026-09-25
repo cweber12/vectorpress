@@ -4,7 +4,9 @@ The CLI is a thin layer: every command calls into ``vectorpress.build``,
 ``vectorpress.catalog`` and friends. No domain logic lives here.
 """
 
+from collections.abc import Callable
 from pathlib import Path
+from typing import Protocol
 
 import typer
 
@@ -34,6 +36,7 @@ from vectorpress.domain.finding import Finding, ValidationOutcome
 from vectorpress.domain.numeric_format import format_number
 from vectorpress.domain.product import Product
 from vectorpress.domain.reference_size import resolve_reference_size_in
+from vectorpress.domain.status import Status
 from vectorpress.pipeline.generate import (
     DerivativeStatus,
     GenerationOutcome,
@@ -42,10 +45,13 @@ from vectorpress.pipeline.generate import (
     generate_asset,
 )
 from vectorpress.pipeline.review import (
-    ApproveOutcome,
     StatusCounts,
+    TargetSelection,
     approve_derivative,
     count_derivative_statuses,
+    regenerate_derivative,
+    reject_derivative,
+    select_review_targets,
 )
 from vectorpress.validate.cut_file import THRESHOLDS, validate_cut_file
 from vectorpress.validate.validate_asset import AssetValidationOutcome, validate_asset_cut_file
@@ -400,36 +406,325 @@ def generate(
         raise typer.Exit(code=1)
 
 
+class _ReviewResult(Protocol):
+    """What :func:`approve_derivative`, :func:`reject_derivative` and
+    :func:`regenerate_derivative` have in common: ``error`` is ``None`` on
+    success, the reason nothing was written otherwise. The three commands
+    below act through this shape so their CLI plumbing does not care which
+    one it is calling. A read-only property, not a plain field: each
+    concrete result is a frozen dataclass, and a plain Protocol field would
+    demand a settable ``error`` too."""
+
+    @property
+    def error(self) -> str | None: ...
+
+
+_ReviewAction = Callable[[Asset, Path, DerivativeType, str | None, CatalogConfig], _ReviewResult]
+
+
+def _parse_derivative_type_or_exit(value: str) -> DerivativeType:
+    try:
+        return DerivativeType(value)
+    except ValueError:
+        typer.echo(f"Unknown derivative type: {value!r}", err=True)
+        raise typer.Exit(code=1) from None
+
+
+def _parse_status_or_exit(value: str) -> Status:
+    try:
+        return Status(value)
+    except ValueError:
+        typer.echo(f"Unknown status: {value!r}", err=True)
+        raise typer.Exit(code=1) from None
+
+
+def _echo_review_line(
+    asset_id: str, derivative_type: str, status_text: str, note: str | None
+) -> None:
+    note_suffix = f"\t{note}" if note else ""
+    typer.echo(f"{asset_id}\t{derivative_type}\t{status_text}{note_suffix}")
+
+
+def _validate_review_targeting(
+    asset_id: str | None,
+    derivative_type: str | None,
+    all_types: bool,
+    all_assets: bool,
+    type_filter: str | None,
+    status_filter: str | None,
+) -> None:
+    """The one targeting shape ``approve``, ``reject`` and ``regenerate``
+    share (§10, §24): ``ASSET_ID DERIVATIVE_TYPE``, ``ASSET_ID --all-types``,
+    or ``--all`` (optionally narrowed by ``--type`` and/or ``--status``,
+    which only mean anything alongside ``--all``). Anything else -- no
+    targeting at all included -- is a usage error, exit 2, before anything
+    is loaded or written.
+    """
+    has_asset = asset_id is not None
+    has_type_arg = derivative_type is not None
+    modes = [
+        has_asset and has_type_arg and not all_types and not all_assets,
+        has_asset and not has_type_arg and all_types and not all_assets,
+        not has_asset and not has_type_arg and not all_types and all_assets,
+    ]
+    if sum(modes) != 1:
+        raise typer.BadParameter(
+            "Give exactly one of: ASSET_ID DERIVATIVE_TYPE, ASSET_ID --all-types, or --all.",
+            param_hint="asset_id / derivative_type / --all-types / --all",
+        )
+    if type_filter is not None and not all_assets:
+        raise typer.BadParameter("--type only narrows --all.", param_hint="--type")
+    if status_filter is not None and not all_assets:
+        raise typer.BadParameter("--status only narrows --all.", param_hint="--status")
+
+
+def _run_bulk_review(
+    command: str,
+    status_text: str,
+    act: _ReviewAction,
+    selection: TargetSelection,
+    root: Path,
+    config: CatalogConfig,
+    note: str | None,
+) -> None:
+    """Run ``act`` over every target ``select_review_targets`` picked,
+    printing a line per derivative it skips (named, never failed on) or
+    changes, then a summary (§10, §24's "many at once")."""
+    for skip in selection.skipped:
+        typer.echo(f"{skip.asset_id}\t{skip.derivative_type.value}\tskipped: {skip.reason}")
+
+    changed = 0
+    for target in selection.targets:
+        result = act(
+            target.asset,
+            asset_dir(root, config, target.asset.id),
+            target.derivative_type,
+            note,
+            config,
+        )
+        if result.error is None:
+            _echo_review_line(target.asset.id, target.derivative_type.value, status_text, note)
+            changed += 1
+        else:
+            typer.echo(
+                f"{target.asset.id}\t{target.derivative_type.value}\tskipped: {result.error}"
+            )
+
+    typer.echo(f"{command}: {changed} changed, {len(selection.skipped)} skipped")
+
+
+def _run_review(
+    ctx: typer.Context,
+    command: str,
+    status_text: str,
+    act: _ReviewAction,
+    asset_id: str | None,
+    derivative_type: str | None,
+    all_types: bool,
+    all_assets: bool,
+    type_filter: str | None,
+    status_filter: str | None,
+    note: str | None,
+) -> None:
+    """Shared body of ``approve``, ``reject`` and ``regenerate``: validate
+    targeting, then either act on the one named (asset, type) directly --
+    an unknown asset/type or a missing/impossible derivative errors, exit 1
+    -- or resolve the bulk targets (``--all-types``/``--all``) and run
+    ``act`` over each, which never fails the command (§10, §24)."""
+    _validate_review_targeting(
+        asset_id, derivative_type, all_types, all_assets, type_filter, status_filter
+    )
+    root, config = _locate_and_load_config(ctx)
+
+    if derivative_type is not None:
+        assert asset_id is not None  # single-target mode requires both, enforced above
+        found = _lookup_asset_or_exit(load_assets(root, config), config, asset_id)
+        parsed_type = _parse_derivative_type_or_exit(derivative_type)
+        result = act(found, asset_dir(root, config, found.id), parsed_type, note, config)
+        if result.error is not None:
+            typer.echo(f"{command}: {asset_id} {derivative_type} failed: {result.error}", err=True)
+            raise typer.Exit(code=1)
+        _echo_review_line(asset_id, derivative_type, status_text, note)
+        return
+
+    inventory = load_assets(root, config)
+    scoped_assets = _select_targets(inventory, config, asset_id)
+    parsed_type_filter = (
+        _parse_derivative_type_or_exit(type_filter) if type_filter is not None else None
+    )
+    parsed_status_filter = (
+        _parse_status_or_exit(status_filter) if status_filter is not None else None
+    )
+
+    selection = select_review_targets(
+        scoped_assets, root, config, derivative_type=parsed_type_filter, status=parsed_status_filter
+    )
+    _run_bulk_review(command, status_text, act, selection, root, config, note)
+
+
 @app.command()
 def approve(
     ctx: typer.Context,
-    asset_id: str = typer.Argument(help="The asset's ID (its folder name under assets/)."),
-    derivative_type: str = typer.Argument(help="The derivative type to approve, e.g. cut_svg."),
+    asset_id: str | None = typer.Argument(
+        None, help="The asset's ID (its folder name under assets/)."
+    ),
+    derivative_type: str | None = typer.Argument(
+        None, help="The derivative type to approve, e.g. cut_svg."
+    ),
+    all_types: bool = typer.Option(
+        False, "--all-types", help="Approve every existing derivative of ASSET_ID."
+    ),
+    all_assets: bool = typer.Option(
+        False, "--all", help="Approve every existing derivative across the catalog."
+    ),
+    type_filter: str | None = typer.Option(
+        None, "--type", help="With --all, narrow to one derivative type."
+    ),
+    status_filter: str | None = typer.Option(
+        None, "--status", help="With --all, narrow to derivatives currently at this status."
+    ),
     note: str | None = typer.Option(
         None, "--note", help="An optional note to record with the approval."
     ),
 ) -> None:
-    """Approve one derivative, recording it approved with an optional note.
+    """Approve a derivative, every derivative of one asset, or every
+    matching derivative across the catalog, recording each approved with an
+    optional note.
 
-    Errors with exit 1 and writes nothing for an unknown asset, an unknown
-    derivative type, or a derivative that is missing or impossible.
+    Give exactly one of: ASSET_ID DERIVATIVE_TYPE, ASSET_ID --all-types, or
+    --all (optionally narrowed by --type and/or --status). Any other
+    combination is a usage error, exit 2.
+    \f
+    ASSET_ID DERIVATIVE_TYPE errors with exit 1 and writes nothing for an
+    unknown asset, an unknown derivative type, or a derivative that is
+    missing or impossible. --all-types and --all never fail that way: a
+    missing/impossible derivative, a --type naming a type with no recipe
+    yet, or an asset that failed to load, is skipped and named instead, and
+    the run still exits 0.
     """
-    root, config = _locate_and_load_config(ctx)
-    found = _lookup_asset_or_exit(load_assets(root, config), config, asset_id)
+    _run_review(
+        ctx,
+        "approve",
+        Status.APPROVED.value,
+        approve_derivative,
+        asset_id,
+        derivative_type,
+        all_types,
+        all_assets,
+        type_filter,
+        status_filter,
+        note,
+    )
 
-    try:
-        parsed_type = DerivativeType(derivative_type)
-    except ValueError:
-        typer.echo(f"Unknown derivative type: {derivative_type!r}", err=True)
-        raise typer.Exit(code=1) from None
 
-    result = approve_derivative(found, asset_dir(root, config, found.id), parsed_type, note, config)
-    if result.outcome is ApproveOutcome.ERROR:
-        typer.echo(f"approve: {asset_id} {derivative_type} failed: {result.error}", err=True)
-        raise typer.Exit(code=1)
+@app.command()
+def reject(
+    ctx: typer.Context,
+    asset_id: str | None = typer.Argument(
+        None, help="The asset's ID (its folder name under assets/)."
+    ),
+    derivative_type: str | None = typer.Argument(
+        None, help="The derivative type to reject, e.g. cut_svg."
+    ),
+    all_types: bool = typer.Option(
+        False, "--all-types", help="Reject every existing derivative of ASSET_ID."
+    ),
+    all_assets: bool = typer.Option(
+        False, "--all", help="Reject every existing derivative across the catalog."
+    ),
+    type_filter: str | None = typer.Option(
+        None, "--type", help="With --all, narrow to one derivative type."
+    ),
+    status_filter: str | None = typer.Option(
+        None, "--status", help="With --all, narrow to derivatives currently at this status."
+    ),
+    note: str | None = typer.Option(
+        None, "--note", help="An optional note to record with the rejection."
+    ),
+) -> None:
+    """Reject a derivative, every derivative of one asset, or every
+    matching derivative across the catalog, recording each rejected with an
+    optional note.
 
-    note_suffix = f"\t{note}" if note else ""
-    typer.echo(f"{asset_id}\t{derivative_type}\tapproved{note_suffix}")
+    Give exactly one of: ASSET_ID DERIVATIVE_TYPE, ASSET_ID --all-types, or
+    --all (optionally narrowed by --type and/or --status). Any other
+    combination is a usage error, exit 2.
+    \f
+    Same shape and error handling as ``approve``: ASSET_ID DERIVATIVE_TYPE
+    errors with exit 1 and writes nothing for an unknown asset, an unknown
+    derivative type, or a derivative that is missing or impossible;
+    --all-types and --all skip and name those instead of failing.
+    """
+    _run_review(
+        ctx,
+        "reject",
+        Status.REJECTED.value,
+        reject_derivative,
+        asset_id,
+        derivative_type,
+        all_types,
+        all_assets,
+        type_filter,
+        status_filter,
+        note,
+    )
+
+
+@app.command()
+def regenerate(
+    ctx: typer.Context,
+    asset_id: str | None = typer.Argument(
+        None, help="The asset's ID (its folder name under assets/)."
+    ),
+    derivative_type: str | None = typer.Argument(
+        None, help="The derivative type to mark for regeneration, e.g. cut_svg."
+    ),
+    all_types: bool = typer.Option(
+        False, "--all-types", help="Mark every existing derivative of ASSET_ID for regeneration."
+    ),
+    all_assets: bool = typer.Option(
+        False, "--all", help="Mark every existing derivative across the catalog for regeneration."
+    ),
+    type_filter: str | None = typer.Option(
+        None, "--type", help="With --all, narrow to one derivative type."
+    ),
+    status_filter: str | None = typer.Option(
+        None, "--status", help="With --all, narrow to derivatives currently at this status."
+    ),
+    note: str | None = typer.Option(
+        None, "--note", help="An optional note to record with the mark."
+    ),
+) -> None:
+    """Mark a derivative, every derivative of one asset, or every matching
+    derivative across the catalog for regeneration, with an optional note.
+
+    Give exactly one of: ASSET_ID DERIVATIVE_TYPE, ASSET_ID --all-types, or
+    --all (optionally narrowed by --type and/or --status). Any other
+    combination is a usage error, exit 2.
+    \f
+    Marking does not regenerate anything itself: the next ``vpress
+    generate`` for a marked asset regenerates every derivative marked
+    regenerate even when it is current, as if --force applied to that
+    derivative alone, and each ends up needs_review afterward whether or
+    not its output changed. Same error handling as ``approve``: ASSET_ID
+    DERIVATIVE_TYPE errors with exit 1 and writes nothing for an unknown
+    asset, an unknown derivative type, or a derivative that is missing or
+    impossible; --all-types and --all skip and name those instead of
+    failing.
+    """
+    _run_review(
+        ctx,
+        "regenerate",
+        Status.REGENERATE.value,
+        regenerate_derivative,
+        asset_id,
+        derivative_type,
+        all_types,
+        all_assets,
+        type_filter,
+        status_filter,
+        note,
+    )
 
 
 def _optional_catalog_config(ctx: typer.Context) -> CatalogConfig | None:

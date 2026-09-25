@@ -271,3 +271,160 @@ def test_vpress_status_counts_derivatives_by_status(
     assert after.exit_code == 0, after.output
     assert "Needs review: 3" in after.stdout
     assert "Approved: 1" in after.stdout
+
+
+# --- reject (§10, §24) ---------------------------------------------------------------
+
+
+@pytest.mark.integration
+def test_reject_with_a_note_shows_rejected_and_the_note(
+    monkeypatch: pytest.MonkeyPatch, temp_catalog_root: Path
+) -> None:
+    monkeypatch.chdir(temp_catalog_root)
+    runner.invoke(app, ["generate", "giant_green_anemone"])
+
+    reject_result = runner.invoke(
+        app, ["reject", "giant_green_anemone", "cut_svg", "--note", "fragment"]
+    )
+    assert reject_result.exit_code == 0, reject_result.output
+    assert "rejected" in reject_result.stdout
+
+    asset_result = runner.invoke(app, ["asset", "giant_green_anemone"])
+    assert asset_result.exit_code == 0, asset_result.output
+    cut_svg_line = next(
+        line for line in asset_result.stdout.splitlines() if line.strip().startswith("cut_svg")
+    )
+    assert "rejected" in cut_svg_line
+    assert "fragment" in cut_svg_line
+
+
+@pytest.mark.integration
+def test_rejecting_a_missing_derivative_is_an_error_and_writes_nothing(
+    monkeypatch: pytest.MonkeyPatch, temp_catalog_root: Path
+) -> None:
+    monkeypatch.chdir(temp_catalog_root)  # nothing generated yet
+
+    result = runner.invoke(app, ["reject", "ochre_sea_star", "cut_svg"])
+
+    assert result.exit_code == 1, result.output
+    assert not _derived_dir(temp_catalog_root, "ochre_sea_star").exists()
+
+
+# --- regenerate (§24) -----------------------------------------------------------------
+
+
+@pytest.mark.integration
+def test_regenerate_then_generate_regenerates_only_the_marked_derivative(
+    monkeypatch: pytest.MonkeyPatch, temp_catalog_root: Path
+) -> None:
+    """§24: the next ``vpress generate`` regenerates exactly the derivative
+    marked ``regenerate`` -- as if --force applied to it alone -- and it
+    ends up needs_review, whether or not the bytes actually changed;
+    every other derivative is untouched (reported ``current``)."""
+    monkeypatch.chdir(temp_catalog_root)
+    runner.invoke(app, ["generate", "ochre_sea_star"])
+    runner.invoke(app, ["approve", "ochre_sea_star", "cut_svg", "--note", "clean"])
+
+    regenerate_result = runner.invoke(app, ["regenerate", "ochre_sea_star", "cut_svg"])
+    assert regenerate_result.exit_code == 0, regenerate_result.output
+
+    generate_result = runner.invoke(app, ["generate", "ochre_sea_star"])
+    assert generate_result.exit_code == 0, generate_result.output
+    lines = {
+        line.split("\t")[1]: line.split("\t")[2] for line in generate_result.stdout.splitlines()
+    }
+    assert lines["cut_svg"] == "generated"
+    assert lines["transparent_png"] == "current"
+    assert lines["silhouette_svg"] == "current"
+    assert lines["flatcolor_svg"] == "current"
+
+    asset_result = runner.invoke(app, ["asset", "ochre_sea_star"])
+    assert asset_result.exit_code == 0, asset_result.output
+    cut_svg_line = next(
+        line for line in asset_result.stdout.splitlines() if line.strip().startswith("cut_svg")
+    )
+    assert "needs review" in cut_svg_line
+    assert "clean" not in cut_svg_line  # the old approval's note no longer applies
+
+
+@pytest.mark.integration
+def test_regenerating_a_missing_derivative_is_an_error_and_writes_nothing(
+    monkeypatch: pytest.MonkeyPatch, temp_catalog_root: Path
+) -> None:
+    monkeypatch.chdir(temp_catalog_root)  # nothing generated yet
+
+    result = runner.invoke(app, ["regenerate", "ochre_sea_star", "cut_svg"])
+
+    assert result.exit_code == 1, result.output
+    assert not _derived_dir(temp_catalog_root, "ochre_sea_star").exists()
+
+
+# --- bulk targeting: --all-types, --all, --type, --status (§10, §24) ------------------
+
+
+@pytest.mark.integration
+def test_approve_all_types_approves_every_existing_derivative_of_one_asset(
+    monkeypatch: pytest.MonkeyPatch, temp_catalog_root: Path
+) -> None:
+    monkeypatch.chdir(temp_catalog_root)
+    runner.invoke(app, ["generate", "ochre_sea_star"])  # has flatcolor: no impossible types
+
+    result = runner.invoke(app, ["approve", "ochre_sea_star", "--all-types"])
+
+    assert result.exit_code == 0, result.output
+    for derivative_type in ("transparent_png", "silhouette_svg", "cut_svg", "flatcolor_svg"):
+        assert f"ochre_sea_star\t{derivative_type}\tapproved" in result.stdout
+    assert "approve: 4 changed, 0 skipped" in result.stdout
+
+    status_result = runner.invoke(app, ["status"])
+    assert "Approved: 4" in status_result.stdout
+
+
+@pytest.mark.integration
+def test_approve_all_narrowed_by_type_approves_across_the_catalog_and_names_the_rest(
+    monkeypatch: pytest.MonkeyPatch, temp_catalog_root: Path
+) -> None:
+    """§24's example: ``--all --type transparent_png`` approves every
+    asset's transparent PNG and names any that are missing or impossible;
+    ``--status`` narrows further."""
+    monkeypatch.chdir(temp_catalog_root)
+    generate_result = runner.invoke(app, ["generate", "--all"])
+    assert generate_result.exit_code == 1, generate_result.output  # acorn_barnacle fails (§35)
+
+    result = runner.invoke(app, ["approve", "--all", "--type", "transparent_png"])
+
+    assert result.exit_code == 0, result.output
+    assert "ochre_sea_star\ttransparent_png\tapproved" in result.stdout
+    assert "giant_green_anemone\ttransparent_png\tapproved" in result.stdout
+    # acorn_barnacle's source image fails to decode at all (§35), so every
+    # derivative -- transparent_png included -- never generated: missing,
+    # named as skipped, never a failure of the approve run itself.
+    assert "acorn_barnacle\ttransparent_png\tskipped: missing" in result.stdout
+
+    # --status narrows the *targets*: nothing is needs_review any more
+    # (the first call just approved every one), but acorn_barnacle's
+    # transparent_png is still missing regardless of --status, so it is
+    # still named.
+    narrowed = runner.invoke(
+        app, ["approve", "--all", "--type", "transparent_png", "--status", "needs_review"]
+    )
+    assert narrowed.exit_code == 0, narrowed.output
+    assert "acorn_barnacle\ttransparent_png\tskipped: missing" in narrowed.stdout
+    assert "approve: 0 changed, 1 skipped" in narrowed.stdout
+
+
+@pytest.mark.integration
+def test_reject_all_names_impossible_derivatives_without_failing(
+    monkeypatch: pytest.MonkeyPatch, temp_catalog_root: Path
+) -> None:
+    """Every asset but ochre_sea_star has only a silhouette source, so
+    flatcolor_svg is impossible for them -- named as skipped, never a
+    failure, and the run still exits 0."""
+    monkeypatch.chdir(temp_catalog_root)
+    runner.invoke(app, ["generate", "--all"])
+
+    result = runner.invoke(app, ["reject", "--all", "--type", "flatcolor_svg"])
+
+    assert result.exit_code == 0, result.output
+    assert "ochre_sea_star\tflatcolor_svg\trejected" in result.stdout
+    assert "purple_sea_urchin\tflatcolor_svg\tskipped: impossible" in result.stdout

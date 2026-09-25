@@ -50,18 +50,26 @@ class StatusRecord:
 
 def status_after_generation(previous: StatusRecord | None, output_hash: str) -> StatusRecord:
     """The status record a derivative gets right after (re)generation
-    writes ``output_hash`` (§22.1, ADR 0004: "output changed = output hash
-    changed -> needs_review; unchanged keeps status").
+    writes ``output_hash`` (§22.1, §24, ADR 0004: "output changed = output
+    hash changed -> needs_review; unchanged keeps status").
 
     No prior record at all (a new derivative): ``NEEDS_REVIEW``, no note.
     A prior record whose output hash differs (the (re)generation actually
     changed the bytes): ``NEEDS_REVIEW`` again, whatever the previous
     status was, note cleared -- a note about the old bytes does not
-    describe the new ones. A prior record whose output hash is unchanged:
+    describe the new ones. A prior record whose status is ``REGENERATE``
+    (a human asked for a new take with ``vpress regenerate``) also goes to
+    ``NEEDS_REVIEW``, note cleared, even when the hash is unchanged: the
+    old status no longer applies once the regeneration a human asked for
+    has run. Every other prior record with an unchanged output hash:
     returned as-is, status and note both preserved -- this is what makes
     ``generate --force`` non-destructive to an already-approved derivative.
     """
-    if previous is None or previous.output_hash != output_hash:
+    if (
+        previous is None
+        or previous.output_hash != output_hash
+        or previous.status is Status.REGENERATE
+    ):
         return StatusRecord(status=Status.NEEDS_REVIEW, note=None, output_hash=output_hash)
     return previous
 
