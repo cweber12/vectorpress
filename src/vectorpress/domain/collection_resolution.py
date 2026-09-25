@@ -166,7 +166,7 @@ def resolve_rule(rule: MembershipRule, assets: list[Asset]) -> list[ResolvedMemb
 def resolve_membership(
     membership: Membership,
     assets: list[Asset],
-    collections_by_slug: Mapping[CollectionSlug, Membership] | None = None,
+    collections_by_slug: Mapping[CollectionSlug, Membership],
     *,
     own_slug: CollectionSlug | None = None,
 ) -> MembershipResolution:
@@ -176,9 +176,9 @@ def resolve_membership(
     carrying every way it matched (§11, §12, §13).
 
     ``collections_by_slug`` supplies every other loaded collection's
-    membership, keyed by slug, for resolving ``collection_slugs`` --
-    omit it (or pass an empty mapping) when the membership declares no
-    union, the same as every call site before this recursed. ``own_slug``
+    membership, keyed by slug, for resolving ``collection_slugs`` -- pass an
+    empty mapping for a membership that declares no union, so a future
+    caller cannot forget it and silently lose union resolution. ``own_slug``
     is this membership's own slug, if it has one (a real collection does; an
     inline product membership does not, per ``vectorpress.domain.
     membership``'s own docstring) -- it seeds the cycle-tracking path so a
@@ -190,7 +190,7 @@ def resolve_membership(
     problem, and neither is an empty union.
     """
     path = (own_slug,) if own_slug is not None else ()
-    return _resolve_membership(membership, assets, collections_by_slug or {}, path)
+    return _resolve_membership(membership, assets, collections_by_slug, path)
 
 
 def _resolve_membership(

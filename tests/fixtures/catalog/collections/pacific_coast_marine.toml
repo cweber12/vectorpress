@@ -7,8 +7,9 @@
 
 name = "Pacific Coast Marine"
 description = """
-A mega bundle over the tide pool and kelp forest collections, plus the
-turban snail, for a single combined marine-life offering (ADR 0008).
+A union over the tide pool and kelp forest collections, plus the turban
+snail, for a single combined marine-life membership -- a mega bundle
+product could be built over this collection (ADR 0008).
 """
 tags = ["pacific coast", "marine"]
 marketplace_category = "Nature & Wildlife"

@@ -75,7 +75,7 @@ def test_resolving_the_explicit_fixture_collection_lists_exactly_its_three_membe
     assert collection is not None
 
     resolved = resolve_collection(
-        collection, config, known_assets=_known_assets(*PACIFIC_COAST_MEMBERS)
+        collection, config, known_assets=_known_assets(*PACIFIC_COAST_MEMBERS), known_collections=[]
     )
 
     assert {member.asset_id for member in resolved.members} == PACIFIC_COAST_MEMBERS
@@ -95,7 +95,9 @@ def test_resolving_the_rule_fixture_collection_lists_the_kelp_forest_asset() -> 
     assert collection is not None
     known_assets = load_assets(FIXTURE_CATALOG_ROOT, config).assets
 
-    resolved = resolve_collection(collection, config, known_assets=known_assets)
+    resolved = resolve_collection(
+        collection, config, known_assets=known_assets, known_collections=[]
+    )
 
     assert [member.asset_id for member in resolved.members] == ["purple_sea_urchin"]
     assert resolved.members[0].ways_in == (WayIn(WayInKind.RULE),)
@@ -109,7 +111,7 @@ def test_a_rule_matching_no_asset_resolves_to_no_members_and_no_problem() -> Non
     assert collection is not None
 
     resolved = resolve_collection(
-        collection, config, known_assets=_known_assets("some_other_asset")
+        collection, config, known_assets=_known_assets("some_other_asset"), known_collections=[]
     )
 
     assert resolved.members == []
@@ -133,7 +135,7 @@ def test_an_unknown_asset_id_is_a_reference_problem_and_the_rest_still_resolve(
     assert collection is not None
 
     resolved = resolve_collection(
-        collection, config, known_assets=_known_assets(*PACIFIC_COAST_MEMBERS)
+        collection, config, known_assets=_known_assets(*PACIFIC_COAST_MEMBERS), known_collections=[]
     )
 
     assert {member.asset_id for member in resolved.members} == PACIFIC_COAST_MEMBERS
@@ -156,7 +158,10 @@ def test_an_asset_id_whose_own_file_failed_to_load_is_also_a_reference_problem()
     # purple_sea_urchin omitted from known_assets, as if its own asset.toml
     # had failed to load.
     resolved = resolve_collection(
-        collection, config, known_assets=_known_assets("ochre_sea_star", "giant_green_anemone")
+        collection,
+        config,
+        known_assets=_known_assets("ochre_sea_star", "giant_green_anemone"),
+        known_collections=[],
     )
 
     assert {member.asset_id for member in resolved.members} == {
@@ -214,7 +219,9 @@ def test_mixed_membership_lists_the_deduplicated_union_with_both_ways_in(
 
     known_assets = load_assets(catalog_copy, config).assets
 
-    resolved = resolve_collection(collection, config, known_assets=known_assets)
+    resolved = resolve_collection(
+        collection, config, known_assets=known_assets, known_collections=[]
+    )
 
     members_by_id = {member.asset_id: member.ways_in for member in resolved.members}
     assert members_by_id == {
@@ -339,6 +346,36 @@ def test_an_unknown_collection_slug_is_a_reference_problem_and_the_rest_still_re
     assert problem.path == Path("collections") / "pacific_coast_marine.toml"
     assert problem.field == MEMBERSHIP_COLLECTION_SLUGS_FIELD
     assert "not_a_real_collection" in problem.message
+
+
+def test_a_union_slug_whose_own_file_failed_to_load_is_also_a_reference_problem(
+    catalog_copy: Path,
+) -> None:
+    """A collection slug named in a union is unknown two ways: a slug no
+    file names at all (the test above), or a slug whose own file exists but
+    failed to load -- absent from ``known_collections`` either way, so it
+    reads the same as a genuinely unknown slug. The rest of the union (here,
+    the tide-pool collection's own members) still resolves."""
+    path = _collection_toml(catalog_copy, "kelp_forest_ecosystem")
+    target = 'name = "Kelp Forest Ecosystem"'
+    text = path.read_text(encoding="utf-8")
+    assert target in text
+    path.write_text(text.replace(target, "name = unterminated"), encoding="utf-8")
+    config = load_catalog_config(catalog_copy)
+    inventory = load_collections(catalog_copy, config)
+    assert find_collection(inventory, "kelp_forest_ecosystem") is None  # confirms it failed to load
+    collection = find_collection(inventory, "pacific_coast_marine")
+    assert collection is not None
+    known_assets = load_assets(catalog_copy, config).assets
+
+    resolved = resolve_collection(collection, config, known_assets, inventory.collections)
+
+    assert {member.asset_id for member in resolved.members} >= PACIFIC_COAST_MEMBERS
+    assert len(resolved.reference_problems) == 1
+    problem = resolved.reference_problems[0]
+    assert problem.path == Path("collections") / "pacific_coast_marine.toml"
+    assert problem.field == MEMBERSHIP_COLLECTION_SLUGS_FIELD
+    assert "unknown collection: 'kelp_forest_ecosystem'" in problem.message
 
 
 def test_a_self_cycle_terminates_and_is_a_reference_problem(catalog_copy: Path) -> None:

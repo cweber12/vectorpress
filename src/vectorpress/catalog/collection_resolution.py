@@ -68,7 +68,7 @@ def resolve_collection(
     collection: Collection,
     config: CatalogConfig,
     known_assets: list[Asset],
-    known_collections: list[Collection] | None = None,
+    known_collections: list[Collection],
 ) -> ResolvedCollection:
     """Resolve one loaded collection's membership into its current members.
 
@@ -76,11 +76,12 @@ def resolve_collection(
     one) -- the catalog layer's ``loaded_assets`` -- supplying both the ID
     set the explicit list resolves against and the classification values a
     rule matches against. ``known_collections`` is every other collection
-    that actually loaded, for resolving a union's ``collection_slugs`` --
-    omit it (or pass ``None``) for a collection whose membership declares no
-    union, the same as every call site before this union support existed.
+    that actually loaded (never a failed one -- the same rule as
+    ``known_assets``), for resolving a union's ``collection_slugs``; pass an
+    empty list for a collection whose membership declares no union, so a
+    future caller cannot forget it and silently lose union resolution.
     """
-    collections_by_slug = {c.slug: c.membership for c in known_collections or []}
+    collections_by_slug = {c.slug: c.membership for c in known_collections}
     resolution = resolve_membership(
         collection.membership, known_assets, collections_by_slug, own_slug=collection.slug
     )

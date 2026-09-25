@@ -224,7 +224,7 @@ def test_resolve_membership_with_only_a_rule_produces_rule_members() -> None:
     )
     asset = _asset(id="purple_sea_urchin", ecosystems=["Kelp forest"])
 
-    result = resolve_membership(membership, [asset])
+    result = resolve_membership(membership, [asset], {})
 
     assert result.members == [ResolvedMember("purple_sea_urchin", (WayIn(WayInKind.RULE),))]
     assert result.unknown_asset_ids == []
@@ -234,7 +234,7 @@ def test_resolve_membership_with_only_explicit_ids_matches_resolve_explicit() ->
     membership = Membership(asset_ids=["ochre_sea_star"])
     asset = _asset(id="ochre_sea_star")
 
-    result = resolve_membership(membership, [asset])
+    result = resolve_membership(membership, [asset], {})
 
     assert result.members == [ResolvedMember("ochre_sea_star", (WayIn(WayInKind.EXPLICIT),))]
 
@@ -249,7 +249,7 @@ def test_resolve_membership_mixed_lists_the_deduplicated_union() -> None:
     explicit_only = _asset(id="owl_limpet", ecosystems=["Rocky intertidal"])
     rule_only = _asset(id="purple_sea_urchin", ecosystems=["Kelp forest"])
 
-    result = resolve_membership(membership, [explicit_only, rule_only])
+    result = resolve_membership(membership, [explicit_only, rule_only], {})
 
     assert {member.asset_id for member in result.members} == {"owl_limpet", "purple_sea_urchin"}
 
@@ -263,7 +263,7 @@ def test_resolve_membership_mixed_member_matched_both_ways_lists_both_once() -> 
     )
     asset = _asset(id="purple_sea_urchin", ecosystems=["Kelp forest"])
 
-    result = resolve_membership(membership, [asset])
+    result = resolve_membership(membership, [asset], {})
 
     assert result.members == [
         ResolvedMember("purple_sea_urchin", (WayIn(WayInKind.EXPLICIT), WayIn(WayInKind.RULE)))
@@ -302,7 +302,7 @@ def test_resolve_membership_union_way_in_names_the_directly_contributing_slug() 
 
 
 def test_resolve_membership_union_member_in_two_collections_lists_both_via_ways() -> None:
-    """``purple_sea_urchin`` in both a explicit list and a rule collection,
+    """``purple_sea_urchin`` in both an explicit list and a rule collection,
     unioned together, appears once with both "via" ways in -- the fixture's
     own ``pacific_coast_marine`` acceptance walkthrough (§13)."""
     tide_pool = Membership(asset_ids=["purple_sea_urchin"])
@@ -348,7 +348,7 @@ def test_resolve_membership_resolves_a_union_of_a_union() -> None:
 def test_resolve_membership_union_reports_an_unknown_collection_slug() -> None:
     union = Membership(collection_slugs=["does_not_exist"])
 
-    result = resolve_membership(union, [])
+    result = resolve_membership(union, [], {})
 
     assert result.members == []
     assert result.unknown_collection_slugs == ["does_not_exist"]
