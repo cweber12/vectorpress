@@ -14,11 +14,13 @@ from typing import Any
 import pytest
 from PIL import Image
 
+from vectorpress.catalog.overrides import override_currency, override_path, read_override_provenance
 from vectorpress.catalog.provenance import DERIVED_DIRNAME, read_provenance, sha256_bytes
 from vectorpress.domain.asset import AccuracyStatus, Asset, RightsStatus, Source
 from vectorpress.domain.catalog_config import CatalogConfig
 from vectorpress.domain.derivative_state import DerivativeState
-from vectorpress.domain.derivative_type import DerivativeType
+from vectorpress.domain.derivative_type import DerivativeType, derivative_filename
+from vectorpress.domain.recipe import RECIPES
 from vectorpress.pipeline import generate as generate_module
 from vectorpress.pipeline.generate import (
     GenerationOutcome,
@@ -350,6 +352,40 @@ def test_regenerates_when_the_source_file_changes(tmp_path: Path) -> None:
     second_provenance = read_provenance(asset_dir / DERIVED_DIRNAME, "ochre-sea-star-color.png")
     assert second_provenance is not None
     assert second_provenance.source_hash != first_provenance.source_hash
+
+
+# --- overrides: generate baselines an untouched override before rewriting (§22.2) --
+
+
+def test_generate_baselines_a_hand_dropped_override_before_rewriting_the_generated_file(
+    tmp_path: Path,
+) -> None:
+    """A hand-dropped override with no provenance of its own yet -- no
+    command has touched it -- must still be flagged stale after a source
+    change and a regenerate: its baseline has to be the source hash the
+    generated file had *before* this generate rewrote it, not the new one,
+    or the two would trivially match and the override would never look
+    stale at all."""
+    asset_dir = _make_asset_dir(tmp_path)
+    generate_asset(_asset(), asset_dir)
+    filename = derivative_filename(_asset().display_name, DerivativeType.CUT_SVG)
+    old_source_hash = sha256_bytes((asset_dir / SOURCES_DIRNAME / "silhouette.png").read_bytes())
+
+    override_path(asset_dir, filename).parent.mkdir(parents=True, exist_ok=True)
+    override_path(asset_dir, filename).write_bytes(b"<svg>hand-dropped, never touched</svg>")
+    assert read_override_provenance(asset_dir / DERIVED_DIRNAME, filename) is None
+
+    _write_source_png(asset_dir / SOURCES_DIRNAME / "silhouette.png", rgba=(10, 20, 30, 255))
+    generate_asset(_asset(), asset_dir)
+
+    provenance = read_override_provenance(asset_dir / DERIVED_DIRNAME, filename)
+    assert provenance is not None
+    assert provenance.source_hash == old_source_hash
+
+    currency = override_currency(_asset(), asset_dir, RECIPES[DerivativeType.CUT_SVG], filename)
+    assert currency is not None
+    assert currency.state is DerivativeState.STALE
+    assert currency.reason == "source changed"
 
 
 # --- stale_only (issue #26's --stale) ----------------------------------------------

@@ -24,8 +24,10 @@ import json
 import re
 import shutil
 from pathlib import Path
+from typing import cast
 
 import pytest
+from PIL import Image
 from typer.testing import CliRunner
 
 from vectorpress.catalog.findings import findings_path
@@ -107,6 +109,20 @@ def _write_override(
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(data)
     return path
+
+
+def _replace_silhouette_source(root: Path, asset_id: str = ASSET_ID) -> None:
+    """Change the asset's silhouette source's content, the same shape a
+    human replacing a master asset makes: the geometry stays a plausible
+    silhouette (one corner pixel's alpha flips), only its bytes -- and so its
+    hash -- change (§22.2's "the source hash it was edited against")."""
+    path = root / "assets" / asset_id / "sources" / "silhouette.png"
+    original_bytes = path.read_bytes()
+    image = Image.open(path).convert("RGBA")
+    r, g, b, a = cast(tuple[int, int, int, int], image.getpixel((0, 0)))
+    image.putpixel((0, 0), (r, g, b, 0 if a else 255))
+    image.save(path, format="PNG")
+    assert path.read_bytes() != original_bytes  # the replacement must actually change the hash
 
 
 # --- acceptance criterion 1: detection, own status, validated as pass --------------
@@ -368,3 +384,251 @@ def test_generated_files_own_state_json_is_untouched_by_an_overrides_approval(
     assert override_state_path.is_file()
     data = json.loads(override_state_path.read_text(encoding="utf-8"))
     assert data["cut_svg"]["status"] == "approved"
+
+
+# --- acceptance criterion 7: a source change flags the override stale -------------
+
+
+@pytest.mark.integration
+def test_replacing_the_source_flags_an_approved_override_stale(
+    monkeypatch: pytest.MonkeyPatch, temp_catalog_root: Path
+) -> None:
+    monkeypatch.chdir(temp_catalog_root)
+    runner.invoke(app, ["generate", ASSET_ID])
+    generated_bytes = (_derived_dir(temp_catalog_root) / FILENAME).read_bytes()
+    _write_override(temp_catalog_root, _hand_edit(generated_bytes))
+    runner.invoke(app, ["validate", ASSET_ID])
+    approve_result = runner.invoke(app, ["approve", ASSET_ID, "cut_svg"])
+    assert approve_result.exit_code == 0, approve_result.output
+
+    _replace_silhouette_source(temp_catalog_root)
+
+    asset_result = runner.invoke(app, ["asset", ASSET_ID])
+    assert asset_result.exit_code == 0, asset_result.output
+    cut_svg_line = next(
+        line for line in asset_result.stdout.splitlines() if line.strip().startswith("cut_svg")
+    )
+    assert "stale (source changed)" in cut_svg_line
+    # still effective and still approved: staleness and status are separate
+    # facts (CONTEXT.md "Stale").
+    assert "approved" in cut_svg_line
+    assert "resolve: vpress override keep" in asset_result.stdout
+    assert "vpress override discard" in asset_result.stdout
+
+    override_bytes_before = override_path(
+        temp_catalog_root / "assets" / ASSET_ID, FILENAME
+    ).read_bytes()
+    generate_result = runner.invoke(app, ["generate", "--force", ASSET_ID])
+    assert generate_result.exit_code == 0, generate_result.output
+
+    # generate regenerated the *generated* file, never the override.
+    assert (
+        override_path(temp_catalog_root / "assets" / ASSET_ID, FILENAME).read_bytes()
+        == override_bytes_before
+    )
+    # the generated file's own provenance now tracks the *new* source --
+    # confirming generate actually regenerated it, whether or not the traced
+    # geometry itself happened to come out identical.
+    new_generated_provenance = read_provenance(_derived_dir(temp_catalog_root), FILENAME)
+    assert new_generated_provenance is not None
+    new_source_hash = sha256_bytes(
+        (temp_catalog_root / "assets" / ASSET_ID / "sources" / "silhouette.png").read_bytes()
+    )
+    assert new_generated_provenance.source_hash == new_source_hash
+
+
+# --- acceptance criterion 8: vpress override keep ---------------------------------
+
+
+@pytest.mark.integration
+def test_override_keep_clears_the_stale_flag_and_a_second_keep_rewrites_nothing(
+    monkeypatch: pytest.MonkeyPatch, temp_catalog_root: Path
+) -> None:
+    monkeypatch.chdir(temp_catalog_root)
+    runner.invoke(app, ["generate", ASSET_ID])
+    generated_bytes = (_derived_dir(temp_catalog_root) / FILENAME).read_bytes()
+    override_bytes = _hand_edit(generated_bytes)
+    _write_override(temp_catalog_root, override_bytes)
+    runner.invoke(app, ["approve", ASSET_ID, "cut_svg"])
+    _replace_silhouette_source(temp_catalog_root)
+
+    before = runner.invoke(app, ["asset", ASSET_ID])
+    stale_line = next(
+        line for line in before.stdout.splitlines() if line.strip().startswith("cut_svg")
+    )
+    assert "stale (source changed)" in stale_line
+
+    keep_result = runner.invoke(app, ["override", "keep", ASSET_ID, "cut_svg"])
+    assert keep_result.exit_code == 0, keep_result.output
+    assert "kept" in keep_result.stdout
+
+    after = runner.invoke(app, ["asset", ASSET_ID])
+    kept_line = next(
+        line for line in after.stdout.splitlines() if line.strip().startswith("cut_svg")
+    )
+    # the override itself is no longer flagged stale (only the *generated*
+    # file's own state -- untouched by keep -- still says stale).
+    assert "stale (source changed)" not in kept_line
+    assert "approved" in kept_line  # keep never touches status
+    assert override_path(temp_catalog_root / "assets" / ASSET_ID, FILENAME).read_bytes() == (
+        override_bytes
+    )
+
+    provenance_path = override_provenance_path(_derived_dir(temp_catalog_root), FILENAME)
+    bytes_before_second_keep = provenance_path.read_bytes()
+
+    second_keep = runner.invoke(app, ["override", "keep", ASSET_ID, "cut_svg"])
+    assert second_keep.exit_code == 0, second_keep.output
+    assert "not stale" in second_keep.stdout
+    assert provenance_path.read_bytes() == bytes_before_second_keep
+
+
+@pytest.mark.integration
+def test_override_keep_on_a_non_stale_override_is_a_noop(
+    monkeypatch: pytest.MonkeyPatch, temp_catalog_root: Path
+) -> None:
+    monkeypatch.chdir(temp_catalog_root)
+    runner.invoke(app, ["generate", ASSET_ID])
+    generated_bytes = (_derived_dir(temp_catalog_root) / FILENAME).read_bytes()
+    _write_override(temp_catalog_root, _hand_edit(generated_bytes))
+
+    result = runner.invoke(app, ["override", "keep", ASSET_ID, "cut_svg"])
+
+    assert result.exit_code == 0, result.output
+    assert "not stale" in result.stdout
+
+
+@pytest.mark.integration
+def test_override_keep_with_no_override_is_an_error(
+    monkeypatch: pytest.MonkeyPatch, temp_catalog_root: Path
+) -> None:
+    monkeypatch.chdir(temp_catalog_root)
+    runner.invoke(app, ["generate", ASSET_ID])
+
+    result = runner.invoke(app, ["override", "keep", ASSET_ID, "cut_svg"])
+
+    assert result.exit_code == 1
+    assert "failed" in result.stdout + result.stderr
+
+
+# --- acceptance criterion 9: editing the stale override clears the flag ----------
+
+
+@pytest.mark.integration
+def test_editing_the_stale_override_clears_the_flag_and_returns_to_needs_review(
+    monkeypatch: pytest.MonkeyPatch, temp_catalog_root: Path
+) -> None:
+    monkeypatch.chdir(temp_catalog_root)
+    runner.invoke(app, ["generate", ASSET_ID])
+    generated_bytes = (_derived_dir(temp_catalog_root) / FILENAME).read_bytes()
+    override_file = _write_override(temp_catalog_root, _hand_edit(generated_bytes))
+    runner.invoke(app, ["approve", ASSET_ID, "cut_svg"])
+    _replace_silhouette_source(temp_catalog_root)
+
+    stale = runner.invoke(app, ["asset", ASSET_ID])
+    stale_line = next(
+        line for line in stale.stdout.splitlines() if line.strip().startswith("cut_svg")
+    )
+    assert "stale (source changed)" in stale_line
+
+    override_file.write_bytes(_hand_edit(generated_bytes, comment=b"<!-- edited again -->"))
+
+    asset_result = runner.invoke(app, ["asset", ASSET_ID])
+    cut_svg_line = next(
+        line for line in asset_result.stdout.splitlines() if line.strip().startswith("cut_svg")
+    )
+    # the edit is taken as made against the current source: no longer
+    # flagged stale, even though nothing has explicitly re-baselined it yet.
+    assert "stale (source changed)" not in cut_svg_line
+    assert "needs review" in cut_svg_line
+    assert "approved" not in cut_svg_line
+
+
+# --- acceptance criterion 10: vpress override discard -----------------------------
+
+
+@pytest.mark.integration
+def test_override_discard_without_yes_removes_nothing_and_exits_1(
+    monkeypatch: pytest.MonkeyPatch, temp_catalog_root: Path
+) -> None:
+    monkeypatch.chdir(temp_catalog_root)
+    runner.invoke(app, ["generate", ASSET_ID])
+    generated_bytes = (_derived_dir(temp_catalog_root) / FILENAME).read_bytes()
+    override_file = _write_override(temp_catalog_root, _hand_edit(generated_bytes))
+    bytes_before = override_file.read_bytes()
+
+    result = runner.invoke(app, ["override", "discard", ASSET_ID, "cut_svg"])
+
+    assert result.exit_code == 1
+    assert override_file.is_file()
+    assert override_file.read_bytes() == bytes_before
+    assert "would remove" in result.stdout
+
+
+@pytest.mark.integration
+def test_override_discard_with_yes_removes_it_and_the_generated_file_becomes_effective(
+    monkeypatch: pytest.MonkeyPatch, temp_catalog_root: Path
+) -> None:
+    monkeypatch.chdir(temp_catalog_root)
+    runner.invoke(app, ["generate", ASSET_ID])
+    generated_bytes = (_derived_dir(temp_catalog_root) / FILENAME).read_bytes()
+    override_file = _write_override(temp_catalog_root, _hand_edit(generated_bytes))
+    runner.invoke(app, ["validate", ASSET_ID])
+    runner.invoke(app, ["approve", ASSET_ID, "cut_svg"])
+
+    result = runner.invoke(app, ["override", "discard", ASSET_ID, "cut_svg", "--yes"])
+
+    assert result.exit_code == 0, result.output
+    assert "discarded" in result.stdout
+    assert not override_file.is_file()
+    assert read_override_provenance(_derived_dir(temp_catalog_root), FILENAME) is None
+
+    asset_result = runner.invoke(app, ["asset", ASSET_ID])
+    cut_svg_line = next(
+        line for line in asset_result.stdout.splitlines() if line.strip().startswith("cut_svg")
+    )
+    assert "override" not in cut_svg_line
+    # the generated file's own status/findings are shown now, never the
+    # discarded override's approval.
+    assert "approved" not in cut_svg_line
+
+
+@pytest.mark.integration
+def test_discarding_a_type_with_no_override_is_a_clear_error(
+    monkeypatch: pytest.MonkeyPatch, temp_catalog_root: Path
+) -> None:
+    monkeypatch.chdir(temp_catalog_root)
+    runner.invoke(app, ["generate", ASSET_ID])
+
+    result = runner.invoke(app, ["override", "discard", ASSET_ID, "cut_svg", "--yes"])
+
+    assert result.exit_code == 1
+    assert "failed" in result.stdout + result.stderr
+
+
+# --- acceptance criterion 11: vpress status counts stale overrides ----------------
+
+
+@pytest.mark.integration
+def test_vpress_status_counts_stale_overrides(
+    monkeypatch: pytest.MonkeyPatch, temp_catalog_root: Path
+) -> None:
+    monkeypatch.chdir(temp_catalog_root)
+    runner.invoke(app, ["generate", ASSET_ID])
+    generated_bytes = (_derived_dir(temp_catalog_root) / FILENAME).read_bytes()
+    _write_override(temp_catalog_root, _hand_edit(generated_bytes))
+    runner.invoke(app, ["approve", ASSET_ID, "cut_svg"])
+
+    before = runner.invoke(app, ["status"])
+    before_line = next(
+        line for line in before.stdout.splitlines() if line.startswith("Stale overrides:")
+    )
+    assert int(before_line.split(":")[1].strip()) == 0
+
+    _replace_silhouette_source(temp_catalog_root)
+
+    after = runner.invoke(app, ["status"])
+    after_line = next(
+        line for line in after.stdout.splitlines() if line.startswith("Stale overrides:")
+    )
+    assert int(after_line.split(":")[1].strip()) >= 1

@@ -56,8 +56,11 @@ the source it was edited against has changed.
 never overwritten, and can be discarded to revert to the generated version.
 `vpress open --override` may create one, on that explicit request only, by
 copying the current generated file into `overrides/`: create-only, never
-overwriting an override already there — the one write the tool ever makes
-under `overrides/`.
+overwriting an override already there. `vpress override discard --yes` removes
+one, on that explicit, confirmed request only. Creating and discarding are the
+only two writes the tool ever makes under `overrides/`. Discarding also clears
+the override's own provenance, status and findings, so a later override at the
+same path starts fresh rather than inheriting them.
 
 **Effective derivative** — The file a product actually uses for a given asset and
 derivative type: the override if present, else the generated file.

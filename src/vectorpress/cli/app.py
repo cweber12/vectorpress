@@ -30,6 +30,7 @@ from vectorpress.catalog.overrides import (
     effective_derivative,
     effective_derivative_status,
     list_unrecognized_overrides,
+    override_currency,
 )
 from vectorpress.catalog.products import load_products, lookup_product
 from vectorpress.catalog.provenance import DERIVED_DIRNAME, read_derivative_bytes
@@ -41,6 +42,7 @@ from vectorpress.domain.derivative_type import DerivativeType, derivative_filena
 from vectorpress.domain.finding import Finding, ValidationOutcome
 from vectorpress.domain.numeric_format import format_number
 from vectorpress.domain.product import Product
+from vectorpress.domain.recipe import RECIPES
 from vectorpress.domain.reference_size import resolve_reference_size_in
 from vectorpress.domain.status import Status
 from vectorpress.pipeline.generate import (
@@ -51,6 +53,13 @@ from vectorpress.pipeline.generate import (
     generate_asset,
 )
 from vectorpress.pipeline.open_editor import Launcher, launch_editor, resolve_open_target
+from vectorpress.pipeline.override_resolution import (
+    DiscardOutcome,
+    KeepOutcome,
+    count_stale_overrides,
+    discard_override,
+    keep_override,
+)
 from vectorpress.pipeline.review import (
     StatusCounts,
     TargetSelection,
@@ -177,8 +186,9 @@ def status(ctx: typer.Context) -> None:
     scripts.
     \f
     Aggregates problems from catalog config, assets, collections, products
-    and brand. Missing, impossible and stale derivative counts are
-    inventory, not problems, and never affect the exit code.
+    and brand. Missing, impossible and stale derivative counts, and the
+    stale override count, are inventory, not problems, and never affect the
+    exit code.
     """
     root = _locate_root(ctx)
     catalog = load_catalog(root)
@@ -193,12 +203,15 @@ def status(ctx: typer.Context) -> None:
     if catalog.config is not None:
         counts = count_derivative_states(catalog.assets, root, catalog.config)
         status_counts = count_derivative_statuses(catalog.assets, root, catalog.config)
+        stale_override_count = count_stale_overrides(catalog.assets, root, catalog.config)
     else:
         counts = DerivativeStateCounts(missing=0, impossible=0, stale=0)
         status_counts = StatusCounts(needs_review=0, approved=0, rejected=0, regenerate=0)
+        stale_override_count = 0
     typer.echo(f"Missing derivatives: {counts.missing}")
     typer.echo(f"Impossible derivatives: {counts.impossible}")
     typer.echo(f"Stale derivatives: {counts.stale}")
+    typer.echo(f"Stale overrides: {stale_override_count}")
     typer.echo(f"Needs review: {status_counts.needs_review}")
     typer.echo(f"Approved: {status_counts.approved}")
     typer.echo(f"Rejected: {status_counts.rejected}")
@@ -321,6 +334,32 @@ def _override_findings_display(
     return "pass" if currency.result is ValidationOutcome.PASS else "needs review"
 
 
+def _override_label(
+    asset_obj: Asset, asset_dir_path: Path, derivative_type: DerivativeType, candidate_filename: str
+) -> str:
+    """The override marker on ``vpress asset``'s overridden derivative line:
+    ``override``, or ``override, stale (source changed)`` once the source it
+    was edited against has changed (§22.2, CONTEXT.md "Stale")."""
+    recipe = RECIPES.get(derivative_type)
+    if recipe is None:
+        return "override"
+    currency = override_currency(asset_obj, asset_dir_path, recipe, candidate_filename)
+    if currency is not None and currency.state is DerivativeState.STALE:
+        return f"override, stale ({currency.reason})"
+    return "override"
+
+
+def _echo_stale_override_resolutions(asset_id: str, derivative_type: DerivativeType) -> None:
+    """The three ways to resolve a stale override (§22.2), printed right
+    under its line in ``vpress asset``."""
+    type_name = derivative_type.value
+    typer.echo(
+        f"    resolve: vpress override keep {asset_id} {type_name}"
+        f" | re-edit the override file"
+        f" | vpress override discard {asset_id} {type_name} --yes"
+    )
+
+
 @app.command()
 def asset(
     ctx: typer.Context,
@@ -332,9 +371,11 @@ def asset(
     The cut_svg line also shows its findings result: pass, needs review,
     findings stale, or not validated. A type overridden under overrides/
     shows override (generated: <state>) instead, with the override's own
-    status and findings. A file under overrides/ that matches no derivative
-    type is reported, never an error. An asset that failed to load shows
-    its metadata problems instead.
+    status and findings; a stale override (its edited-against source has
+    since changed) shows override, stale (source changed) and a line
+    suggesting the three resolutions: keep, re-edit, or discard. A file
+    under overrides/ that matches no derivative type is reported, never an
+    error. An asset that failed to load shows its metadata problems instead.
     """
     root, config = _locate_and_load_config(ctx)
     found = _lookup_asset_or_exit(load_assets(root, config), config, asset_id)
@@ -354,8 +395,11 @@ def asset(
         effective = effective_derivative(asset_dir_path, candidate_filename)
 
         if effective is not None and effective.is_override:
+            label = _override_label(
+                found, asset_dir_path, status.derivative_type, candidate_filename
+            )
             line = (
-                f"  {status.derivative_type.value}\toverride (generated: {status.state.value})"
+                f"  {status.derivative_type.value}\t{label} (generated: {status.state.value})"
                 f"\t{candidate_filename}"
             )
             line += (
@@ -365,6 +409,8 @@ def asset(
                 derived_dir = asset_dir_path / DERIVED_DIRNAME
                 line += f"\t{_override_findings_display(effective, derived_dir, candidate_filename, config)}"
             typer.echo(line)
+            if label != "override":
+                _echo_stale_override_resolutions(found.id, status.derivative_type)
             continue
 
         if status.state is DerivativeState.IMPOSSIBLE:
@@ -801,6 +847,87 @@ def regenerate(
         status_filter,
         note,
     )
+
+
+override_app = typer.Typer(
+    name="override",
+    help="Resolve a stale override: keep it, or discard it.",
+    no_args_is_help=True,
+)
+app.add_typer(override_app, name="override")
+
+
+@override_app.command("keep")
+def override_keep(
+    ctx: typer.Context,
+    asset_id: str = typer.Argument(help="The asset's ID (its folder name under assets/)."),
+    derivative_type: str = typer.Argument(help="The overridden derivative type, e.g. cut_svg."),
+) -> None:
+    """Keep a stale override as-is against its changed source.
+
+    Re-baselines the override's edited-against source hash to the source
+    currently selected for it, clearing the stale flag -- the override's
+    bytes and status are untouched. A non-stale override is a no-op, said as
+    such; a second keep in a row is always a no-op, since the first one
+    already moved the baseline.
+    \f
+    An unknown asset or derivative type, or a derivative type with no
+    override at all, is an error, exit 1, nothing written.
+    """
+    root, config = _locate_and_load_config(ctx)
+    found = _lookup_asset_or_exit(load_assets(root, config), config, asset_id)
+    parsed_type = _parse_derivative_type_or_exit(derivative_type)
+
+    result = keep_override(found, asset_dir(root, config, found.id), parsed_type)
+    if result.outcome is KeepOutcome.ERROR:
+        assert result.error is not None  # ERROR always carries a reason
+        typer.echo(f"override keep: {asset_id} {derivative_type} failed: {result.error}", err=True)
+        raise typer.Exit(code=1)
+
+    typer.echo(f"{asset_id}\t{derivative_type}\t{result.outcome.value}")
+
+
+@override_app.command("discard")
+def override_discard(
+    ctx: typer.Context,
+    asset_id: str = typer.Argument(help="The asset's ID (its folder name under assets/)."),
+    derivative_type: str = typer.Argument(help="The overridden derivative type, e.g. cut_svg."),
+    yes: bool = typer.Option(
+        False, "--yes", help="Actually remove the override. Without it, nothing is touched."
+    ),
+) -> None:
+    """Discard an override, reverting to the generated file.
+
+    Removes the override file and its provenance, status and findings, so
+    the generated derivative becomes effective again with its own status
+    and findings. Without --yes, prints what would be removed and exits 1
+    without touching anything.
+    \f
+    The one deletion the tool ever makes under overrides/ (CONTEXT.md
+    "Override"), made only on this explicit, confirmed request. An unknown
+    asset or derivative type, or a derivative type with no override at all,
+    is an error, exit 1, nothing written, whether or not --yes is given.
+    """
+    root, config = _locate_and_load_config(ctx)
+    found = _lookup_asset_or_exit(load_assets(root, config), config, asset_id)
+    parsed_type = _parse_derivative_type_or_exit(derivative_type)
+
+    result = discard_override(found, asset_dir(root, config, found.id), parsed_type, confirmed=yes)
+    if result.outcome is DiscardOutcome.ERROR:
+        assert result.error is not None  # ERROR always carries a reason
+        typer.echo(
+            f"override discard: {asset_id} {derivative_type} failed: {result.error}", err=True
+        )
+        raise typer.Exit(code=1)
+
+    assert result.override_file is not None  # DISCARDED/WOULD_DISCARD always name the file
+    if result.outcome is DiscardOutcome.WOULD_DISCARD:
+        typer.echo(f"{asset_id}\t{derivative_type}\twould remove: {result.override_file}")
+        typer.echo(f"{asset_id}\t{derivative_type}\twould remove: its provenance, status, findings")
+        typer.echo("override discard: pass --yes to actually remove it", err=True)
+        raise typer.Exit(code=1)
+
+    typer.echo(f"{asset_id}\t{derivative_type}\tdiscarded\t{result.override_file}")
 
 
 #: Injection seam for tests: `vpress open`'s launch step goes through this
