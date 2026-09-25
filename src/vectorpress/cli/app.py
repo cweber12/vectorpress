@@ -25,13 +25,19 @@ from vectorpress.catalog.findings import FindingsCurrencyState, findings_currenc
 from vectorpress.catalog.load import load_catalog, load_catalog_config
 from vectorpress.catalog.locate import locate_catalog_root
 from vectorpress.catalog.metadata_problem import MetadataProblem
+from vectorpress.catalog.overrides import (
+    EffectiveDerivative,
+    effective_derivative,
+    effective_derivative_status,
+    list_unrecognized_overrides,
+)
 from vectorpress.catalog.products import load_products, lookup_product
 from vectorpress.catalog.provenance import DERIVED_DIRNAME, read_derivative_bytes
 from vectorpress.catalog.status import asset_derivative_status
 from vectorpress.domain.asset import Asset
 from vectorpress.domain.catalog_config import CatalogConfig
 from vectorpress.domain.derivative_state import DerivativeState
-from vectorpress.domain.derivative_type import DerivativeType
+from vectorpress.domain.derivative_type import DerivativeType, derivative_filename
 from vectorpress.domain.finding import Finding, ValidationOutcome
 from vectorpress.domain.numeric_format import format_number
 from vectorpress.domain.product import Product
@@ -274,6 +280,46 @@ def _status_display(
     return text
 
 
+def _override_status_display(
+    effective: EffectiveDerivative,
+    asset_dir_path: Path,
+    derivative_type: DerivativeType,
+) -> str:
+    """The status column on ``vpress asset``'s overridden derivative line:
+    the override's own status (§6.8, CONTEXT.md "Effective derivative"),
+    never the generated file's."""
+    record = effective_derivative_status(asset_dir_path, derivative_type, effective)
+    text = record.status.value.replace("_", " ")
+    if record.note:
+        text += f" ({record.note})"
+    return text
+
+
+def _override_findings_display(
+    effective: EffectiveDerivative,
+    derived_dir: Path,
+    output_filename: str,
+    config: CatalogConfig,
+) -> str:
+    """The findings column on an overridden ``cut_svg`` line: the override's
+    own findings currency (§6.8), mirroring :func:`_findings_display` but
+    for the override's own coexisting report."""
+    currency = findings_currency(
+        derived_dir,
+        output_filename,
+        effective.bytes,
+        config.reference_size_in,
+        THRESHOLDS,
+        is_override=True,
+    )
+    if currency.state is FindingsCurrencyState.NOT_VALIDATED:
+        return "not validated"
+    if currency.state is FindingsCurrencyState.STALE:
+        return "findings stale"
+    assert currency.result is not None  # set exactly when state is CURRENT
+    return "pass" if currency.result is ValidationOutcome.PASS else "needs review"
+
+
 @app.command()
 def asset(
     ctx: typer.Context,
@@ -283,11 +329,15 @@ def asset(
     derivative type's state (current, stale, missing or impossible).
 
     The cut_svg line also shows its findings result: pass, needs review,
-    findings stale, or not validated. An asset that failed to load shows
+    findings stale, or not validated. A type overridden under overrides/
+    shows override (generated: <state>) instead, with the override's own
+    status and findings. A file under overrides/ that matches no derivative
+    type is reported, never an error. An asset that failed to load shows
     its metadata problems instead.
     """
     root, config = _locate_and_load_config(ctx)
     found = _lookup_asset_or_exit(load_assets(root, config), config, asset_id)
+    asset_dir_path = asset_dir(root, config, found.id)
     typer.echo(f"{found.id}\t{found.display_name}")
     typer.echo(f"Rights status: {found.rights_status.value}")
     typer.echo(f"Accuracy status: {found.accuracy_status.value}")
@@ -296,7 +346,26 @@ def asset(
         typer.echo(f"  {source.file}\t{source.role}")
 
     typer.echo("Derivatives:")
-    for status in asset_derivative_statuses(found, asset_dir(root, config, found.id), config):
+    known_filenames: list[str] = []
+    for status in asset_derivative_statuses(found, asset_dir_path, config):
+        candidate_filename = derivative_filename(found.display_name, status.derivative_type)
+        known_filenames.append(candidate_filename)
+        effective = effective_derivative(asset_dir_path, candidate_filename)
+
+        if effective is not None and effective.is_override:
+            line = (
+                f"  {status.derivative_type.value}\toverride (generated: {status.state.value})"
+                f"\t{candidate_filename}"
+            )
+            line += (
+                f"\t{_override_status_display(effective, asset_dir_path, status.derivative_type)}"
+            )
+            if status.derivative_type is DerivativeType.CUT_SVG:
+                derived_dir = asset_dir_path / DERIVED_DIRNAME
+                line += f"\t{_override_findings_display(effective, derived_dir, candidate_filename, config)}"
+            typer.echo(line)
+            continue
+
         if status.state is DerivativeState.IMPOSSIBLE:
             line = f"  {status.derivative_type.value}\t{status.state.value}\t{status.reason}"
         elif status.state is DerivativeState.CURRENT:
@@ -318,6 +387,12 @@ def asset(
         if status.derivative_type is DerivativeType.CUT_SVG:
             line += f"\t{_findings_display(status, root, config, found.id)}"
         typer.echo(line)
+
+    unrecognized = list_unrecognized_overrides(asset_dir_path, known_filenames)
+    if unrecognized:
+        typer.echo("Unrecognized overrides:")
+        for name in unrecognized:
+            typer.echo(f"  {name}\tignored")
 
 
 def _select_targets(
@@ -910,7 +985,10 @@ def validate(
             if resolved_product is not None
             else ""
         )
-        typer.echo(f"{target.id}\tcut_svg\t{outcome.filename}\t{result_text}{size_note}")
+        override_note = "\t(override)" if outcome.is_override else ""
+        typer.echo(
+            f"{target.id}\tcut_svg\t{outcome.filename}\t{result_text}{size_note}{override_note}"
+        )
         for finding in outcome.validation.findings:
             _echo_finding(finding)
 

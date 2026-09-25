@@ -13,11 +13,16 @@ from pathlib import Path
 from PIL import Image
 
 from vectorpress.catalog.assets import asset_dir
+from vectorpress.catalog.overrides import (
+    override_path,
+    read_override_provenance,
+    read_override_status,
+)
 from vectorpress.catalog.provenance import DERIVED_DIRNAME
 from vectorpress.catalog.status import read_status
 from vectorpress.domain.asset import AccuracyStatus, Asset, RightsStatus, Source
 from vectorpress.domain.catalog_config import CatalogConfig
-from vectorpress.domain.derivative_type import DerivativeType
+from vectorpress.domain.derivative_type import DerivativeType, derivative_filename
 from vectorpress.domain.status import Status
 from vectorpress.pipeline.generate import generate_asset
 from vectorpress.pipeline.review import (
@@ -376,3 +381,106 @@ def test_count_derivative_statuses_counts_only_existing_derivatives(tmp_path: Pa
     # and cut_svg were generated but never approved, so needs_review.
     assert counts.approved == 1
     assert counts.needs_review == 2
+
+
+# --- overrides: approve/reject/regenerate act on the effective derivative (§6.8) ----
+
+
+def _write_override_file(asset_dir_path: Path, filename: str, data: bytes) -> Path:
+    path = override_path(asset_dir_path, filename)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(data)
+    return path
+
+
+def test_approve_approves_the_override_and_leaves_the_generated_status_untouched(
+    tmp_path: Path,
+) -> None:
+    asset_dir_path = _make_asset_dir(tmp_path)
+    generate_asset(_asset(), asset_dir_path)
+    filename = derivative_filename(_asset().display_name, DerivativeType.CUT_SVG)
+    _write_override_file(asset_dir_path, filename, b"<svg>hand-edited</svg>")
+    generated_status_before = read_status(asset_dir_path / DERIVED_DIRNAME, DerivativeType.CUT_SVG)
+    assert generated_status_before is not None  # generation itself records needs_review
+
+    result = approve_derivative(_asset(), asset_dir_path, DerivativeType.CUT_SVG, "clean")
+
+    assert result.outcome is ApproveOutcome.APPROVED
+    override_record = read_override_status(asset_dir_path / DERIVED_DIRNAME, DerivativeType.CUT_SVG)
+    assert override_record is not None
+    assert override_record.status is Status.APPROVED
+    assert override_record.note == "clean"
+    # the generated file's own status record was never touched by approving
+    # the override.
+    assert (
+        read_status(asset_dir_path / DERIVED_DIRNAME, DerivativeType.CUT_SVG)
+        == generated_status_before
+    )
+
+
+def test_approving_the_override_records_its_provenance(tmp_path: Path) -> None:
+    asset_dir_path = _make_asset_dir(tmp_path)
+    generate_asset(_asset(), asset_dir_path)
+    filename = derivative_filename(_asset().display_name, DerivativeType.CUT_SVG)
+    _write_override_file(asset_dir_path, filename, b"<svg>hand-edited</svg>")
+
+    approve_derivative(_asset(), asset_dir_path, DerivativeType.CUT_SVG, None)
+
+    override_provenance = read_override_provenance(asset_dir_path / DERIVED_DIRNAME, filename)
+    assert override_provenance is not None
+
+
+def test_regenerate_on_an_overridden_type_marks_the_override_not_the_generated_file(
+    tmp_path: Path,
+) -> None:
+    """§6.8: overrides are never overwritten, so marking an overridden type
+    for regeneration must never make ``vpress generate`` force-regenerate
+    the *generated* file underneath it -- only the generated file's own
+    status controls that (:func:`~vectorpress.pipeline.generate._regenerate_requested`)."""
+    asset_dir_path = _make_asset_dir(tmp_path)
+    generate_asset(_asset(), asset_dir_path)
+    filename = derivative_filename(_asset().display_name, DerivativeType.CUT_SVG)
+    _write_override_file(asset_dir_path, filename, b"<svg>hand-edited</svg>")
+    generated_status_before = read_status(asset_dir_path / DERIVED_DIRNAME, DerivativeType.CUT_SVG)
+    assert generated_status_before is not None  # generation itself records needs_review
+
+    result = regenerate_derivative(_asset(), asset_dir_path, DerivativeType.CUT_SVG, None)
+    assert result.outcome is RegenerateOutcome.REGENERATE
+
+    override_record = read_override_status(asset_dir_path / DERIVED_DIRNAME, DerivativeType.CUT_SVG)
+    assert override_record is not None
+    assert override_record.status is Status.REGENERATE
+    # the generated file's own status record is untouched by marking the
+    # override for regeneration.
+    assert (
+        read_status(asset_dir_path / DERIVED_DIRNAME, DerivativeType.CUT_SVG)
+        == generated_status_before
+    )
+
+    results = generate_asset(_asset(), asset_dir_path)
+    cut_svg_result = next(r for r in results if r.derivative_type is DerivativeType.CUT_SVG)
+    # not forced: the generated file itself was never marked regenerate.
+    assert cut_svg_result.outcome.value == "current"
+
+    override_file = override_path(asset_dir_path, filename)
+    assert override_file.read_bytes() == b"<svg>hand-edited</svg>"
+
+
+def test_count_derivative_statuses_counts_the_overrides_status_when_present(
+    tmp_path: Path,
+) -> None:
+    config = CatalogConfig(name="test")
+    asset, asset_dir_path = _make_catalog_asset(tmp_path, config, "ochre_sea_star")
+    generate_asset(asset, asset_dir_path)
+    approve_derivative(
+        asset, asset_dir_path, DerivativeType.CUT_SVG, None
+    )  # approves the generated file
+    filename = derivative_filename(asset.display_name, DerivativeType.CUT_SVG)
+    _write_override_file(asset_dir_path, filename, b"<svg>hand-edited</svg>")
+
+    counts = count_derivative_statuses([asset], tmp_path, config)
+
+    # cut_svg's generated file is approved, but the override is what is
+    # effective now, and it has never been reviewed -- needs_review.
+    assert counts.approved == 0
+    assert counts.needs_review >= 1
