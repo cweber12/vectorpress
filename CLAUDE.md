@@ -38,6 +38,13 @@ JSON; accept an intended change with `uv run pytest --snapshot-update` and expla
 diff in the PR. Heavy runtime dependencies (tracing, geometry, DXF, Playwright) are added
 by the PRD that first needs them, via `uv add`.
 
+CLI output assertions strip ANSI escapes and Rich box-drawing before matching: CI
+runners detect color support and split words across escape codes (see
+`_normalized_output` in `tests/integration/test_validate.py`).
+
 ## Conventions
 
 Conventional commits; squash-merge to `main`; CI runs on ubuntu and windows.
+
+The dev machine is Windows. Write multi-line issue, PR and comment bodies to a file
+with the Write tool and pass `--body-file`; heredocs break on quoting here.
