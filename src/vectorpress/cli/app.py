@@ -46,7 +46,7 @@ from vectorpress.domain.product import Product
 from vectorpress.domain.recipe import RECIPES
 from vectorpress.domain.reference_size import resolve_reference_size_in
 from vectorpress.domain.status import Status
-from vectorpress.pipeline.eligibility import asset_eligibility_for, eligible_derivative_types
+from vectorpress.pipeline.eligibility import asset_eligibility_for, possible_derivative_types
 from vectorpress.pipeline.generate import (
     DerivativeStatus,
     GenerationOutcome,
@@ -477,7 +477,7 @@ def asset(
     requested_types = (
         _parse_types_option_or_exit(types)
         if types is not None
-        else eligible_derivative_types(found, asset_dir_path, config)
+        else possible_derivative_types(found, asset_dir_path, config)
     )
     result = asset_eligibility_for(found, asset_dir_path, requested_types, config)
     _echo_eligibility(requested_types, result)

@@ -30,14 +30,15 @@ from vectorpress.domain.eligibility import (
 from vectorpress.pipeline.generate import asset_derivative_statuses
 
 
-def eligible_derivative_types(
+def possible_derivative_types(
     asset: Asset, asset_dir_path: Path, config: CatalogConfig | None = None
 ) -> list[DerivativeType]:
     """Every derivative type this asset can have at all -- every recipe-
     bearing type whose state is not ``impossible`` (§10.1) -- in the order
     :func:`~vectorpress.pipeline.generate.asset_derivative_statuses` returns
-    them. This is the default set ``vpress asset`` shows eligibility for
-    when ``--types`` is not given."""
+    them. Not itself an eligibility answer: this is only the default set
+    ``vpress asset`` shows eligibility *for* when ``--types`` is not given,
+    whether or not the asset is actually eligible to ship with them."""
     return [
         status.derivative_type
         for status in asset_derivative_statuses(asset, asset_dir_path, config)

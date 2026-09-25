@@ -24,8 +24,8 @@ from vectorpress.domain.eligibility import Eligibility
 from vectorpress.domain.status import Status, StatusRecord
 from vectorpress.pipeline.eligibility import (
     asset_eligibility_for,
-    eligible_derivative_types,
     included_derivatives,
+    possible_derivative_types,
 )
 from vectorpress.pipeline.generate import generate_asset
 from vectorpress.pipeline.review import approve_derivative
@@ -63,17 +63,17 @@ def _config() -> CatalogConfig:
     return CatalogConfig(name="test")
 
 
-# --- eligible_derivative_types: every state but impossible ---------------------------
+# --- possible_derivative_types: every state but impossible ---------------------------
 
 
-def test_eligible_derivative_types_excludes_impossible_types(tmp_path: Path) -> None:
+def test_possible_derivative_types_excludes_impossible_types(tmp_path: Path) -> None:
     """This asset has only a ``silhouette`` source: ``flatcolor_svg`` (which
     needs a ``flatcolor`` source) is impossible and excluded; every other
     recipe-bearing type, still ``missing`` before generation, is included."""
     config = _config()
     asset, asset_dir_path = _make_catalog_asset(tmp_path, config, "ochre_sea_star")
 
-    types = eligible_derivative_types(asset, asset_dir_path, config)
+    types = possible_derivative_types(asset, asset_dir_path, config)
 
     assert DerivativeType.FLATCOLOR_SVG not in types
     assert DerivativeType.TRANSPARENT_PNG in types
