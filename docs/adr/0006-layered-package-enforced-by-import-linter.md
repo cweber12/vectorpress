@@ -1,6 +1,6 @@
 # 0006 — Single package, layered by import direction, enforced in CI
 
-Status: accepted
+Status: accepted; partly superseded by 0011 (collection resolution lives in domain/catalog, not build)
 Date: 2026-09-22
 
 ## Decision
