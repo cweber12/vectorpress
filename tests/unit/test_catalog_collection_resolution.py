@@ -16,6 +16,7 @@ from vectorpress.catalog.collection_resolution import (
     MEMBERSHIP_ASSET_IDS_FIELD,
     MEMBERSHIP_COLLECTION_SLUGS_FIELD,
     PRODUCT_COLLECTION_SLUG_FIELD,
+    all_reference_problems,
     collection_toml_path,
     lookup_and_resolve_collection,
     product_collection_slug_reference_problem,
@@ -574,3 +575,85 @@ def test_product_collection_slug_reference_problem_is_none_without_a_collection_
     problem = product_collection_slug_reference_problem(product, config, known_collections=[])
 
     assert problem is None
+
+
+# --- all_reference_problems: collections and products in one pass (§34, ADR 0011) --
+
+
+def test_all_reference_problems_is_empty_on_the_clean_fixture() -> None:
+    config = load_catalog_config(FIXTURE_CATALOG_ROOT)
+    known_assets = load_assets(FIXTURE_CATALOG_ROOT, config).assets
+    collections = load_collections(FIXTURE_CATALOG_ROOT, config).collections
+    products = load_products(FIXTURE_CATALOG_ROOT, config).products
+
+    assert all_reference_problems(collections, products, config, known_assets) == []
+
+
+def test_all_reference_problems_gathers_a_collections_own_problem(catalog_copy: Path) -> None:
+    path = _collection_toml(catalog_copy, "pacific_coast_tide_pool")
+    text = path.read_text(encoding="utf-8").replace(
+        '"purple_sea_urchin"]', '"purple_sea_urchin", "not_a_real_asset"]'
+    )
+    path.write_text(text, encoding="utf-8")
+    config = load_catalog_config(catalog_copy)
+    collections = load_collections(catalog_copy, config).collections
+    products = load_products(catalog_copy, config).products
+    known_assets = load_assets(catalog_copy, config).assets
+
+    problems = all_reference_problems(collections, products, config, known_assets)
+
+    assert len(problems) == 1
+    assert problems[0].field == MEMBERSHIP_ASSET_IDS_FIELD
+    assert "not_a_real_asset" in problems[0].message
+
+
+def test_all_reference_problems_gathers_a_products_own_problem(catalog_copy: Path) -> None:
+    path = catalog_copy / "products" / "pacific_coast_tide_pool_standard_pack.toml"
+    text = path.read_text(encoding="utf-8")
+    assert 'collection_slug = "pacific_coast_tide_pool"\n' in text
+    path.write_text(
+        text.replace(
+            'collection_slug = "pacific_coast_tide_pool"\n',
+            'collection_slug = "not_a_real_collection"\n',
+        ),
+        encoding="utf-8",
+    )
+    config = load_catalog_config(catalog_copy)
+    collections = load_collections(catalog_copy, config).collections
+    products = load_products(catalog_copy, config).products
+    known_assets = load_assets(catalog_copy, config).assets
+
+    problems = all_reference_problems(collections, products, config, known_assets)
+
+    assert len(problems) == 1
+    assert problems[0].field == PRODUCT_COLLECTION_SLUG_FIELD
+    assert "not_a_real_collection" in problems[0].message
+
+
+def test_all_reference_problems_gathers_both_kinds_together(catalog_copy: Path) -> None:
+    collection_path = _collection_toml(catalog_copy, "pacific_coast_tide_pool")
+    collection_text = collection_path.read_text(encoding="utf-8").replace(
+        '"purple_sea_urchin"]', '"purple_sea_urchin", "not_a_real_asset"]'
+    )
+    collection_path.write_text(collection_text, encoding="utf-8")
+
+    product_path = catalog_copy / "products" / "pacific_coast_tide_pool_standard_pack.toml"
+    product_text = product_path.read_text(encoding="utf-8")
+    assert 'collection_slug = "pacific_coast_tide_pool"\n' in product_text
+    product_path.write_text(
+        product_text.replace(
+            'collection_slug = "pacific_coast_tide_pool"\n',
+            'collection_slug = "not_a_real_collection"\n',
+        ),
+        encoding="utf-8",
+    )
+    config = load_catalog_config(catalog_copy)
+    collections = load_collections(catalog_copy, config).collections
+    products = load_products(catalog_copy, config).products
+    known_assets = load_assets(catalog_copy, config).assets
+
+    problems = all_reference_problems(collections, products, config, known_assets)
+
+    assert len(problems) == 2
+    fields = {problem.field for problem in problems}
+    assert fields == {MEMBERSHIP_ASSET_IDS_FIELD, PRODUCT_COLLECTION_SLUG_FIELD}

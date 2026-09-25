@@ -159,6 +159,56 @@ def test_a_rights_blocked_asset_stays_excluded_even_fully_approved(
     assert "missing" not in member_section
 
 
+def _set_accuracy_status_issue_found(root: Path, asset_id: str) -> None:
+    """Turn one fixture asset's accuracy status blocking (§10.1,
+    ``AccuracyStatus.ISSUE_FOUND``), the asset-level counterpart to
+    ``_add_rights_blocked_test_product``'s rights block -- on a real
+    ``pacific_coast_tide_pool`` member, so both products already over that
+    collection (different ``derivative_types``) both see it excluded."""
+    path = root / "assets" / asset_id / "asset.toml"
+    text = path.read_text(encoding="utf-8")
+    assert 'accuracy_status = "reviewed"\n' in text
+    path.write_text(
+        text.replace('accuracy_status = "reviewed"\n', 'accuracy_status = "issue_found"\n'),
+        encoding="utf-8",
+    )
+
+
+@pytest.mark.integration
+def test_an_accuracy_blocked_member_stays_excluded_in_both_products_even_fully_approved(
+    monkeypatch: pytest.MonkeyPatch, temp_catalog_root: Path
+) -> None:
+    """§10.1's asset-level accuracy block, distinct from the rights-status
+    one above: ``purple_sea_urchin`` is a member of both
+    ``pacific_coast_tide_pool_standard_pack`` and
+    ``pacific_coast_tide_pool_png_only`` (different derivative types, same
+    underlying collection) -- an accuracy-blocked member stays excluded in
+    both, even with every one of its derivatives approved."""
+    _set_accuracy_status_issue_found(temp_catalog_root, "purple_sea_urchin")
+    monkeypatch.chdir(temp_catalog_root)
+    generate_result = runner.invoke(app, ["generate", "--all"])
+    assert generate_result.exit_code == 1, generate_result.output  # acorn_barnacle fails (§35)
+    approve_result = runner.invoke(app, ["approve", "--all"])
+    assert approve_result.exit_code == 0, approve_result.output
+
+    for product_slug in (
+        "pacific_coast_tide_pool_standard_pack",
+        "pacific_coast_tide_pool_png_only",
+    ):
+        result = runner.invoke(app, ["product", product_slug])
+
+        assert result.exit_code == 0, result.output
+        assert "purple_sea_urchin\texplicit\texcluded" in result.stdout
+        assert "accuracy status: issue found" in result.stdout
+        # every existing derivative is approved: no per-derivative reason left.
+        member_section = _section(result.stdout, "  purple_sea_urchin")
+        assert "needs review" not in member_section
+        assert "missing" not in member_section
+        # the other two members are unaffected.
+        assert "ochre_sea_star\texplicit\teligible" in result.stdout
+        assert "giant_green_anemone\texplicit\teligible" in result.stdout
+
+
 # --- acceptance criterion 4: inline rule membership is live -------------------------
 
 

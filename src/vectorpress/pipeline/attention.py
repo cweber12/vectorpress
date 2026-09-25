@@ -24,10 +24,7 @@ from enum import StrEnum
 from pathlib import Path
 
 from vectorpress.catalog.assets import asset_dir
-from vectorpress.catalog.collection_resolution import (
-    product_collection_slug_reference_problem,
-    resolve_collections,
-)
+from vectorpress.catalog.collection_resolution import all_reference_problems
 from vectorpress.catalog.findings import read_findings_report
 from vectorpress.catalog.load import LoadedCatalog
 from vectorpress.catalog.metadata_problem import MetadataProblem
@@ -311,14 +308,9 @@ def build_attention_report(catalog: LoadedCatalog, root: Path) -> AttentionRepor
     awaiting_review_count = 0
 
     if catalog.config is not None:
-        for resolved in resolve_collections(catalog.collections, catalog.config, catalog.assets):
-            reference_problems.extend(resolved.reference_problems)
-        for product in catalog.products:
-            problem = product_collection_slug_reference_problem(
-                product, catalog.config, catalog.collections
-            )
-            if problem is not None:
-                reference_problems.append(problem)
+        reference_problems = all_reference_problems(
+            catalog.collections, catalog.products, catalog.config, catalog.assets
+        )
 
         for asset in catalog.assets:
             asset_dir_path = asset_dir(root, catalog.config, asset.id)
