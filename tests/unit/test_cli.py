@@ -247,27 +247,33 @@ def test_status_lists_a_missing_field_an_unknown_role_and_a_duplicate_id(
     Folder-named assets mean a duplicate asset ID can only arise as an
     ``id`` field disagreeing with its own folder (#4's check); this asset
     is excluded and the mismatch is reported as the "duplicate ID" case.
+
+    Uses assets none of the fixture's collections reference (bat_star,
+    coralline_algae, keyhole_limpet -- their own asset.toml notes say so):
+    breaking a collection member here would also surface it as a reference
+    problem, which is exercised on its own in
+    tests/integration/test_collection_resolution.py, not this count.
     """
     root = tmp_path / "catalog"
     shutil.copytree(FIXTURE_CATALOG_ROOT, root)
 
-    ochre = root / "assets" / "ochre_sea_star" / "asset.toml"
-    ochre.write_text(
-        ochre.read_text(encoding="utf-8").replace('subject_category = "Echinoderm"\n', ""),
+    bat_star = root / "assets" / "bat_star" / "asset.toml"
+    bat_star.write_text(
+        bat_star.read_text(encoding="utf-8").replace('subject_category = "Echinoderm"\n', ""),
         encoding="utf-8",
     )
 
-    urchin = root / "assets" / "purple_sea_urchin" / "asset.toml"
-    urchin.write_text(
-        urchin.read_text(encoding="utf-8").replace(
+    coralline_algae = root / "assets" / "coralline_algae" / "asset.toml"
+    coralline_algae.write_text(
+        coralline_algae.read_text(encoding="utf-8").replace(
             'role = "silhouette"', 'role = "not_a_real_role"'
         ),
         encoding="utf-8",
     )
 
-    anemone = root / "assets" / "giant_green_anemone" / "asset.toml"
-    anemone.write_text(
-        'id = "purple_sea_urchin"\n' + anemone.read_text(encoding="utf-8"),
+    keyhole_limpet = root / "assets" / "keyhole_limpet" / "asset.toml"
+    keyhole_limpet.write_text(
+        'id = "coralline_algae"\n' + keyhole_limpet.read_text(encoding="utf-8"),
         encoding="utf-8",
     )
 
@@ -277,12 +283,12 @@ def test_status_lists_a_missing_field_an_unknown_role_and_a_duplicate_id(
 
     assert result.exit_code != 0
     assert "Metadata problems: 3" in result.stdout
-    assert str(Path("assets") / "ochre_sea_star" / "asset.toml") in result.stdout
+    assert str(Path("assets") / "bat_star" / "asset.toml") in result.stdout
     assert "subject_category" in result.stdout
-    assert str(Path("assets") / "purple_sea_urchin" / "asset.toml") in result.stdout
+    assert str(Path("assets") / "coralline_algae" / "asset.toml") in result.stdout
     assert "not_a_real_role" in result.stdout
-    assert str(Path("assets") / "giant_green_anemone" / "asset.toml") in result.stdout
-    assert "purple_sea_urchin" in result.stdout
+    assert str(Path("assets") / "keyhole_limpet" / "asset.toml") in result.stdout
+    assert "coralline_algae" in result.stdout
     assert "does not match folder name" in result.stdout
 
 
@@ -573,6 +579,89 @@ def test_collections_are_sorted_by_slug(monkeypatch: pytest.MonkeyPatch) -> None
     lines = [line for line in result.stdout.splitlines() if line.strip()]
     slugs = [line.split("\t")[0] for line in lines]
     assert slugs == sorted(slugs)
+
+
+def test_collections_member_count_column_reflects_current_resolution(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The explicit fixture collection resolves to 3 members; the rule
+    collection resolves to 0 -- this slice does not resolve rules yet."""
+    monkeypatch.chdir(FIXTURE_CATALOG_ROOT)
+
+    result = runner.invoke(app, ["collections"])
+
+    assert result.exit_code == 0
+    lines = {line.split("\t")[0]: line for line in result.stdout.splitlines() if line.strip()}
+    assert lines["pacific_coast_tide_pool"].split("\t")[-1] == "3"
+    assert lines["kelp_forest_ecosystem"].split("\t")[-1] == "0"
+
+
+# --- vpress collection <slug> (§11, §34) -------------------------------------------
+
+
+def test_collection_on_the_fixture_lists_exactly_its_three_explicit_members(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.chdir(FIXTURE_CATALOG_ROOT)
+
+    result = runner.invoke(app, ["collection", "pacific_coast_tide_pool"])
+
+    assert result.exit_code == 0, result.output
+    assert "Pacific Coast Tide Pool" in result.stdout
+    assert "Members: 3" in result.stdout
+    for asset_id in ("giant_green_anemone", "ochre_sea_star", "purple_sea_urchin"):
+        assert f"{asset_id}\texplicit" in result.stdout
+
+
+def test_collection_prints_description_tags_and_marketplace_category(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.chdir(FIXTURE_CATALOG_ROOT)
+
+    result = runner.invoke(app, ["collection", "pacific_coast_tide_pool"])
+
+    assert result.exit_code == 0, result.output
+    assert "Nature & Wildlife" in result.stdout
+    assert "tide pool" in result.stdout
+    assert "Membership form: explicit" in result.stdout
+
+
+def test_collection_with_unknown_slug_exits_non_zero_and_names_the_slug(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.chdir(FIXTURE_CATALOG_ROOT)
+
+    result = runner.invoke(app, ["collection", "not_a_real_collection"])
+
+    assert result.exit_code != 0
+    assert "not_a_real_collection" in result.output
+    assert "Unknown collection" in result.output
+    assert ".toml" not in result.output  # does not claim a file exists
+
+
+def test_collection_that_failed_to_load_exits_non_zero_with_a_distinct_message(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Acceptance criterion 3: an unknown slug and a collection file that
+    failed to load are told apart, mirroring ``vpress asset``'s and
+    ``vpress product``'s own lookup split."""
+    root = tmp_path / "catalog"
+    shutil.copytree(FIXTURE_CATALOG_ROOT, root)
+    path = root / "collections" / "pacific_coast_tide_pool.toml"
+    path.write_text(
+        path.read_text(encoding="utf-8").replace(
+            'marketplace_category = "Nature & Wildlife"\n', ""
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
+
+    result = runner.invoke(app, ["--catalog", str(root), "collection", "pacific_coast_tide_pool"])
+
+    assert result.exit_code != 0
+    assert "Unknown collection" not in result.output
+    assert str(Path("collections") / "pacific_coast_tide_pool.toml") in result.output
+    assert "marketplace_category" in result.output
 
 
 def test_products_lists_both_fixture_products_with_slug_title_tier_and_collection(

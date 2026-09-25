@@ -55,6 +55,8 @@ def test_every_cli_command_leaves_source_images_unchanged(
     succeeding_results = [
         runner.invoke(app, ["status"]),
         runner.invoke(app, ["assets"]),
+        runner.invoke(app, ["collections"]),
+        runner.invoke(app, ["collection", "pacific_coast_tide_pool"]),
         *(runner.invoke(app, ["asset", asset_id]) for asset_id in FIXTURE_ASSET_IDS),
         *(runner.invoke(app, ["generate", asset_id]) for asset_id in FIXTURE_ASSET_IDS),
     ]

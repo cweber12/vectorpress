@@ -19,6 +19,12 @@ from vectorpress.catalog.assets import (
     load_assets,
     lookup_asset,
 )
+from vectorpress.catalog.collection_resolution import (
+    ResolvedCollection,
+    lookup_and_resolve_collection,
+    resolve_collection,
+    resolve_collections,
+)
 from vectorpress.catalog.collections import load_collections
 from vectorpress.catalog.derivatives import DerivativeStateCounts
 from vectorpress.catalog.errors import CatalogConfigError, CatalogNotFoundError
@@ -190,6 +196,24 @@ def _lookup_product_or_exit(root: Path, config: CatalogConfig, slug: str) -> Pro
     return result.product
 
 
+def _lookup_and_resolve_collection_or_exit(
+    root: Path, config: CatalogConfig, slug: str
+) -> ResolvedCollection:
+    """The collection named ``slug``, resolved to its current members, or
+    exit 1 -- the same two outcomes as :func:`_lookup_product_or_exit`."""
+    known_asset_ids = {loaded.id for loaded in load_assets(root, config).assets}
+    result = lookup_and_resolve_collection(
+        load_collections(root, config), config, known_asset_ids, slug
+    )
+    if result.resolved is None:
+        if result.problems:
+            _echo_problems(result.problems)
+        else:
+            typer.echo(f"Unknown collection: {slug!r}", err=True)
+        raise typer.Exit(code=1)
+    return result.resolved
+
+
 @app.command()
 def status(ctx: typer.Context) -> None:
     """Show the catalog's inventory and every metadata problem.
@@ -204,6 +228,12 @@ def status(ctx: typer.Context) -> None:
     counts (approved / awaiting review / blocked) come from
     vectorpress.pipeline.attention.build_attention_report, the same model
     'vpress attention' renders, so the two always agree.
+
+    Collection reference problems (an asset ID in a collection's
+    membership.asset_ids that no loaded asset has) are printed alongside
+    metadata problems but never drive the exit code: resolution does not
+    stop the rest of a collection's members from resolving, so it is not
+    itself a load failure (§11).
     """
     root = _locate_root(ctx)
     catalog = load_catalog(root)
@@ -240,7 +270,12 @@ def status(ctx: typer.Context) -> None:
     if not report.is_empty:
         typer.echo("Run 'vpress attention' for details.")
 
-    _echo_problems(catalog.problems)
+    reference_problems: list[MetadataProblem] = []
+    if catalog.config is not None:
+        known_asset_ids = {loaded.id for loaded in catalog.assets}
+        for resolved in resolve_collections(catalog.collections, catalog.config, known_asset_ids):
+            reference_problems.extend(resolved.reference_problems)
+    _echo_problems([*catalog.problems, *reference_problems])
 
     if catalog.problems:
         raise typer.Exit(code=1)
@@ -1291,16 +1326,53 @@ def validate(
 
 @app.command()
 def collections(ctx: typer.Context) -> None:
-    """List every collection that loaded: slug, name, and membership form.
+    """List every collection that loaded: slug, name, membership form, and
+    current member count.
 
-    Membership is shown as declared; which assets match is not resolved
-    yet. Collections that failed to load are reported by 'vpress status'.
+    Member count is the collection's currently resolved members (§11);
+    'vpress collection <slug>' shows each one and how it got in.
+    Collections that failed to load are reported by 'vpress status'.
     """
     root, config = _locate_and_load_config(ctx)
     inventory = load_collections(root, config)
+    known_asset_ids = {loaded.id for loaded in load_assets(root, config).assets}
 
     for loaded in inventory.collections:
-        typer.echo(f"{loaded.slug}\t{loaded.name}\t{loaded.membership.form.value}")
+        resolved = resolve_collection(loaded, config, known_asset_ids)
+        typer.echo(
+            f"{loaded.slug}\t{loaded.name}\t{loaded.membership.form.value}\t{len(resolved.members)}"
+        )
+
+
+@app.command()
+def collection(
+    ctx: typer.Context,
+    slug: str = typer.Argument(
+        help="The collection's slug (its file name under collections/, without .toml)."
+    ),
+) -> None:
+    """Show one collection: metadata and its currently resolved members.
+
+    Each member line names how it got in ('explicit' for this release).
+    An asset ID in the collection's list that no loaded asset has is a
+    reference problem, listed after the members; it does not stop the rest
+    from resolving.
+    """
+    root, config = _locate_and_load_config(ctx)
+    resolved = _lookup_and_resolve_collection_or_exit(root, config, slug)
+    loaded = resolved.collection
+
+    typer.echo(f"{loaded.slug}\t{loaded.name}")
+    typer.echo(f"Description: {loaded.description}")
+    typer.echo(f"Tags: {', '.join(loaded.tags) if loaded.tags else 'none'}")
+    typer.echo(f"Marketplace category: {loaded.marketplace_category}")
+    typer.echo(f"Membership form: {loaded.membership.form.value}")
+    typer.echo(f"Members: {len(resolved.members)}")
+    for member in resolved.members:
+        ways_in = ", ".join(str(way) for way in member.ways_in)
+        typer.echo(f"  {member.asset_id}\t{ways_in}")
+
+    _echo_problems(resolved.reference_problems)
 
 
 @app.command()

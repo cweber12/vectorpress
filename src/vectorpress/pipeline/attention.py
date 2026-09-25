@@ -24,6 +24,7 @@ from enum import StrEnum
 from pathlib import Path
 
 from vectorpress.catalog.assets import asset_dir
+from vectorpress.catalog.collection_resolution import resolve_collections
 from vectorpress.catalog.findings import read_findings_report
 from vectorpress.catalog.load import LoadedCatalog
 from vectorpress.catalog.metadata_problem import MetadataProblem
@@ -287,16 +288,26 @@ def build_attention_report(catalog: LoadedCatalog, root: Path) -> AttentionRepor
     derivative-shaped can be resolved then, so every group but
     ``missing_metadata`` (``catalog.problems``, which already names the
     broken ``catalog.toml``) is empty.
+
+    ``missing_metadata`` also carries every collection's reference problems
+    (an asset ID in ``membership.asset_ids`` that no loaded asset has,
+    §11): a reference problem is not a load-time metadata problem, but it
+    is rendered the same way and belongs in the same "needs a human" kind.
     """
     needs_review: list[NeedsReviewItem] = []
     stale_overrides: list[StaleOverrideItem] = []
     missing_derivatives: list[MissingDerivativeItem] = []
     blocked_assets: list[BlockedAssetItem] = []
     warnings: list[WarningItem] = []
+    reference_problems: list[MetadataProblem] = []
     approved_count = 0
     awaiting_review_count = 0
 
     if catalog.config is not None:
+        known_asset_ids = {asset.id for asset in catalog.assets}
+        for resolved in resolve_collections(catalog.collections, catalog.config, known_asset_ids):
+            reference_problems.extend(resolved.reference_problems)
+
         for asset in catalog.assets:
             asset_dir_path = asset_dir(root, catalog.config, asset.id)
             needs_review.extend(_needs_review_items(asset, asset_dir_path, catalog.config))
@@ -320,7 +331,7 @@ def build_attention_report(catalog: LoadedCatalog, root: Path) -> AttentionRepor
         stale_overrides=stale_overrides,
         blocked_assets=blocked_assets,
         missing_derivatives=missing_derivatives,
-        missing_metadata=list(catalog.problems),
+        missing_metadata=[*catalog.problems, *reference_problems],
         warnings=warnings,
         asset_publication_counts=AssetPublicationCounts(
             approved=approved_count,
