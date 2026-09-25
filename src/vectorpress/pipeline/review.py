@@ -30,7 +30,7 @@ from vectorpress.domain.derivative_state import DerivativeState
 from vectorpress.domain.derivative_type import DerivativeType
 from vectorpress.domain.recipe import RECIPES
 from vectorpress.domain.status import Status, StatusRecord
-from vectorpress.pipeline.generate import asset_derivative_statuses
+from vectorpress.pipeline.generate import asset_derivative_statuses, reviewable_output_filename
 
 
 def _reviewable_output_hash(
@@ -50,34 +50,28 @@ def _reviewable_output_hash(
     A derivative type with no recipe yet, or one whose *generated* file is
     ``missing`` or ``impossible`` for this asset, has no output file -- an
     error, even when an override happens to sit under ``overrides/`` with no
-    generated counterpart (this PRD slice gates reviewability on the
-    generated file's own state, the same as before overrides existed). A
-    ``current`` or ``stale`` generated derivative can be reviewed; when an
-    override is present for it, this resolves to the override instead
-    (CONTEXT.md "Effective derivative") and, as a side effect, records the
-    override's provenance the first time it is seen (:func:`~vectorpress.
+    generated counterpart (:func:`~vectorpress.pipeline.generate.
+    reviewable_output_filename` gates reviewability on the generated file's
+    own state, the same as before overrides existed). A ``current`` or
+    ``stale`` generated derivative can be reviewed; when an override is
+    present for it, this resolves to the override instead (CONTEXT.md
+    "Effective derivative") and, as a side effect, records the override's
+    provenance the first time it is seen (:func:`~vectorpress.
     catalog.overrides.ensure_override_provenance`).
     """
-    status = next(
-        (
-            s
-            for s in asset_derivative_statuses(asset, asset_dir_path, config)
-            if s.derivative_type is derivative_type
-        ),
-        None,
+    output_filename, error = reviewable_output_filename(
+        asset, asset_dir_path, derivative_type, config
     )
-    if status is None:
-        return None, False, f"{derivative_type.value} has no recipe yet"
-    if status.state not in (DerivativeState.CURRENT, DerivativeState.STALE):
-        return None, False, f"{derivative_type.value} is {status.state.value}"
+    if output_filename is None:
+        assert error is not None  # reviewable_output_filename always pairs one with the other
+        return None, False, error
 
-    assert status.output_filename is not None  # CURRENT/STALE always carry a filename
-    effective = effective_derivative(asset_dir_path, status.output_filename)
+    effective = effective_derivative(asset_dir_path, output_filename)
     assert effective is not None  # CURRENT/STALE means the generated file exists on disk
 
     if effective.is_override:
         ensure_override_provenance(
-            asset, asset_dir_path, RECIPES[derivative_type], status.output_filename, effective.bytes
+            asset, asset_dir_path, RECIPES[derivative_type], output_filename, effective.bytes
         )
     return sha256_bytes(effective.bytes), effective.is_override, None
 

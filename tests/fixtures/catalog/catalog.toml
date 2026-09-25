@@ -5,9 +5,12 @@
 
 name = "Tide Pool Studio"
 
-# assets_dir, collections_dir, products_dir and reference_size_in are left
-# unset here on purpose, to exercise their documented defaults:
+# assets_dir, collections_dir, products_dir, reference_size_in and editor are
+# left unset here on purpose, to exercise their documented defaults:
 #   assets_dir       = "assets"
 #   collections_dir  = "collections"
 #   products_dir     = "products"
 #   reference_size_in = 3.0
+#   editor            = unset -- `vpress open` falls back to the OS default
+#                        opener. Set editor = ["<program>", "<flag>", ...]
+#                        to launch a specific editor instead.

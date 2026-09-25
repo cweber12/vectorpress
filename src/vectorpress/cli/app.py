@@ -50,6 +50,7 @@ from vectorpress.pipeline.generate import (
     count_derivative_states,
     generate_asset,
 )
+from vectorpress.pipeline.open_editor import Launcher, launch_editor, resolve_open_target
 from vectorpress.pipeline.review import (
     StatusCounts,
     TargetSelection,
@@ -800,6 +801,76 @@ def regenerate(
         status_filter,
         note,
     )
+
+
+#: Injection seam for tests: `vpress open`'s launch step goes through this
+#: single point, so a test can assert the exact command without spawning a
+#: real process or the OS's own opener. Production code leaves it unset,
+#: which selects `vectorpress.pipeline.open_editor.default_launcher`.
+_launcher: Launcher | None = None
+
+
+@app.command("open")
+def open_derivative(
+    ctx: typer.Context,
+    asset_id: str = typer.Argument(help="The asset's ID (its folder name under assets/)."),
+    derivative_type: str = typer.Argument(help="The derivative type to open, e.g. cut_svg."),
+    generated: bool = typer.Option(
+        False,
+        "--generated",
+        help="Open the generated file under derived/, even when an override exists.",
+    ),
+    override: bool = typer.Option(
+        False,
+        "--override",
+        help=(
+            "Open the override, starting one from the current generated file if none exists yet."
+        ),
+    ),
+) -> None:
+    """Launch an editor on one derivative and return without waiting.
+
+    Opens the effective derivative by default: the override if one exists,
+    else the generated file. --generated always opens the generated file
+    under derived/, even when an override exists. --override opens the
+    override, first copying the current generated file into overrides/ when
+    none exists yet -- that copy is created once and never rewritten by a
+    later call. A missing, impossible or unknown derivative, or an unknown
+    asset, is an error, exit 1.
+    \f
+    Launches catalog.toml's editor command with the file's path appended, or
+    the OS default opener when no editor is configured
+    (vectorpress.pipeline.open_editor.launch_editor). Which file to open is
+    resolved by vectorpress.pipeline.open_editor.resolve_open_target, gated
+    on the generated file's own reviewability -- the same rule approve,
+    reject and regenerate apply.
+    """
+    if generated and override:
+        raise typer.BadParameter(
+            "--generated and --override are mutually exclusive.",
+            param_hint="--generated / --override",
+        )
+
+    root, config = _locate_and_load_config(ctx)
+    found = _lookup_asset_or_exit(load_assets(root, config), config, asset_id)
+    parsed_type = _parse_derivative_type_or_exit(derivative_type)
+    asset_dir_path = asset_dir(root, config, found.id)
+
+    target, error = resolve_open_target(
+        found,
+        asset_dir_path,
+        parsed_type,
+        config,
+        generated_only=generated,
+        start_override=override,
+    )
+    if target is None:
+        assert error is not None  # resolve_open_target always pairs one with the other
+        typer.echo(f"open: {asset_id} {derivative_type} failed: {error}", err=True)
+        raise typer.Exit(code=1)
+
+    launch_editor(target.path, config.editor, launcher=_launcher)
+    typer.echo(f"{asset_id}\t{derivative_type}\t{target.path}")
 
 
 def _optional_catalog_config(ctx: typer.Context) -> CatalogConfig | None:

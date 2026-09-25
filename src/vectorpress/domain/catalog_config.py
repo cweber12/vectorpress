@@ -5,7 +5,7 @@ No I/O here (ADR 0006): this module only defines and validates the shape of
 layer's job.
 """
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 #: Roles a source image can have without being listed in ``catalog.toml``
 #: (ADR 0003). A catalog may declare additional roles via ``extra_roles``.
@@ -32,6 +32,20 @@ class CatalogConfig(BaseModel):
     products_dir: str = DEFAULT_PRODUCTS_DIR
     reference_size_in: float = DEFAULT_REFERENCE_SIZE_IN
     extra_roles: list[str] = Field(default_factory=list)
+    #: The external editor 'vpress open' launches: a program plus optional
+    #: arguments, e.g. ["code", "--wait"]. Unset (the default) falls back to
+    #: the OS default opener (§6.8, §24).
+    editor: list[str] | None = None
+
+    @field_validator("editor")
+    @classmethod
+    def _editor_is_a_program_plus_arguments(cls, value: list[str] | None) -> list[str] | None:
+        if value is not None and (len(value) == 0 or any(not part for part in value)):
+            raise ValueError(
+                "editor must be a non-empty list of non-empty strings "
+                "(a program name, plus optional arguments)"
+            )
+        return value
 
     @property
     def source_roles(self) -> tuple[str, ...]:

@@ -70,6 +70,17 @@ def test_wrongly_typed_value_names_file_and_field(tmp_path: Path) -> None:
     assert "reference_size_in" in message
 
 
+def test_invalid_editor_value_names_file_and_field(tmp_path: Path) -> None:
+    path = _write_catalog_toml(tmp_path, 'name = "Tide Pool Studio"\neditor = []\n')
+
+    with pytest.raises(CatalogConfigError) as exc_info:
+        load_catalog_config(tmp_path)
+
+    message = str(exc_info.value)
+    assert str(path) in message
+    assert "editor" in message
+
+
 # --- load_catalog: the single load entry point (issue #6) -------------------------
 
 
