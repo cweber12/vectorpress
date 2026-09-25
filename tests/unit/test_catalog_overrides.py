@@ -615,48 +615,75 @@ def test_ensure_override_provenance_rebaselines_to_the_new_source_when_it_actual
 def test_create_override_from_generated_does_not_inherit_orphaned_provenance_or_status(
     tmp_path: Path,
 ) -> None:
-    """A previous override was approved, then deleted by hand (not through
-    ``vpress override discard``), leaving its provenance and status behind
-    with nothing to clean them up. A new override created afterward
-    (``vpress open --override``'s codepath) must not inherit that leftover
-    state: fresh provenance, ``needs_review``, not the old ``approved``."""
+    """A previous override was an *unedited* copy of the generated file,
+    approved as-is, then deleted by hand (not through ``vpress override
+    discard``), leaving its provenance and status behind with nothing to
+    clean them up. The source is then changed (color only -- the alpha
+    channel cut_svg's tracer actually reads is untouched, so the freshly
+    generated file comes out byte-identical to the old one) before a new
+    override is created from it.
+
+    This is deliberately the case where, without the clear, the bug would
+    hide: the new override's bytes equal both the orphaned provenance's and
+    the orphaned status's recorded ``output_hash`` exactly, so
+    :func:`ensure_override_provenance` would take the "unchanged, no
+    rewrite" branch and hand back the leftover (wrong, pre-source-change)
+    ``source_hash``, and :func:`asset_override_status` would hand back the
+    leftover ``approved`` -- both silently "matching" by coincidence unless
+    :func:`_clear_orphaned_override_state` actually ran first."""
     asset_dir = _make_asset_dir(tmp_path)
     from vectorpress.pipeline.generate import generate_asset
 
     generate_asset(_asset(), asset_dir)
     recipe = RECIPES[DerivativeType.CUT_SVG]
-    old_override_bytes = b"<svg>the deleted override</svg>"
-    override_file = _write_override(asset_dir, FILENAME, old_override_bytes)
-    ensure_override_provenance(_asset(), asset_dir, recipe, FILENAME, old_override_bytes)
+    first_generated_bytes = (asset_dir / DERIVED_DIRNAME / FILENAME).read_bytes()
+    first_source_hash = sha256_bytes((asset_dir / SOURCES_DIRNAME / "silhouette.png").read_bytes())
+
+    override_file = _write_override(asset_dir, FILENAME, first_generated_bytes)
+    ensure_override_provenance(_asset(), asset_dir, recipe, FILENAME, first_generated_bytes)
     write_override_status(
         asset_dir / DERIVED_DIRNAME,
         DerivativeType.CUT_SVG,
         StatusRecord(
-            status=Status.APPROVED, note="clean", output_hash=sha256_bytes(old_override_bytes)
+            status=Status.APPROVED,
+            note="clean",
+            output_hash=sha256_bytes(first_generated_bytes),
         ),
     )
     # Deleted by hand -- no command ran to clean up its state.
     override_file.unlink()
 
-    generated_bytes = (asset_dir / DERIVED_DIRNAME / FILENAME).read_bytes()
-    generated_provenance_source_hash = sha256_bytes(
-        (asset_dir / SOURCES_DIRNAME / "silhouette.png").read_bytes()
-    )
-    create_override_from_generated(_asset(), asset_dir, recipe, FILENAME, generated_bytes)
+    # Same alpha channel (the only thing cut_svg's tracer reads), different
+    # RGB -- a genuinely different source, but the regenerated cut file
+    # comes out byte-identical to the deleted override's bytes.
+    _write_source_png(asset_dir / SOURCES_DIRNAME / "silhouette.png", rgba=(1, 2, 3, 255))
+    generate_asset(_asset(), asset_dir)  # source changed -> stale -> regenerated
+    second_generated_bytes = (asset_dir / DERIVED_DIRNAME / FILENAME).read_bytes()
+    second_source_hash = sha256_bytes((asset_dir / SOURCES_DIRNAME / "silhouette.png").read_bytes())
+    assert second_generated_bytes == first_generated_bytes  # proves the setup: same geometry
+    assert second_source_hash != first_source_hash  # but a genuinely different source
+
+    create_override_from_generated(_asset(), asset_dir, recipe, FILENAME, second_generated_bytes)
 
     new_provenance = read_override_provenance(asset_dir / DERIVED_DIRNAME, FILENAME)
     assert new_provenance is not None
-    assert new_provenance.source_hash == generated_provenance_source_hash
-    assert new_provenance.output_hash == sha256_bytes(generated_bytes)
+    assert new_provenance.source_hash == second_source_hash
+    assert new_provenance.output_hash == sha256_bytes(second_generated_bytes)
 
     new_status = asset_override_status(
-        asset_dir / DERIVED_DIRNAME, DerivativeType.CUT_SVG, generated_bytes
+        asset_dir / DERIVED_DIRNAME, DerivativeType.CUT_SVG, second_generated_bytes
     )
     assert new_status.status is Status.NEEDS_REVIEW
     assert new_status.note is None
 
 
 def test_create_override_from_generated_does_not_inherit_orphaned_findings(tmp_path: Path) -> None:
+    """A findings report left behind by a deleted override is removed
+    unconditionally by :func:`_clear_orphaned_override_state` -- nothing
+    else in this module ever deletes a findings file, so unlike the
+    provenance/status test above, no bytes-matching coincidence is needed
+    to make this depend on the clear: with it disabled, ``report_path``
+    would simply still be there."""
     asset_dir = _make_asset_dir(tmp_path)
     from vectorpress.pipeline.generate import generate_asset
 
