@@ -104,6 +104,7 @@ def test_load_catalog_on_the_clean_fixture_has_no_problems() -> None:
     ]
     assert [c.slug for c in catalog.collections] == [
         "kelp_forest_ecosystem",
+        "pacific_coast_marine",
         "pacific_coast_tide_pool",
     ]
     assert [p.slug for p in catalog.products] == [
@@ -231,7 +232,7 @@ def test_load_catalog_aggregates_collection_problems_alongside_asset_problems(
     assert Path("assets") / "ochre_sea_star" / "asset.toml" in paths
     assert Path("collections") / "pacific_coast_tide_pool.toml" in paths
     loaded_slugs = {c.slug for c in catalog.collections}
-    assert loaded_slugs == {"kelp_forest_ecosystem"}
+    assert loaded_slugs == {"kelp_forest_ecosystem", "pacific_coast_marine"}
 
 
 def test_load_catalog_root_is_the_catalog_root_passed_in() -> None:

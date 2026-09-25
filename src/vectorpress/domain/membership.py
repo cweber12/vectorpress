@@ -5,7 +5,9 @@ those (ADR 0008, CONTEXT.md "Collection").
 
 No I/O here (ADR 0006): this only defines and validates shape. Resolving a
 rule or union into actual members — checking that asset IDs and collection
-slugs exist, and evaluating a rule against loaded assets — is PRD 5's job.
+slugs exist, evaluating a rule against loaded assets, and following a union
+recursively — is ``domain.collection_resolution.resolve_membership``, wired
+to a loaded catalog by ``catalog.collection_resolution`` (ADR 0011).
 """
 
 from enum import StrEnum
@@ -20,9 +22,9 @@ class ClassificationField(StrEnum):
 
     Named for what a rule matches against, not for the ``Asset`` attribute
     names: ``group`` and ``category`` stand for ``taxonomic_group`` and
-    ``subject_category`` respectively. Mapping rule fields to asset
-    attributes is PRD 5's job (this module has no catalog awareness, per
-    ADR 0006).
+    ``subject_category`` respectively. The mapping from rule field to asset
+    attribute lives in ``domain.collection_resolution._asset_values_for_field``
+    (this module has no catalog awareness, per ADR 0006).
     """
 
     TAGS = "tags"
@@ -46,7 +48,8 @@ class MembershipRule(BaseModel):
     must match.
 
     Parsed and validated for shape only (known classification field,
-    non-empty values); whether any asset actually matches is PRD 5's job.
+    non-empty values); whether any asset actually matches is
+    ``domain.collection_resolution.resolve_rule``'s job.
     """
 
     model_config = ConfigDict(strict=True, extra="forbid", frozen=True)
@@ -70,7 +73,8 @@ class Membership(BaseModel):
 
     At least one of ``asset_ids``, ``rule`` or ``collection_slugs`` must be
     present. Whether the referenced asset IDs or collection slugs exist is
-    left to PRD 5 (this module has no catalog awareness, per ADR 0006).
+    ``domain``/``catalog``'s ``collection_resolution``'s job (this module
+    has no catalog awareness, per ADR 0006).
     """
 
     model_config = ConfigDict(strict=True, extra="forbid", frozen=True)

@@ -5,7 +5,9 @@ resolving the rest of the collection still succeeds (§11, §34).
 
 Also covers rule membership's live resolution (§11, §12): adding a new
 matching asset to the catalog must change a rule collection's members
-without editing the collection file itself.
+without editing the collection file itself -- and, since a union collection
+resolves its unioned collections' members live too (§13), the same new
+asset must appear in a union over that rule collection as well.
 """
 
 import json
@@ -194,3 +196,34 @@ def test_a_newly_added_non_matching_asset_does_not_appear(
     assert result.exit_code == 0, result.output
     assert "sunflower_star" not in result.stdout
     assert "Members: 1" in result.stdout
+
+
+# --- union collections: membership.collection_slugs (§11, §13) --------------------
+
+
+@pytest.mark.integration
+def test_a_newly_added_kelp_forest_asset_appears_in_the_union_collection_too(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Acceptance criterion: a kelp-forest asset added to a temp catalog
+    copy appears in ``pacific_coast_marine`` (a union over
+    ``kelp_forest_ecosystem`` among others) too, through
+    ``kelp_forest_ecosystem``'s own live rule resolution -- without editing
+    either collection's file."""
+    root = tmp_path / "catalog"
+    shutil.copytree(FIXTURE_CATALOG_ROOT, root)
+    kelp_before = (root / "collections" / "kelp_forest_ecosystem.toml").read_text(encoding="utf-8")
+    marine_before = (root / "collections" / "pacific_coast_marine.toml").read_text(encoding="utf-8")
+    _add_kelp_forest_asset(root, "sunflower_star", 'ecosystems = ["kelp forest"]')
+    monkeypatch.chdir(root)
+
+    result = runner.invoke(app, ["collection", "pacific_coast_marine"])
+
+    assert result.exit_code == 0, result.output
+    assert "sunflower_star\tvia kelp_forest_ecosystem" in result.stdout
+    assert (root / "collections" / "kelp_forest_ecosystem.toml").read_text(
+        encoding="utf-8"
+    ) == kelp_before
+    assert (root / "collections" / "pacific_coast_marine.toml").read_text(
+        encoding="utf-8"
+    ) == marine_before

@@ -1,0 +1,18 @@
+# Hand-authored collection metadata (ADR 0005). The collection slug is this
+# file's stem. Mixed membership: an explicit asset plus a union of the two
+# other fixture collections (ADR 0008, ADR 0011, domain.collection_resolution).
+# Resolved recursively and de-duplicated against each collection's own
+# current members -- purple_sea_urchin is in both pacific_coast_tide_pool
+# and kelp_forest_ecosystem, so it appears here once, with both "via" ways in.
+
+name = "Pacific Coast Marine"
+description = """
+A mega bundle over the tide pool and kelp forest collections, plus the
+turban snail, for a single combined marine-life offering (ADR 0008).
+"""
+tags = ["pacific coast", "marine"]
+marketplace_category = "Nature & Wildlife"
+
+[membership]
+asset_ids = ["turban_snail"]
+collection_slugs = ["pacific_coast_tide_pool", "kelp_forest_ecosystem"]
