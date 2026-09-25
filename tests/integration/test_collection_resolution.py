@@ -2,6 +2,10 @@
 reference problem visible from ``vpress collection``, ``vpress status`` and
 ``vpress attention``, and never changes either command's exit code --
 resolving the rest of the collection still succeeds (§11, §34).
+
+Also covers rule membership's live resolution (§11, §12): adding a new
+matching asset to the catalog must change a rule collection's members
+without editing the collection file itself.
 """
 
 import json
@@ -127,3 +131,66 @@ def test_status_exit_code_is_unaffected_by_a_reference_problem_on_the_clean_fixt
     assert clean_result.exit_code == 0
     assert broken_result.exit_code == 0
     assert clean_result.exit_code == broken_result.exit_code
+
+
+# --- rule membership: live resolution against the loaded assets (§11, §12) ---------
+
+
+def _add_kelp_forest_asset(root: Path, asset_id: str, ecosystems_toml_value: str) -> None:
+    """Add a new asset to a temp catalog copy by cloning ``bat_star`` (a
+    minimal fixture asset with a real source image) and overriding its
+    ecosystems, so the new asset needs no newly-generated artwork."""
+    source_dir = root / "assets" / "bat_star"
+    new_dir = root / "assets" / asset_id
+    shutil.copytree(source_dir, new_dir)
+    toml_path = new_dir / "asset.toml"
+    text = toml_path.read_text(encoding="utf-8")
+    text = text.replace('ecosystems = ["Subtidal", "Rocky reef"]', ecosystems_toml_value)
+    toml_path.write_text(text, encoding="utf-8")
+
+
+@pytest.mark.integration
+def test_a_newly_added_matching_asset_appears_without_touching_the_collection_file(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Acceptance criterion 2: adding a new asset whose ``ecosystems``
+    include "kelp forest" (a different case than the rule's "Kelp forest")
+    makes it appear in 'vpress collection kelp_forest_ecosystem' with no
+    edit to the collection file -- live membership, nothing cached (§11,
+    §12)."""
+    root = tmp_path / "catalog"
+    shutil.copytree(FIXTURE_CATALOG_ROOT, root)
+    collection_toml_before = (root / "collections" / "kelp_forest_ecosystem.toml").read_text(
+        encoding="utf-8"
+    )
+    _add_kelp_forest_asset(root, "sunflower_star", 'ecosystems = ["kelp forest"]')
+    monkeypatch.chdir(root)
+
+    result = runner.invoke(app, ["collection", "kelp_forest_ecosystem"])
+
+    assert result.exit_code == 0, result.output
+    assert "sunflower_star\trule" in result.stdout
+    assert "purple_sea_urchin\trule" in result.stdout
+    assert "Members: 2" in result.stdout
+    collection_toml_after = (root / "collections" / "kelp_forest_ecosystem.toml").read_text(
+        encoding="utf-8"
+    )
+    assert collection_toml_after == collection_toml_before
+
+
+@pytest.mark.integration
+def test_a_newly_added_non_matching_asset_does_not_appear(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A control for the test above: an added asset whose ecosystems do not
+    match the rule stays out."""
+    root = tmp_path / "catalog"
+    shutil.copytree(FIXTURE_CATALOG_ROOT, root)
+    _add_kelp_forest_asset(root, "sunflower_star", 'ecosystems = ["Open ocean"]')
+    monkeypatch.chdir(root)
+
+    result = runner.invoke(app, ["collection", "kelp_forest_ecosystem"])
+
+    assert result.exit_code == 0, result.output
+    assert "sunflower_star" not in result.stdout
+    assert "Members: 1" in result.stdout

@@ -219,9 +219,9 @@ def _lookup_and_resolve_collection_or_exit(
 ) -> ResolvedCollection:
     """The collection named ``slug``, resolved to its current members, or
     exit 1 -- the same two outcomes as :func:`_lookup_product_or_exit`."""
-    known_asset_ids = {loaded.id for loaded in load_assets(root, config).assets}
+    known_assets = load_assets(root, config).assets
     result = lookup_and_resolve_collection(
-        load_collections(root, config), config, known_asset_ids, slug
+        load_collections(root, config), config, known_assets, slug
     )
     if result.resolved is None:
         if result.problems:
@@ -291,8 +291,7 @@ def status(ctx: typer.Context) -> None:
 
     reference_problems: list[MetadataProblem] = []
     if catalog.config is not None:
-        known_asset_ids = {loaded.id for loaded in catalog.assets}
-        for resolved in resolve_collections(catalog.collections, catalog.config, known_asset_ids):
+        for resolved in resolve_collections(catalog.collections, catalog.config, catalog.assets):
             reference_problems.extend(resolved.reference_problems)
     _echo_problems(catalog.problems)
     _echo_reference_problems(reference_problems)
@@ -1355,10 +1354,10 @@ def collections(ctx: typer.Context) -> None:
     """
     root, config = _locate_and_load_config(ctx)
     inventory = load_collections(root, config)
-    known_asset_ids = {loaded.id for loaded in load_assets(root, config).assets}
+    known_assets = load_assets(root, config).assets
 
     for loaded in inventory.collections:
-        resolved = resolve_collection(loaded, config, known_asset_ids)
+        resolved = resolve_collection(loaded, config, known_assets)
         typer.echo(
             f"{loaded.slug}\t{loaded.name}\t{loaded.membership.form.value}\t{len(resolved.members)}"
         )
@@ -1386,6 +1385,9 @@ def collection(
     typer.echo(f"Tags: {', '.join(loaded.tags) if loaded.tags else 'none'}")
     typer.echo(f"Marketplace category: {loaded.marketplace_category}")
     typer.echo(f"Membership form: {loaded.membership.form.value}")
+    if loaded.membership.rule is not None:
+        rule = loaded.membership.rule
+        typer.echo(f"Rule: {rule.field.value} = {', '.join(rule.values)}")
     typer.echo(f"Members: {len(resolved.members)}")
     for member in resolved.members:
         ways_in = ", ".join(str(way) for way in member.ways_in)
