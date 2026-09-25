@@ -149,7 +149,7 @@ def test_status_reports_the_product_count(monkeypatch: pytest.MonkeyPatch) -> No
     result = runner.invoke(app, ["status"])
 
     assert result.exit_code == 0
-    assert "Products: 2" in result.stdout
+    assert "Products: 3" in result.stdout
 
 
 def test_status_prints_the_brand_name(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -735,7 +735,7 @@ def test_collection_that_failed_to_load_exits_non_zero_with_a_distinct_message(
     assert "marketplace_category" in result.output
 
 
-def test_products_lists_both_fixture_products_with_slug_title_tier_and_collection(
+def test_products_lists_every_fixture_product_with_slug_title_tier_and_collection(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Splits each line on the tab separator and asserts the exact 4-tuple
@@ -758,6 +758,12 @@ def test_products_lists_both_fixture_products_with_slug_title_tier_and_collectio
         "pacific_coast_tide_pool_standard_pack",
         "Pacific Coast Tide Pool Cut File Collection",
         "standard_pack",
+        "pacific_coast_tide_pool",
+    )
+    assert lines["pacific_coast_tide_pool_png_only"] == (
+        "pacific_coast_tide_pool_png_only",
+        "pacific_coast_tide_pool_png_only",
+        "collection",
         "pacific_coast_tide_pool",
     )
     assert lines["kelp_forest_mini_pack"] == (

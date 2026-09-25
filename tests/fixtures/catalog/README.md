@@ -206,11 +206,17 @@ Three valid collections (§11, §13, ADR 0008), resolved live by
 
 ## Products
 
-Two valid products (§7, §18, ADR 0008), populated by issue #7:
+Three valid products (§7, §18, ADR 0008):
 
 - `pacific_coast_tide_pool_standard_pack` — references the
   `pacific_coast_tide_pool` collection by slug and carries a full
   `[listing]`.
+- `pacific_coast_tide_pool_png_only` — references the *same*
+  `pacific_coast_tide_pool` collection by slug, but with `derivative_types
+  = ["transparent_png"]` and `formats = ["png"]` instead of the standard
+  pack's three types: the same membership resolving to a different
+  eligible/excluded breakdown depending which product asks (§10, `vpress
+  product`). No `[listing]` yet.
 - `kelp_forest_mini_pack` — an inline collection (the same `Membership`
   shape a collection file uses) instead of a collection slug reference,
   and no `[listing]` yet, since PRD 7 drafts that on first build. Carries
@@ -221,5 +227,7 @@ Two valid products (§7, §18, ADR 0008), populated by issue #7:
   than overwriting it.
 
 Whether a referenced collection slug, or an inline membership's asset IDs
-and collection slugs, actually exist is PRD 5's job; this fixture only
-exercises shape.
+and collection slugs, actually exist is checked live by `vpress product`
+(`build.product_resolution`, ADR 0011), the same reference-problem
+mechanism a collection's own membership uses; this fixture's committed
+products all resolve cleanly.

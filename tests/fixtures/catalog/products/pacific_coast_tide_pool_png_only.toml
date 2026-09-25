@@ -1,0 +1,14 @@
+# Hand-authored product metadata (ADR 0005). The product slug is this
+# file's stem. References the same "pacific_coast_tide_pool" collection as
+# pacific_coast_tide_pool_standard_pack.toml, by slug (ADR 0008), but with a
+# different derivative_types -- transparent_png only, formats png only --
+# so the identical membership resolves to a different eligible/excluded
+# breakdown depending which product asks (§10: "the same sea star can ship
+# in a PNG-only product while its cut file is still being fixed"). No
+# [listing] yet, since PRD 7 drafts that on first build.
+
+collection_slug = "pacific_coast_tide_pool"
+derivative_types = ["transparent_png"]
+formats = ["png"]
+tier = "collection"
+price = 5.00

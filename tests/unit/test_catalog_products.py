@@ -26,13 +26,14 @@ def _product_toml(root: Path, slug: str) -> Path:
     return root / "products" / f"{slug}.toml"
 
 
-def test_fixture_catalog_loads_two_valid_products() -> None:
+def test_fixture_catalog_loads_three_valid_products() -> None:
     config = load_catalog_config(FIXTURE_CATALOG_ROOT)
 
     inventory = load_products(FIXTURE_CATALOG_ROOT, config)
 
     assert [p.slug for p in inventory.products] == [
         "kelp_forest_mini_pack",
+        "pacific_coast_tide_pool_png_only",
         "pacific_coast_tide_pool_standard_pack",
     ]
     assert inventory.problems == []
@@ -284,7 +285,7 @@ def test_toml_syntax_error_is_a_problem_naming_the_file(catalog_copy: Path) -> N
 
     inventory = load_products(catalog_copy, config)
 
-    assert len(inventory.products) == 1
+    assert "kelp_forest_mini_pack" not in {p.slug for p in inventory.products}
     assert len(inventory.problems) == 1
     assert "kelp_forest_mini_pack" in str(inventory.problems[0].path)
 

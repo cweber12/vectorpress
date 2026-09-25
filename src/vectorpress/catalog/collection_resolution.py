@@ -23,10 +23,16 @@ from pathlib import Path
 
 from vectorpress.catalog.collections import CollectionInventory, find_collection
 from vectorpress.catalog.metadata_problem import MetadataProblem
+from vectorpress.catalog.products import product_toml_path
 from vectorpress.domain.asset import Asset
 from vectorpress.domain.catalog_config import CatalogConfig
 from vectorpress.domain.collection import Collection, CollectionSlug
-from vectorpress.domain.collection_resolution import ResolvedMember, resolve_membership
+from vectorpress.domain.collection_resolution import (
+    MembershipResolution,
+    ResolvedMember,
+    resolve_membership,
+)
+from vectorpress.domain.product import Product
 
 COLLECTION_CONFIG_SUFFIX = ".toml"
 
@@ -38,6 +44,12 @@ MEMBERSHIP_ASSET_IDS_FIELD = "membership.asset_ids"
 #: Likewise, for a reference problem (unknown slug, or a cycle) in a
 #: membership's collection union.
 MEMBERSHIP_COLLECTION_SLUGS_FIELD = "membership.collection_slugs"
+
+#: The field a product's reference problem on its own ``collection_slug`` is
+#: attributed to (distinct from ``MEMBERSHIP_COLLECTION_SLUGS_FIELD``, which
+#: is about an inline membership's *union*, not a product's single
+#: collection reference).
+PRODUCT_COLLECTION_SLUG_FIELD = "collection_slug"
 
 
 @dataclass(frozen=True)
@@ -64,6 +76,33 @@ def collection_toml_path(config: CatalogConfig, slug: CollectionSlug) -> Path:
     return Path(config.collections_dir) / f"{slug}{COLLECTION_CONFIG_SUFFIX}"
 
 
+def membership_reference_problems(
+    path: Path, resolution: MembershipResolution
+) -> list[MetadataProblem]:
+    """Every reference problem in one membership resolution -- unknown
+    explicit asset IDs, unknown collection slugs, cycles -- attributed to
+    ``path`` under :data:`MEMBERSHIP_ASSET_IDS_FIELD`/
+    :data:`MEMBERSHIP_COLLECTION_SLUGS_FIELD`. The one place a
+    :class:`~vectorpress.domain.collection_resolution.MembershipResolution`
+    becomes reference problems, shared by :func:`resolve_collection` (a
+    collection's own membership) and ``build.product_resolution`` (a
+    product's inline membership) rather than duplicated between them.
+    """
+    problems = [
+        MetadataProblem(path, MEMBERSHIP_ASSET_IDS_FIELD, f"unknown asset ID: {asset_id!r}")
+        for asset_id in resolution.unknown_asset_ids
+    ]
+    problems.extend(
+        MetadataProblem(path, MEMBERSHIP_COLLECTION_SLUGS_FIELD, f"unknown collection: {slug!r}")
+        for slug in resolution.unknown_collection_slugs
+    )
+    problems.extend(
+        MetadataProblem(path, MEMBERSHIP_COLLECTION_SLUGS_FIELD, f"cycle: {' -> '.join(cycle)}")
+        for cycle in resolution.cycles
+    )
+    return problems
+
+
 def resolve_collection(
     collection: Collection,
     config: CatalogConfig,
@@ -86,18 +125,7 @@ def resolve_collection(
         collection.membership, known_assets, collections_by_slug, own_slug=collection.slug
     )
     path = collection_toml_path(config, collection.slug)
-    reference_problems = [
-        MetadataProblem(path, MEMBERSHIP_ASSET_IDS_FIELD, f"unknown asset ID: {asset_id!r}")
-        for asset_id in resolution.unknown_asset_ids
-    ]
-    reference_problems.extend(
-        MetadataProblem(path, MEMBERSHIP_COLLECTION_SLUGS_FIELD, f"unknown collection: {slug!r}")
-        for slug in resolution.unknown_collection_slugs
-    )
-    reference_problems.extend(
-        MetadataProblem(path, MEMBERSHIP_COLLECTION_SLUGS_FIELD, f"cycle: {' -> '.join(cycle)}")
-        for cycle in resolution.cycles
-    )
+    reference_problems = membership_reference_problems(path, resolution)
     return ResolvedCollection(
         collection=collection, members=resolution.members, reference_problems=reference_problems
     )
@@ -149,4 +177,29 @@ def lookup_and_resolve_collection(
     return CollectionResolutionLookup(
         resolved=resolve_collection(collection, config, known_assets, inventory.collections),
         problems=[],
+    )
+
+
+def product_collection_slug_reference_problem(
+    product: Product, config: CatalogConfig, known_collections: list[Collection]
+) -> MetadataProblem | None:
+    """The reference problem on one product's ``collection_slug`` (§7, ADR
+    0011): unknown, or naming a collection whose file failed to load --
+    told apart no further here, since either way ``known_collections`` (the
+    catalog layer's own loaded, never-failed inventory -- the same rule
+    :func:`resolve_collection`'s own ``known_collections`` follows) does not
+    have it. A pure catalog-level fact living beside a collection's own
+    reference problems, reused by ``build.product_resolution`` (which needs
+    ``pipeline.eligibility`` for the rest of product resolution, ADR 0011)
+    rather than duplicated there. ``None`` for a product with no
+    ``collection_slug`` (an inline membership instead) or one that names a
+    collection that did load.
+    """
+    if product.collection_slug is None:
+        return None
+    if any(collection.slug == product.collection_slug for collection in known_collections):
+        return None
+    path = product_toml_path(config, product.slug)
+    return MetadataProblem(
+        path, PRODUCT_COLLECTION_SLUG_FIELD, f"unknown collection: {product.collection_slug!r}"
     )

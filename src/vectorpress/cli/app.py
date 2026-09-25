@@ -12,6 +12,7 @@ from typing import Protocol
 import typer
 
 from vectorpress import __version__
+from vectorpress.build.product_resolution import resolve_product
 from vectorpress.catalog.assets import (
     AssetInventory,
     asset_dir,
@@ -22,6 +23,7 @@ from vectorpress.catalog.assets import (
 from vectorpress.catalog.collection_resolution import (
     ResolvedCollection,
     lookup_and_resolve_collection,
+    product_collection_slug_reference_problem,
     resolve_collection,
     resolve_collections,
 )
@@ -248,11 +250,12 @@ def status(ctx: typer.Context) -> None:
     'vpress attention' renders, so the two always agree.
 
     Collection reference problems (an asset ID in a collection's
-    membership.asset_ids that no loaded asset has) are printed under their
-    own "Reference problems" count, separate from "Metadata problems": only
-    the metadata problem count drives the exit code, since resolution does
-    not stop the rest of a collection's members from resolving and so is
-    never itself a load failure (§11).
+    membership.asset_ids that no loaded asset has) and a product's own
+    unknown collection_slug (§7, ADR 0011) are printed under their own
+    "Reference problems" count, separate from "Metadata problems": only the
+    metadata problem count drives the exit code, since resolution does not
+    stop the rest of a collection's members from resolving and so is never
+    itself a load failure (§11).
     """
     root = _locate_root(ctx)
     catalog = load_catalog(root)
@@ -293,6 +296,12 @@ def status(ctx: typer.Context) -> None:
     if catalog.config is not None:
         for resolved in resolve_collections(catalog.collections, catalog.config, catalog.assets):
             reference_problems.extend(resolved.reference_problems)
+        for loaded_product in catalog.products:
+            problem = product_collection_slug_reference_problem(
+                loaded_product, catalog.config, catalog.collections
+            )
+            if problem is not None:
+                reference_problems.append(problem)
     _echo_problems(catalog.problems)
     _echo_reference_problems(reference_problems)
 
@@ -1415,6 +1424,69 @@ def products(ctx: typer.Context) -> None:
             assert loaded.membership is not None  # enforced by Product's own validation
             collection_ref = f"inline ({loaded.membership.form.value})"
         typer.echo(f"{loaded.slug}\t{title}\t{loaded.tier.value}\t{collection_ref}")
+
+
+@app.command()
+def product(
+    ctx: typer.Context,
+    slug: str = typer.Argument(
+        help="The product's slug (its file name under products/, without .toml)."
+    ),
+) -> None:
+    """Show one product: presentation, its currently resolved membership,
+    and the eligible/excluded breakdown for its own derivative types.
+
+    Membership is live, resolved the same way 'vpress collection' resolves
+    one -- through the referenced collection, or straight from an inline
+    one. Each member is eligible or excluded (§10, §10.1): an excluded
+    member lists every blocking reason, and every member lists its
+    warnings, which never exclude. Missing required derivatives follows:
+    every (asset, derivative type) generate still needs to produce for this
+    product. An unknown collection_slug is a reference problem, listed
+    after the members like any other; the product then resolves to no
+    members.
+    """
+    root, config = _locate_and_load_config(ctx)
+    loaded = _lookup_product_or_exit(root, config, slug)
+    known_assets = load_assets(root, config).assets
+    known_collections = load_collections(root, config).collections
+    resolved = resolve_product(loaded, root, config, known_assets, known_collections)
+
+    title = loaded.listing.title if loaded.listing is not None else loaded.slug
+    typer.echo(f"{loaded.slug}\t{title}")
+    typer.echo(f"Tier: {loaded.tier.value}")
+    typer.echo(f"Family: {loaded.family if loaded.family else 'none'}")
+    typer.echo(f"Price: {format_number(loaded.price)}")
+    typer.echo(f"Derivative types: {', '.join(dt.value for dt in loaded.derivative_types)}")
+    typer.echo(f"Formats: {', '.join(fmt.value for fmt in loaded.formats)}")
+    reference_size_in = resolve_reference_size_in(config, loaded)
+    typer.echo(f"Reference size: {format_number(reference_size_in)}in")
+    if loaded.collection_slug is not None:
+        collection_ref = loaded.collection_slug
+    else:
+        assert loaded.membership is not None  # enforced by Product's own validation
+        collection_ref = f"inline ({loaded.membership.form.value})"
+    typer.echo(f"Collection: {collection_ref}")
+
+    typer.echo(f"Members: {len(resolved.members)}")
+    typer.echo(f"Eligible: {len(resolved.eligible_members)}")
+    typer.echo(f"Excluded: {len(resolved.excluded_members)}")
+    for member in resolved.members:
+        ways_in = ", ".join(str(way) for way in member.ways_in)
+        typer.echo(f"  {member.asset_id}\t{ways_in}\t{member.eligibility.value}")
+        if member.blocking_reasons:
+            reasons = "; ".join(
+                _render_blocking_reason(reason) for reason in member.blocking_reasons
+            )
+            typer.echo(f"    blocked: {reasons}")
+        if member.warnings:
+            typer.echo(f"    warnings: {'; '.join(member.warnings)}")
+
+    typer.echo(f"Missing required derivatives: {len(resolved.missing_required_derivatives)}")
+    for missing in resolved.missing_required_derivatives:
+        typer.echo(f"  {missing.asset_id}\t{missing.derivative_type.value}\t{missing.state.value}")
+
+    _echo_reference_problems(resolved.reference_problems)
 
 
 # --- vpress attention: the inbox (§34, §24, CONTEXT.md "Attention report / Inbox") ---

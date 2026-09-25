@@ -2,7 +2,8 @@
 resolution (explicit list, rule, and collection union) to a loaded
 catalog's assets and collections, and turning an unknown explicit asset ID,
 an unknown collection slug, or a cycle into a reference problem (§11, §12,
-§13, §34).
+§13, §34). Also a product's own reference problem on its ``collection_slug``
+(§7, ADR 0011).
 """
 
 import shutil
@@ -14,17 +15,38 @@ from vectorpress.catalog.assets import load_assets
 from vectorpress.catalog.collection_resolution import (
     MEMBERSHIP_ASSET_IDS_FIELD,
     MEMBERSHIP_COLLECTION_SLUGS_FIELD,
+    PRODUCT_COLLECTION_SLUG_FIELD,
     collection_toml_path,
     lookup_and_resolve_collection,
+    product_collection_slug_reference_problem,
     resolve_collection,
     resolve_collections,
 )
 from vectorpress.catalog.collections import find_collection, load_collections
 from vectorpress.catalog.load import load_catalog_config
+from vectorpress.catalog.products import find_product, load_products
 from vectorpress.domain.asset import AccuracyStatus, Asset, RightsStatus, Source
 from vectorpress.domain.collection_resolution import WayIn, WayInKind
+from vectorpress.domain.membership import Membership
+from vectorpress.domain.product import Product
 
 FIXTURE_CATALOG_ROOT = Path(__file__).parents[1] / "fixtures" / "catalog"
+
+
+def _product(**overrides: object) -> Product:
+    """A minimal, fully-populated product for tests that fabricate a
+    ``collection_slug`` reference rather than loading a real fixture file."""
+    fields: dict[str, object] = {
+        "slug": "test_product",
+        "collection_slug": "some_collection",
+        "derivative_types": ["cut_svg"],
+        "formats": ["svg"],
+        "tier": "individual",
+        "price": 1.0,
+    }
+    fields.update(overrides)
+    return Product(**fields)  # type: ignore[arg-type]
+
 
 PACIFIC_COAST_MEMBERS = {"ochre_sea_star", "giant_green_anemone", "purple_sea_urchin"}
 
@@ -487,3 +509,68 @@ def test_lookup_and_resolve_reports_problems_for_a_slug_that_failed_to_load(
     assert result.resolved is None
     assert len(result.problems) == 1
     assert result.problems[0].field == "marketplace_category"
+
+
+# --- product_collection_slug_reference_problem (§7, ADR 0011) ----------------------
+
+
+def test_product_collection_slug_reference_problem_is_none_for_a_loaded_collection() -> None:
+    config = load_catalog_config(FIXTURE_CATALOG_ROOT)
+    product_inventory = load_products(FIXTURE_CATALOG_ROOT, config)
+    product = find_product(product_inventory, "pacific_coast_tide_pool_standard_pack")
+    assert product is not None
+    known_collections = load_collections(FIXTURE_CATALOG_ROOT, config).collections
+
+    problem = product_collection_slug_reference_problem(product, config, known_collections)
+
+    assert problem is None
+
+
+def test_product_collection_slug_reference_problem_is_none_for_an_inline_membership() -> None:
+    config = load_catalog_config(FIXTURE_CATALOG_ROOT)
+    product_inventory = load_products(FIXTURE_CATALOG_ROOT, config)
+    product = find_product(product_inventory, "kelp_forest_mini_pack")
+    assert product is not None
+
+    problem = product_collection_slug_reference_problem(product, config, known_collections=[])
+
+    assert problem is None
+
+
+def test_product_collection_slug_reference_problem_names_the_unknown_slug() -> None:
+    config = load_catalog_config(FIXTURE_CATALOG_ROOT)
+    product = _product(collection_slug="not_a_real_collection")
+
+    problem = product_collection_slug_reference_problem(product, config, known_collections=[])
+
+    assert problem is not None
+    assert problem.path == Path("products") / "test_product.toml"
+    assert problem.field == PRODUCT_COLLECTION_SLUG_FIELD
+    assert "not_a_real_collection" in problem.message
+
+
+def test_product_collection_slug_reference_problem_also_covers_a_collection_that_failed_to_load() -> (
+    None
+):
+    """A ``collection_slug`` naming a collection whose own file failed to
+    load reads the same as a genuinely unknown one: either way it is simply
+    absent from ``known_collections`` (the same rule ``resolve_collection``'s
+    own ``known_collections`` follows for a failed-to-load asset)."""
+    config = load_catalog_config(FIXTURE_CATALOG_ROOT)
+    # pacific_coast_tide_pool omitted from known_collections, as if its own
+    # <slug>.toml had failed to load.
+    product = _product(collection_slug="pacific_coast_tide_pool")
+
+    problem = product_collection_slug_reference_problem(product, config, known_collections=[])
+
+    assert problem is not None
+    assert "pacific_coast_tide_pool" in problem.message
+
+
+def test_product_collection_slug_reference_problem_is_none_without_a_collection_slug() -> None:
+    config = load_catalog_config(FIXTURE_CATALOG_ROOT)
+    product = _product(collection_slug=None, membership=Membership(asset_ids=["ochre_sea_star"]))
+
+    problem = product_collection_slug_reference_problem(product, config, known_collections=[])
+
+    assert problem is None
