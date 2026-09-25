@@ -1,0 +1,7 @@
+# serializer version: 1
+# name: test_png_only_output_is_locked_by_snapshot
+  'pacific_coast_tide_pool_png_only\tpacific_coast_tide_pool_png_only Tier: collection Family: none Price: 5 Derivative types: transparent_png Formats: png Reference size: 3in Collection: pacific_coast_tide_pool Members: 3 Eligible: 0 Excluded: 3   giant_green_anemone\texplicit\texcluded     blocked: transparent_png: needs review     warnings: accuracy status: not reviewed   ochre_sea_star\texplicit\texcluded     blocked: transparent_png: needs review   purple_sea_urchin\texplicit\texcluded     blocked: transparent_png: needs review Missing required derivatives: 0 Reference problems: none '
+# ---
+# name: test_standard_pack_output_is_locked_by_snapshot
+  'pacific_coast_tide_pool_standard_pack\tPacific Coast Tide Pool Cut File Collection Tier: standard_pack Family: Pacific Coast Naturalist Price: 12 Derivative types: cut_svg, silhouette_svg, transparent_png Formats: svg, png, dxf Reference size: 3in Collection: pacific_coast_tide_pool Members: 3 Eligible: 0 Excluded: 3   giant_green_anemone\texplicit\texcluded     blocked: cut_svg: needs review; silhouette_svg: needs review; transparent_png: needs review     warnings: accuracy status: not reviewed   ochre_sea_star\texplicit\texcluded     blocked: cut_svg: needs review; silhouette_svg: needs review; transparent_png: needs review   purple_sea_urchin\texplicit\texcluded     blocked: cut_svg: needs review; silhouette_svg: needs review; transparent_png: needs review Missing required derivatives: 0 Reference problems: none '
+# ---

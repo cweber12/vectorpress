@@ -109,6 +109,7 @@ def test_load_catalog_on_the_clean_fixture_has_no_problems() -> None:
     ]
     assert [p.slug for p in catalog.products] == [
         "kelp_forest_mini_pack",
+        "pacific_coast_tide_pool_png_only",
         "pacific_coast_tide_pool_standard_pack",
     ]
     assert catalog.brand is not None
@@ -331,4 +332,7 @@ def test_load_catalog_aggregates_product_problems_alongside_collection_problems(
     assert Path("collections") / "pacific_coast_tide_pool.toml" in paths
     assert Path("products") / "kelp_forest_mini_pack.toml" in paths
     loaded_slugs = {p.slug for p in catalog.products}
-    assert loaded_slugs == {"pacific_coast_tide_pool_standard_pack"}
+    assert loaded_slugs == {
+        "pacific_coast_tide_pool_standard_pack",
+        "pacific_coast_tide_pool_png_only",
+    }

@@ -24,7 +24,10 @@ from enum import StrEnum
 from pathlib import Path
 
 from vectorpress.catalog.assets import asset_dir
-from vectorpress.catalog.collection_resolution import resolve_collections
+from vectorpress.catalog.collection_resolution import (
+    product_collection_slug_reference_problem,
+    resolve_collections,
+)
 from vectorpress.catalog.findings import read_findings_report
 from vectorpress.catalog.load import LoadedCatalog
 from vectorpress.catalog.metadata_problem import MetadataProblem
@@ -291,8 +294,12 @@ def build_attention_report(catalog: LoadedCatalog, root: Path) -> AttentionRepor
 
     ``missing_metadata`` also carries every collection's reference problems
     (an asset ID in ``membership.asset_ids`` that no loaded asset has,
-    §11): a reference problem is not a load-time metadata problem, but it
-    is rendered the same way and belongs in the same "needs a human" kind.
+    §11) and every product's unknown-``collection_slug`` reference problem
+    (§7, ADR 0011): neither is a load-time metadata problem, but both are
+    rendered the same way and belong in the same "needs a human" kind. A
+    product's own eligible/excluded breakdown is not part of this report --
+    that is ``build.product_resolution``'s job, called from ``vpress
+    product``.
     """
     needs_review: list[NeedsReviewItem] = []
     stale_overrides: list[StaleOverrideItem] = []
@@ -306,6 +313,12 @@ def build_attention_report(catalog: LoadedCatalog, root: Path) -> AttentionRepor
     if catalog.config is not None:
         for resolved in resolve_collections(catalog.collections, catalog.config, catalog.assets):
             reference_problems.extend(resolved.reference_problems)
+        for product in catalog.products:
+            problem = product_collection_slug_reference_problem(
+                product, catalog.config, catalog.collections
+            )
+            if problem is not None:
+                reference_problems.append(problem)
 
         for asset in catalog.assets:
             asset_dir_path = asset_dir(root, catalog.config, asset.id)

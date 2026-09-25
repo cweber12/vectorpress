@@ -49,6 +49,17 @@ def find_product(inventory: ProductInventory, slug: ProductSlug) -> Product | No
     return next((p for p in inventory.products if p.slug == slug), None)
 
 
+def product_toml_path(config: CatalogConfig, slug: ProductSlug) -> Path:
+    """The on-disk path (relative to the catalog root) a product's slug
+    would have loaded from, whether or not it did -- used to attribute a
+    failed-to-load lookup, or a reference problem on this product's own
+    file (``build.product_resolution``'s inline-membership path, and
+    ``catalog.collection_resolution.product_collection_slug_reference_problem``),
+    to the right file. Mirrors ``catalog.collection_resolution.collection_toml_path``.
+    """
+    return Path(config.products_dir) / f"{slug}{PRODUCT_CONFIG_SUFFIX}"
+
+
 @dataclass(frozen=True)
 class ProductLookup:
     """The result of resolving one product slug against a loaded inventory
@@ -82,7 +93,7 @@ def lookup_product(
     if product is not None:
         return ProductLookup(product=product, problems=[])
 
-    toml_path = Path(config.products_dir) / f"{slug}{PRODUCT_CONFIG_SUFFIX}"
+    toml_path = product_toml_path(config, slug)
     problems = [problem for problem in inventory.problems if problem.path == toml_path]
     return ProductLookup(product=None, problems=problems)
 
