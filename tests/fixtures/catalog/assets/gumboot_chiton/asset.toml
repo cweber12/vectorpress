@@ -13,6 +13,10 @@
 # ecosystems deliberately match no rule-based fixture collection: neither
 # "Kelp forest" (kelp_forest_ecosystem's rule) nor pacific_coast_tide_pool
 # (an explicit, hand-picked asset list this asset was never added to).
+#
+# Doubles as the permanently rights-blocked fixture (§10.1): rights_status
+# is "do_not_publish" below, so every generated derivative can be approved
+# and this asset still shows blocked, for that reason alone.
 
 common_name = "Gumboot chiton"
 display_name = "Gumboot Chiton"
@@ -30,8 +34,8 @@ taxonomic_group = "Mollusk"
 product_use_categories = ["apparel", "stickers", "wall art"]
 notes = "Silhouette source purpose-built to trip the accidental_dot finding kind (issue #39): a detached eye-spot below the dot dimension threshold."
 
-rights_status = "original_artwork"
-licensing_notes = "Original illustration commissioned for this catalog; no external license required."
+rights_status = "do_not_publish"
+licensing_notes = "Placeholder artwork; rights not cleared for sale (kept do_not_publish on purpose)."
 
 accuracy_status = "not_reviewed"
 
