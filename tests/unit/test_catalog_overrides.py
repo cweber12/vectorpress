@@ -12,16 +12,24 @@ from pathlib import Path
 
 from PIL import Image
 
+from vectorpress.catalog.findings import findings_path
 from vectorpress.catalog.overrides import (
     OVERRIDES_DIRNAME,
     EffectiveDerivative,
+    OverrideCurrency,
     OverrideProvenance,
     asset_override_status,
     create_override_from_generated,
+    delete_override_findings,
+    delete_override_provenance,
+    delete_override_status,
+    discard_override_file,
     effective_derivative,
     effective_derivative_status,
     ensure_override_provenance,
     list_unrecognized_overrides,
+    override_currency,
+    override_is_stale,
     override_path,
     override_provenance_path,
     override_state_path,
@@ -32,7 +40,8 @@ from vectorpress.catalog.overrides import (
     write_override_status,
 )
 from vectorpress.catalog.provenance import DERIVED_DIRNAME, sha256_bytes
-from vectorpress.domain.asset import AccuracyStatus, Asset, RightsStatus, Source
+from vectorpress.domain.asset import AccuracyStatus, Asset, DerivativePin, RightsStatus, Source
+from vectorpress.domain.derivative_state import DerivativeState
 from vectorpress.domain.derivative_type import DerivativeType
 from vectorpress.domain.recipe import RECIPES
 from vectorpress.domain.status import Status, StatusRecord
@@ -454,3 +463,287 @@ def test_create_override_from_generated_is_idempotent_on_a_second_call(tmp_path:
 
     assert second == first
     assert second.stat().st_mtime_ns == mtime_before
+
+
+# --- override_is_stale: the pure comparison behind override_currency (§22.2) --------
+
+
+def test_override_is_stale_is_false_when_the_hashes_match() -> None:
+    assert override_is_stale("a" * 64, "a" * 64) is False
+
+
+def test_override_is_stale_is_true_when_the_hashes_differ() -> None:
+    """A changed source's content: the edited-against hash no longer equals
+    the hash of what the source now contains."""
+    assert override_is_stale("a" * 64, "b" * 64) is True
+
+
+def test_override_is_stale_is_true_when_a_pin_now_selects_a_different_source() -> None:
+    """A pin change lands here exactly like a content change: whichever
+    source is now selected, its hash is compared the same way -- the
+    override was edited against the hash of the source that used to be
+    selected."""
+    edited_against_the_old_pin = sha256_bytes(b"first source's bytes")
+    now_selected_by_the_new_pin = sha256_bytes(b"second source's bytes")
+    assert override_is_stale(edited_against_the_old_pin, now_selected_by_the_new_pin) is True
+
+
+def test_override_is_stale_is_true_when_the_current_source_is_gone(tmp_path: Path) -> None:
+    """The currently selected source file has been deleted from disk:
+    ``override_currency`` passes ``None`` here, always a mismatch."""
+    assert override_is_stale("a" * 64, None) is True
+
+
+# --- override_currency: stale (source changed) / current / nothing to compare yet ---
+
+
+def test_override_currency_is_none_with_no_provenance_recorded_yet(tmp_path: Path) -> None:
+    asset_dir = _make_asset_dir(tmp_path)
+    _write_override(asset_dir, FILENAME)
+
+    currency = override_currency(_asset(), asset_dir, RECIPES[DerivativeType.CUT_SVG], FILENAME)
+
+    assert currency is None
+
+
+def test_override_currency_is_current_right_after_the_baseline_is_recorded(
+    tmp_path: Path,
+) -> None:
+    asset_dir = _make_asset_dir(tmp_path)
+    override_bytes = b"<svg>hand-authored</svg>"
+    _write_override(asset_dir, FILENAME, override_bytes)
+    ensure_override_provenance(
+        _asset(), asset_dir, RECIPES[DerivativeType.CUT_SVG], FILENAME, override_bytes
+    )
+
+    currency = override_currency(_asset(), asset_dir, RECIPES[DerivativeType.CUT_SVG], FILENAME)
+
+    assert currency == OverrideCurrency(DerivativeState.CURRENT, None)
+
+
+def test_override_currency_is_stale_once_the_source_content_changes(tmp_path: Path) -> None:
+    asset_dir = _make_asset_dir(tmp_path)
+    override_bytes = b"<svg>hand-authored</svg>"
+    _write_override(asset_dir, FILENAME, override_bytes)
+    ensure_override_provenance(
+        _asset(), asset_dir, RECIPES[DerivativeType.CUT_SVG], FILENAME, override_bytes
+    )
+
+    _write_source_png(asset_dir / SOURCES_DIRNAME / "silhouette.png", rgba=(1, 2, 3, 255))
+
+    currency = override_currency(_asset(), asset_dir, RECIPES[DerivativeType.CUT_SVG], FILENAME)
+
+    assert currency is not None
+    assert currency.state is DerivativeState.STALE
+    assert currency.reason == "source changed"
+
+
+def test_override_currency_is_stale_once_a_pin_selects_a_different_source(
+    tmp_path: Path,
+) -> None:
+    """A pin change alone -- no source's own bytes are touched -- flags the
+    override stale too, since a different source is now selected for it."""
+    asset_dir = _make_asset_dir(tmp_path)
+    _write_source_png(asset_dir / SOURCES_DIRNAME / "second.png", rgba=(9, 9, 9, 255))
+    asset = Asset(
+        id="ochre_sea_star",
+        common_name="Ochre sea star",
+        display_name="Ochre Sea Star",
+        description="A test asset.",
+        subject_category="Echinoderm",
+        taxonomic_group="Echinoderm",
+        rights_status=RightsStatus.ORIGINAL_ARTWORK,
+        accuracy_status=AccuracyStatus.NOT_REVIEWED,
+        sources=[
+            Source(role="silhouette", file="silhouette.png"),
+            Source(role="silhouette", file="second.png"),
+        ],
+    )
+    override_bytes = b"<svg>hand-authored</svg>"
+    _write_override(asset_dir, FILENAME, override_bytes)
+    ensure_override_provenance(
+        asset, asset_dir, RECIPES[DerivativeType.CUT_SVG], FILENAME, override_bytes
+    )
+
+    pinned = asset.model_copy(
+        update={"derivatives": {DerivativeType.CUT_SVG.value: DerivativePin(source="second.png")}}
+    )
+    currency = override_currency(pinned, asset_dir, RECIPES[DerivativeType.CUT_SVG], FILENAME)
+
+    assert currency is not None
+    assert currency.state is DerivativeState.STALE
+
+
+# --- re-edit rule: bytes change rebaselines to the *current* source (§22.2) ---------
+
+
+def test_ensure_override_provenance_rebaselines_to_the_new_source_when_it_actually_changed(
+    tmp_path: Path,
+) -> None:
+    """Distinct from the "keeps the source hash across repeated edits" test
+    above: there, the source never changes between edits, so the rebaselined
+    hash happens to equal the old one. Here the source really does change
+    between two edits, and the second edit's baseline follows it -- the
+    re-edit rule (§22.2) that clears a stale flag the moment a human edits
+    the override, with no extra command."""
+    asset_dir = _make_asset_dir(tmp_path)
+    from vectorpress.pipeline.generate import generate_asset
+
+    generate_asset(_asset(), asset_dir)
+    first_bytes = b"<svg>first edit</svg>"
+    _write_override(asset_dir, FILENAME, first_bytes)
+    first_record = ensure_override_provenance(
+        _asset(), asset_dir, RECIPES[DerivativeType.CUT_SVG], FILENAME, first_bytes
+    )
+
+    _write_source_png(asset_dir / SOURCES_DIRNAME / "silhouette.png", rgba=(7, 8, 9, 255))
+    new_source_hash = sha256_bytes((asset_dir / SOURCES_DIRNAME / "silhouette.png").read_bytes())
+
+    second_bytes = b"<svg>second edit</svg>"
+    _write_override(asset_dir, FILENAME, second_bytes)
+    second_record = ensure_override_provenance(
+        _asset(), asset_dir, RECIPES[DerivativeType.CUT_SVG], FILENAME, second_bytes
+    )
+
+    assert second_record.source_hash == new_source_hash
+    assert second_record.source_hash != first_record.source_hash
+
+
+# --- orphaned override state: a newly appearing override starts fresh (§22.2) -------
+
+
+def test_create_override_from_generated_does_not_inherit_orphaned_provenance_or_status(
+    tmp_path: Path,
+) -> None:
+    """A previous override was approved, then deleted by hand (not through
+    ``vpress override discard``), leaving its provenance and status behind
+    with nothing to clean them up. A new override created afterward
+    (``vpress open --override``'s codepath) must not inherit that leftover
+    state: fresh provenance, ``needs_review``, not the old ``approved``."""
+    asset_dir = _make_asset_dir(tmp_path)
+    from vectorpress.pipeline.generate import generate_asset
+
+    generate_asset(_asset(), asset_dir)
+    recipe = RECIPES[DerivativeType.CUT_SVG]
+    old_override_bytes = b"<svg>the deleted override</svg>"
+    override_file = _write_override(asset_dir, FILENAME, old_override_bytes)
+    ensure_override_provenance(_asset(), asset_dir, recipe, FILENAME, old_override_bytes)
+    write_override_status(
+        asset_dir / DERIVED_DIRNAME,
+        DerivativeType.CUT_SVG,
+        StatusRecord(
+            status=Status.APPROVED, note="clean", output_hash=sha256_bytes(old_override_bytes)
+        ),
+    )
+    # Deleted by hand -- no command ran to clean up its state.
+    override_file.unlink()
+
+    generated_bytes = (asset_dir / DERIVED_DIRNAME / FILENAME).read_bytes()
+    generated_provenance_source_hash = sha256_bytes(
+        (asset_dir / SOURCES_DIRNAME / "silhouette.png").read_bytes()
+    )
+    create_override_from_generated(_asset(), asset_dir, recipe, FILENAME, generated_bytes)
+
+    new_provenance = read_override_provenance(asset_dir / DERIVED_DIRNAME, FILENAME)
+    assert new_provenance is not None
+    assert new_provenance.source_hash == generated_provenance_source_hash
+    assert new_provenance.output_hash == sha256_bytes(generated_bytes)
+
+    new_status = asset_override_status(
+        asset_dir / DERIVED_DIRNAME, DerivativeType.CUT_SVG, generated_bytes
+    )
+    assert new_status.status is Status.NEEDS_REVIEW
+    assert new_status.note is None
+
+
+def test_create_override_from_generated_does_not_inherit_orphaned_findings(tmp_path: Path) -> None:
+    asset_dir = _make_asset_dir(tmp_path)
+    from vectorpress.pipeline.generate import generate_asset
+
+    generate_asset(_asset(), asset_dir)
+    recipe = RECIPES[DerivativeType.CUT_SVG]
+    override_file = _write_override(asset_dir, FILENAME, b"<svg>the deleted override</svg>")
+    report_path = findings_path(asset_dir / DERIVED_DIRNAME, FILENAME, is_override=True)
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    report_path.write_text("{}", encoding="utf-8")
+    override_file.unlink()
+
+    generated_bytes = (asset_dir / DERIVED_DIRNAME / FILENAME).read_bytes()
+    create_override_from_generated(_asset(), asset_dir, recipe, FILENAME, generated_bytes)
+
+    assert not report_path.is_file()
+
+
+# --- delete_override_provenance / delete_override_status / delete_override_findings -
+
+
+def test_delete_override_provenance_removes_the_record(tmp_path: Path) -> None:
+    derived_dir = tmp_path / DERIVED_DIRNAME
+    write_override_provenance(
+        derived_dir, FILENAME, OverrideProvenance(source_hash="a" * 64, output_hash="b" * 64)
+    )
+
+    delete_override_provenance(derived_dir, FILENAME)
+
+    assert read_override_provenance(derived_dir, FILENAME) is None
+
+
+def test_delete_override_provenance_is_a_noop_with_nothing_recorded(tmp_path: Path) -> None:
+    delete_override_provenance(tmp_path, FILENAME)  # does not raise
+
+
+def test_delete_override_status_removes_only_the_named_type(tmp_path: Path) -> None:
+    write_override_status(
+        tmp_path,
+        DerivativeType.CUT_SVG,
+        StatusRecord(status=Status.APPROVED, note=None, output_hash="a" * 64),
+    )
+    write_override_status(
+        tmp_path,
+        DerivativeType.SILHOUETTE_SVG,
+        StatusRecord(status=Status.APPROVED, note=None, output_hash="b" * 64),
+    )
+
+    delete_override_status(tmp_path, DerivativeType.CUT_SVG)
+
+    assert read_override_status(tmp_path, DerivativeType.CUT_SVG) is None
+    assert read_override_status(tmp_path, DerivativeType.SILHOUETTE_SVG) is not None
+
+
+def test_delete_override_status_removes_the_whole_file_when_it_was_the_only_entry(
+    tmp_path: Path,
+) -> None:
+    write_override_status(
+        tmp_path,
+        DerivativeType.CUT_SVG,
+        StatusRecord(status=Status.APPROVED, note=None, output_hash="a" * 64),
+    )
+
+    delete_override_status(tmp_path, DerivativeType.CUT_SVG)
+
+    assert not override_state_path(tmp_path).exists()
+
+
+def test_delete_override_findings_removes_the_override_report(tmp_path: Path) -> None:
+    derived_dir = tmp_path / DERIVED_DIRNAME
+    report_path = findings_path(derived_dir, FILENAME, is_override=True)
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    report_path.write_text("{}", encoding="utf-8")
+
+    delete_override_findings(derived_dir, FILENAME)
+
+    assert not report_path.is_file()
+
+
+def test_discard_override_file_removes_the_file(tmp_path: Path) -> None:
+    asset_dir = _make_asset_dir(tmp_path)
+    override_file = _write_override(asset_dir, FILENAME)
+
+    discard_override_file(asset_dir, FILENAME)
+
+    assert not override_file.is_file()
+
+
+def test_discard_override_file_is_a_noop_with_no_file(tmp_path: Path) -> None:
+    asset_dir = _make_asset_dir(tmp_path)
+    discard_override_file(asset_dir, FILENAME)  # does not raise

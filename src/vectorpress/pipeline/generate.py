@@ -24,6 +24,7 @@ from vectorpress.catalog.derivatives import (
     select_derivatives,
     tally_derivative_states,
 )
+from vectorpress.catalog.overrides import ensure_override_provenance, read_override_bytes
 from vectorpress.catalog.provenance import (
     DERIVED_DIRNAME,
     Provenance,
@@ -285,6 +286,16 @@ def _generate_one(
     :func:`~vectorpress.catalog.provenance.derivative_currency`). Caught by
     :func:`generate_asset` so one failing derivative does not stop
     generation for the rest of the asset or catalog.
+
+    An override sitting at this type's filename with no provenance of its
+    own yet (a hand-dropped override no command has touched) gets one
+    recorded here (:func:`~vectorpress.catalog.overrides.ensure_override_provenance`)
+    *before* the generated file and its provenance are rewritten below --
+    using the generated derivative's source hash as it still is, pre-write
+    (§22.2). Recording it after would baseline the override against the
+    source this very regeneration just picked up, so a source change
+    followed by ``generate`` would leave the override looking current when
+    it is really stale.
     """
     assert recipe.generator is not None
     generator = get_generator(recipe.generator)
@@ -309,6 +320,9 @@ def _generate_one(
             output_hash=output_hash,
         )
         derived_dir = asset_dir_path / DERIVED_DIRNAME
+        override_bytes = read_override_bytes(asset_dir_path, filename)
+        if override_bytes is not None:
+            ensure_override_provenance(asset, asset_dir_path, recipe, filename, override_bytes)
         write_derivative(derived_dir, filename, output.output_bytes, provenance)
         write_status(
             derived_dir,

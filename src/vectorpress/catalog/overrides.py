@@ -10,7 +10,9 @@ generated derivative's filename for a type, is that type's override: the
 §6.8): nothing in this module writes, moves or deletes anything under it,
 except :func:`create_override_from_generated` -- ``vpress open --override``'s
 create-only copy, made only on that explicit request, and never overwriting
-a file already there (CONTEXT.md "Override").
+a file already there -- and :func:`discard_override_file` -- ``vpress
+override discard --yes``'s removal of the one file a human asked to remove
+(CONTEXT.md "Override").
 
 An override's own status and provenance are tool-owned state under
 ``derived/`` instead -- their own pair of files, distinct from the
@@ -25,10 +27,13 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
+from vectorpress.catalog.assets import SOURCES_DIRNAME
 from vectorpress.catalog.atomic_write import atomic_write_bytes
 from vectorpress.catalog.derivatives import select_source
+from vectorpress.catalog.findings import findings_path
 from vectorpress.catalog.provenance import (
     DERIVED_DIRNAME,
+    SOURCE_CHANGED,
     read_derivative_bytes,
     read_provenance,
     read_source_bytes,
@@ -36,6 +41,7 @@ from vectorpress.catalog.provenance import (
 )
 from vectorpress.catalog.status import asset_derivative_status
 from vectorpress.domain.asset import Asset
+from vectorpress.domain.derivative_state import DerivativeState
 from vectorpress.domain.derivative_type import DerivativeType
 from vectorpress.domain.recipe import Recipe
 from vectorpress.domain.status import Status, StatusRecord, effective_status
@@ -125,6 +131,13 @@ def create_override_from_generated(
     (:func:`ensure_override_provenance`) the moment it is created, rather
     than waiting for a later ``validate`` or ``approve``, so a source change
     afterward is detectable as staleness right away.
+
+    Also clears any provenance, status or findings left behind by a
+    *previous* override at this path that was deleted by hand instead of
+    through ``vpress override discard`` (§22.2): that leftover state is
+    orphaned, since nothing here removed it when the file disappeared, and
+    the fresh override must not inherit it -- a stale flag, an approval or a
+    findings result that describe bytes nobody wrote.
     """
     path = override_path(asset_dir_path, output_filename)
     if path.is_file():
@@ -139,6 +152,7 @@ def create_override_from_generated(
         # file that won is what matters, not which call wrote it.
         return path
 
+    _clear_orphaned_override_state(asset_dir_path, recipe.derivative_type, output_filename)
     ensure_override_provenance(asset, asset_dir_path, recipe, output_filename, generated_bytes)
     return path
 
@@ -201,6 +215,16 @@ def write_override_provenance(
         atomic_write_bytes(path, payload)
 
 
+def _current_selected_source_hash(asset: Asset, asset_dir_path: Path, recipe: Recipe) -> str:
+    """The hash of the source currently selected for ``recipe`` (§6.8,
+    §22.2): what an override edited right now, or re-baselined against, is
+    taken to be edited against. An override for an impossible type names no
+    source to edit against, so callers only reach here once one exists."""
+    selection = select_source(asset, recipe)
+    assert selection.source is not None
+    return sha256_bytes(read_source_bytes(asset_dir_path, selection.source.file))
+
+
 def _initial_override_source_hash(
     asset: Asset, asset_dir_path: Path, recipe: Recipe, output_filename: str
 ) -> str:
@@ -211,12 +235,7 @@ def _initial_override_source_hash(
     generated_provenance = read_provenance(asset_dir_path / DERIVED_DIRNAME, output_filename)
     if generated_provenance is not None:
         return generated_provenance.source_hash
-
-    selection = select_source(asset, recipe)
-    assert (
-        selection.source is not None
-    )  # an override for an impossible type names no source to edit against
-    return sha256_bytes(read_source_bytes(asset_dir_path, selection.source.file))
+    return _current_selected_source_hash(asset, asset_dir_path, recipe)
 
 
 def ensure_override_provenance(
@@ -227,10 +246,15 @@ def ensure_override_provenance(
     override_bytes: bytes,
 ) -> OverrideProvenance:
     """The override's provenance record for (``asset``, ``recipe``'s type),
-    writing one the first time this override is seen (§6.8) and refreshing
-    ``output_hash`` whenever ``override_bytes`` has changed since --
-    ``source_hash`` is never re-derived once recorded, so an override edited
-    more than once still records what it was *originally* edited against."""
+    writing one the first time this override is seen (§6.8).
+
+    Unchanged bytes since the last call: the existing record, untouched (no
+    rewrite). Changed bytes (a re-edit, §22.2's re-edit rule): the edit is
+    taken as made against the source as it stands right now, so
+    ``source_hash`` re-baselines to :func:`_current_selected_source_hash`
+    -- this is what clears a stale flag the moment a human edits the file,
+    without any extra command. Never seen before: :func:`_initial_override_source_hash`.
+    """
     derived_dir = asset_dir_path / DERIVED_DIRNAME
     output_hash = sha256_bytes(override_bytes)
     existing = read_override_provenance(derived_dir, output_filename)
@@ -238,13 +262,36 @@ def ensure_override_provenance(
     if existing is not None:
         if existing.output_hash == output_hash:
             return existing
-        updated = OverrideProvenance(source_hash=existing.source_hash, output_hash=output_hash)
+        updated = OverrideProvenance(
+            source_hash=_current_selected_source_hash(asset, asset_dir_path, recipe),
+            output_hash=output_hash,
+        )
         write_override_provenance(derived_dir, output_filename, updated)
         return updated
 
     source_hash = _initial_override_source_hash(asset, asset_dir_path, recipe, output_filename)
     record = OverrideProvenance(source_hash=source_hash, output_hash=output_hash)
     write_override_provenance(derived_dir, output_filename, record)
+    return record
+
+
+def rebaseline_override_source(
+    asset: Asset,
+    asset_dir_path: Path,
+    recipe: Recipe,
+    output_filename: str,
+    override_bytes: bytes,
+) -> OverrideProvenance:
+    """Re-baseline one override's edited-against hash to the source
+    currently selected for ``recipe`` (§22.2's "keep": the override stays
+    as-is against the new source, only the baseline moves). ``output_hash``
+    is refreshed too, from ``override_bytes``, so the record always
+    describes the bytes actually on disk."""
+    record = OverrideProvenance(
+        source_hash=_current_selected_source_hash(asset, asset_dir_path, recipe),
+        output_hash=sha256_bytes(override_bytes),
+    )
+    write_override_provenance(asset_dir_path / DERIVED_DIRNAME, output_filename, record)
     return record
 
 
@@ -309,6 +356,25 @@ def write_override_status(
         atomic_write_bytes(path, payload)
 
 
+def delete_override_status(derived_dir: Path, derivative_type: DerivativeType) -> None:
+    """Remove one derivative type's stored override status record, leaving
+    every other type's untouched -- ``vpress override discard``'s status
+    cleanup, and re-used to drop orphaned state ahead of a fresh override
+    (:func:`_clear_orphaned_override_state`). A no-op when no record exists
+    for this type."""
+    statuses = read_all_override_statuses(derived_dir)
+    if derivative_type not in statuses:
+        return
+    del statuses[derivative_type]
+    path = override_state_path(derived_dir)
+    if not statuses:
+        path.unlink(missing_ok=True)
+        return
+    payload = _override_state_payload(statuses)
+    if not (path.is_file() and path.read_bytes() == payload):
+        atomic_write_bytes(path, payload)
+
+
 def asset_override_status(
     derived_dir: Path, derivative_type: DerivativeType, override_bytes: bytes
 ) -> StatusRecord:
@@ -334,3 +400,116 @@ def effective_derivative_status(
     if effective.is_override:
         return asset_override_status(derived_dir, derivative_type, effective.bytes)
     return asset_derivative_status(derived_dir, derivative_type, effective.bytes)
+
+
+# --- stale overrides: the source hash an override was edited against, versus now (§22.2) --
+
+
+def override_is_stale(edited_against_source_hash: str, current_source_hash: str | None) -> bool:
+    """Whether an override is stale (§22.2, ADR 0004, CONTEXT.md "Stale"):
+    its edited-against source hash no longer equals the currently selected
+    source's hash. Covers a source's content changing and a pin selecting a
+    different source alike -- both land here as the same mismatch, since
+    neither this function nor its caller cares which one happened.
+    ``current_source_hash`` is ``None`` when the currently selected source
+    file is gone from disk -- always a mismatch, the override's baseline
+    describes a source that no longer exists to compare it against.
+
+    Pure: both hashes are already-computed values, so this is testable
+    without touching a filesystem -- the check :func:`override_currency`
+    performs once it has read them."""
+    return edited_against_source_hash != current_source_hash
+
+
+@dataclass(frozen=True)
+class OverrideCurrency:
+    """One override's on-disk currency against the source it was edited
+    against (§22.2, ADR 0004): :attr:`DerivativeState.CURRENT` or
+    :attr:`DerivativeState.STALE` with :data:`~vectorpress.catalog.provenance.SOURCE_CHANGED`
+    -- the only reason an override can be stale (CONTEXT.md "Stale": unlike
+    a generated derivative, an override has no recipe to change and is never
+    rewritten on disk by the tool, so ``recipe changed`` and ``output
+    changed on disk`` do not apply to it)."""
+
+    state: DerivativeState
+    reason: str | None
+
+
+def override_currency(
+    asset: Asset, asset_dir_path: Path, recipe: Recipe, output_filename: str
+) -> OverrideCurrency | None:
+    """Whether the override at (``asset``, ``recipe``'s type) is stale
+    against the source currently selected for it, or ``None`` when there is
+    nothing yet to compare: no override provenance has ever been recorded
+    (:func:`ensure_override_provenance` has not run for this override), the
+    override file itself is gone, or no source is currently selectable at
+    all (an impossible type).
+
+    A read-only check: it never re-baselines anything, even when it finds
+    the bytes on disk have moved past the last recorded baseline. When they
+    have -- the override was edited since :func:`ensure_override_provenance`
+    last ran -- the edit is taken as made against the current source
+    already (§22.2's re-edit rule), reported ``CURRENT`` without waiting for
+    some other command to persist that baseline first: ``vpress asset``
+    would otherwise keep showing a since-fixed stale flag until the human
+    happens to run one of the handful of commands that write provenance.
+    """
+    provenance = read_override_provenance(asset_dir_path / DERIVED_DIRNAME, output_filename)
+    if provenance is None:
+        return None
+
+    override_bytes = read_override_bytes(asset_dir_path, output_filename)
+    if override_bytes is None:
+        return None
+    if sha256_bytes(override_bytes) != provenance.output_hash:
+        return OverrideCurrency(DerivativeState.CURRENT, None)
+
+    selection = select_source(asset, recipe)
+    if selection.source is None:
+        return None
+
+    source_path = asset_dir_path / SOURCES_DIRNAME / selection.source.file
+    current_source_hash = sha256_bytes(source_path.read_bytes()) if source_path.is_file() else None
+    if override_is_stale(provenance.source_hash, current_source_hash):
+        return OverrideCurrency(DerivativeState.STALE, SOURCE_CHANGED)
+    return OverrideCurrency(DerivativeState.CURRENT, None)
+
+
+# --- override discard: the one deletion the tool ever makes under overrides/ (§22.2) ------
+
+
+def discard_override_file(asset_dir_path: Path, output_filename: str) -> None:
+    """Remove one override file (``vpress override discard --yes``): the
+    only deletion this module ever makes under ``overrides/``, made only on
+    that explicit, confirmed request. A no-op if the file is already gone."""
+    override_path(asset_dir_path, output_filename).unlink(missing_ok=True)
+
+
+def delete_override_provenance(derived_dir: Path, output_filename: str) -> None:
+    """Remove one override's provenance record, if it exists. A no-op
+    otherwise."""
+    override_provenance_path(derived_dir, output_filename).unlink(missing_ok=True)
+
+
+def delete_override_findings(derived_dir: Path, output_filename: str) -> None:
+    """Remove one override's own findings report, if it exists. A no-op
+    otherwise. Only the catalog-default report -- the one ``vpress asset``
+    shows -- a product-sized override report (a non-default ``at_size``) is
+    not this discard's concern."""
+    findings_path(derived_dir, output_filename, is_override=True).unlink(missing_ok=True)
+
+
+def _clear_orphaned_override_state(
+    asset_dir_path: Path, derivative_type: DerivativeType, output_filename: str
+) -> None:
+    """Remove provenance, status and findings left behind by a previous
+    override at this path that no longer exists (§22.2's "a newly appearing
+    override... must start fresh, not inherit it"): only
+    :func:`create_override_from_generated` calls this, and only once it has
+    confirmed it is writing a file that was not there a moment ago -- a
+    hand-deleted override's leftover state never gets attributed to the one
+    replacing it."""
+    derived_dir = asset_dir_path / DERIVED_DIRNAME
+    delete_override_provenance(derived_dir, output_filename)
+    delete_override_status(derived_dir, derivative_type)
+    delete_override_findings(derived_dir, output_filename)
