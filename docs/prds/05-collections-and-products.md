@@ -1,6 +1,6 @@
 # PRD 5 — Collections and Products
 
-Status: not started
+Status: complete
 Depends on: see `docs/PLAN.md` Part 3 dependency graph
 
 **Goal.** Assets are grouped into collections by rule or list, and products define

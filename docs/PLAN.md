@@ -137,7 +137,7 @@ Dependency graph:
 └─ 2 Derivative generation & provenance
    └─ 3 Cut files & validation
       └─ 4 Review, approval & overrides
-         └─ 5 Collections & products
+         └─ 5 Collections & products   (complete)
             └─ 6 Product build & packaging
                ├─ 7 Previews, listing & marketplace export
                └─ 8 Publication lifecycle

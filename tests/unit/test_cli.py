@@ -433,6 +433,69 @@ def test_asset_default_eligibility_covers_every_type_the_asset_can_have(
     )
 
 
+def test_asset_lists_every_collection_it_belongs_to_including_rule_and_via(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``purple_sea_urchin`` is explicit in ``pacific_coast_tide_pool``,
+    rule-matched into ``kelp_forest_ecosystem``, and pulled into
+    ``pacific_coast_marine`` via both of those (§33, §34, its own
+    ``pacific_coast_marine.toml`` comment)."""
+    monkeypatch.chdir(FIXTURE_CATALOG_ROOT)
+
+    result = runner.invoke(app, ["asset", "purple_sea_urchin"])
+
+    assert result.exit_code == 0
+    assert "Collections: 3" in result.stdout
+    assert "pacific_coast_tide_pool\tPacific Coast Tide Pool\texplicit" in result.stdout
+    assert "kelp_forest_ecosystem\tKelp Forest Ecosystem\trule" in result.stdout
+    marine_line = next(
+        line
+        for line in result.stdout.splitlines()
+        if line.strip().startswith("pacific_coast_marine")
+    )
+    assert "via pacific_coast_tide_pool" in marine_line
+    assert "via kelp_forest_ecosystem" in marine_line
+
+
+def test_asset_lists_every_product_it_belongs_to_with_its_own_eligibility(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Same asset, the product-side section: every product over a
+    collection it belongs to, each showing that product's own eligibility
+    for that product's derivative types -- excluded everywhere on the
+    clean fixture, since nothing is generated yet."""
+    monkeypatch.chdir(FIXTURE_CATALOG_ROOT)
+
+    result = runner.invoke(app, ["asset", "purple_sea_urchin"])
+
+    assert result.exit_code == 0
+    assert "Products: 3" in result.stdout
+    assert (
+        "pacific_coast_tide_pool_standard_pack\tPacific Coast Tide Pool Cut File Collection\t"
+        "explicit\texcluded" in result.stdout
+    )
+    assert (
+        "pacific_coast_tide_pool_png_only\tpacific_coast_tide_pool_png_only\texplicit\texcluded"
+        in (result.stdout)
+    )
+    assert "kelp_forest_mini_pack\tkelp_forest_mini_pack\trule\texcluded" in result.stdout
+
+
+def test_asset_in_no_collection_says_so_instead_of_an_empty_header(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``bat_star``'s own ``asset.toml`` notes it matches no rule-based
+    fixture collection and is on no explicit list either -- "Collections:
+    none" / "Products: none", never a header with nothing under it."""
+    monkeypatch.chdir(FIXTURE_CATALOG_ROOT)
+
+    result = runner.invoke(app, ["asset", "bat_star"])
+
+    assert result.exit_code == 0
+    assert "Collections: none" in result.stdout
+    assert "Products: none" in result.stdout
+
+
 def test_asset_with_types_option_narrows_eligibility_to_the_named_types(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -735,14 +798,17 @@ def test_collection_that_failed_to_load_exits_non_zero_with_a_distinct_message(
     assert "marketplace_category" in result.output
 
 
-def test_products_lists_every_fixture_product_with_slug_title_tier_and_collection(
+def test_products_lists_every_fixture_product_with_slug_title_tier_collection_and_counts(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Splits each line on the tab separator and asserts the exact 4-tuple
+    """Splits each line on the tab separator and asserts the exact 6-tuple
     per product, rather than substring checks: ``"standard_pack"``,
     ``"mini_pack"`` and ``"pacific_coast_tide_pool"`` are all substrings of
-    the product slugs themselves, so a dropped or garbled tier/collection
-    column would not have failed a substring-only assertion.
+    the product slugs themselves, so a dropped or garbled tier/collection/
+    count column would not have failed a substring-only assertion. Every
+    fixture product reads 0 eligible on the clean fixture (nothing
+    generated yet, §34); the member count is each product's own resolved
+    membership size.
     """
     monkeypatch.chdir(FIXTURE_CATALOG_ROOT)
 
@@ -759,18 +825,24 @@ def test_products_lists_every_fixture_product_with_slug_title_tier_and_collectio
         "Pacific Coast Tide Pool Cut File Collection",
         "standard_pack",
         "pacific_coast_tide_pool",
+        "3",
+        "0",
     )
     assert lines["pacific_coast_tide_pool_png_only"] == (
         "pacific_coast_tide_pool_png_only",
         "pacific_coast_tide_pool_png_only",
         "collection",
         "pacific_coast_tide_pool",
+        "3",
+        "0",
     )
     assert lines["kelp_forest_mini_pack"] == (
         "kelp_forest_mini_pack",
         "kelp_forest_mini_pack",
         "mini_pack",
         "inline (rule)",
+        "1",
+        "0",
     )
 
 

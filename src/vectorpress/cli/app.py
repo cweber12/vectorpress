@@ -12,6 +12,11 @@ from typing import Protocol
 import typer
 
 from vectorpress import __version__
+from vectorpress.build.asset_resolution import (
+    AssetCollectionMembership,
+    AssetProductMembership,
+    resolve_asset_reuse,
+)
 from vectorpress.build.product_resolution import resolve_product
 from vectorpress.catalog.assets import (
     AssetInventory,
@@ -22,10 +27,9 @@ from vectorpress.catalog.assets import (
 )
 from vectorpress.catalog.collection_resolution import (
     ResolvedCollection,
+    all_reference_problems,
     lookup_and_resolve_collection,
-    product_collection_slug_reference_problem,
     resolve_collection,
-    resolve_collections,
 )
 from vectorpress.catalog.collections import load_collections
 from vectorpress.catalog.derivatives import DerivativeStateCounts
@@ -294,14 +298,9 @@ def status(ctx: typer.Context) -> None:
 
     reference_problems: list[MetadataProblem] = []
     if catalog.config is not None:
-        for resolved in resolve_collections(catalog.collections, catalog.config, catalog.assets):
-            reference_problems.extend(resolved.reference_problems)
-        for loaded_product in catalog.products:
-            problem = product_collection_slug_reference_problem(
-                loaded_product, catalog.config, catalog.collections
-            )
-            if problem is not None:
-                reference_problems.append(problem)
+        reference_problems = all_reference_problems(
+            catalog.collections, catalog.products, catalog.config, catalog.assets
+        )
     _echo_problems(catalog.problems)
     _echo_reference_problems(reference_problems)
 
@@ -482,6 +481,47 @@ def _echo_eligibility(derivative_types: list[DerivativeType], result: Eligibilit
         typer.echo("Warnings: none")
 
 
+def _echo_asset_collections(memberships: list[AssetCollectionMembership]) -> None:
+    """``vpress asset``'s "which collections is this in" section (§33,
+    §34): a fixed "none" line for an asset in no collection, never an empty
+    header with nothing under it."""
+    if not memberships:
+        typer.echo("Collections: none")
+        return
+    typer.echo(f"Collections: {len(memberships)}")
+    for membership in memberships:
+        ways_in = ", ".join(str(way) for way in membership.ways_in)
+        typer.echo(f"  {membership.collection.slug}\t{membership.collection.name}\t{ways_in}")
+
+
+def _echo_asset_products(memberships: list[AssetProductMembership]) -> None:
+    """``vpress asset``'s "which products is this in, and is it eligible in
+    each" section (§33, §34): mirrors ``vpress product``'s own per-member
+    line (blocking reasons and warnings indented under it), with the same
+    "none" fallback :func:`_echo_asset_collections` uses."""
+    if not memberships:
+        typer.echo("Products: none")
+        return
+    typer.echo(f"Products: {len(memberships)}")
+    for membership in memberships:
+        title = (
+            membership.product.listing.title
+            if membership.product.listing is not None
+            else membership.product.slug
+        )
+        ways_in = ", ".join(str(way) for way in membership.ways_in)
+        typer.echo(
+            f"  {membership.product.slug}\t{title}\t{ways_in}\t{membership.eligibility.value}"
+        )
+        if membership.blocking_reasons:
+            reasons = "; ".join(
+                _render_blocking_reason(reason) for reason in membership.blocking_reasons
+            )
+            typer.echo(f"    blocked: {reasons}")
+        if membership.warnings:
+            typer.echo(f"    warnings: {'; '.join(membership.warnings)}")
+
+
 @app.command()
 def asset(
     ctx: typer.Context,
@@ -496,8 +536,8 @@ def asset(
     ),
 ) -> None:
     """Show one asset: metadata, sources with their roles, each derivative
-    type's state (current, stale, missing or impossible), and publication
-    eligibility.
+    type's state (current, stale, missing or impossible), publication
+    eligibility, and the collections and products it currently belongs to.
 
     The cut_svg line also shows its findings result: pass, needs review,
     findings stale, or not validated. A type overridden under overrides/
@@ -512,9 +552,20 @@ def asset(
     have (not impossible) by default, or --types's comma-separated list
     instead: blocked names one reason per cause, and any warnings (which
     never block) follow.
+
+    Collections and products list every one this asset currently belongs
+    to, each with how it got in; a product also shows its own eligibility
+    for that product's derivative types. "none" when there are none,
+    rather than an empty header.
+    \f
+    Both sections come from build.asset_resolution.resolve_asset_reuse
+    (§33, §34), the asset-side view of the same resolution 'vpress
+    collection' and 'vpress product' already compute -- no second
+    resolution path (ADR 0011).
     """
     root, config = _locate_and_load_config(ctx)
-    found = _lookup_asset_or_exit(load_assets(root, config), config, asset_id)
+    asset_inventory = load_assets(root, config)
+    found = _lookup_asset_or_exit(asset_inventory, config, asset_id)
     asset_dir_path = asset_dir(root, config, found.id)
     typer.echo(f"{found.id}\t{found.display_name}")
     typer.echo(f"Rights status: {found.rights_status.value}")
@@ -584,6 +635,14 @@ def asset(
     )
     result = asset_eligibility_for(found, asset_dir_path, requested_types, config)
     _echo_eligibility(requested_types, result)
+
+    known_collections = load_collections(root, config).collections
+    known_products = load_products(root, config).products
+    reuse = resolve_asset_reuse(
+        found.id, root, config, asset_inventory.assets, known_collections, known_products
+    )
+    _echo_asset_collections(reuse.collections)
+    _echo_asset_products(reuse.products)
 
 
 def _select_targets(
@@ -1407,14 +1466,20 @@ def collection(
 
 @app.command()
 def products(ctx: typer.Context) -> None:
-    """List every product that loaded: slug, listing title, tier, and
-    collection.
+    """List every product that loaded: slug, listing title, tier,
+    collection, current member count, and eligible member count.
 
     The title falls back to the slug for a product with no listing yet.
     Products that failed to load are reported by 'vpress status'.
+    \f
+    Member and eligible counts come from build.product_resolution.
+    resolve_product (§34), the same resolution 'vpress product' shows in
+    full -- no second resolution path.
     """
     root, config = _locate_and_load_config(ctx)
     inventory = load_products(root, config)
+    known_assets = load_assets(root, config).assets
+    known_collections = load_collections(root, config).collections
 
     for loaded in inventory.products:
         title = loaded.listing.title if loaded.listing is not None else loaded.slug
@@ -1423,7 +1488,11 @@ def products(ctx: typer.Context) -> None:
         else:
             assert loaded.membership is not None  # enforced by Product's own validation
             collection_ref = f"inline ({loaded.membership.form.value})"
-        typer.echo(f"{loaded.slug}\t{title}\t{loaded.tier.value}\t{collection_ref}")
+        resolved = resolve_product(loaded, root, config, known_assets, known_collections)
+        typer.echo(
+            f"{loaded.slug}\t{title}\t{loaded.tier.value}\t{collection_ref}\t"
+            f"{len(resolved.members)}\t{len(resolved.eligible_members)}"
+        )
 
 
 @app.command()

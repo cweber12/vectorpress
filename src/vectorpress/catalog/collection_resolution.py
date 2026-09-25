@@ -180,6 +180,34 @@ def lookup_and_resolve_collection(
     )
 
 
+def all_reference_problems(
+    collections: list[Collection],
+    products: list[Product],
+    config: CatalogConfig,
+    known_assets: list[Asset],
+) -> list[MetadataProblem]:
+    """Every reference problem in a loaded catalog, collections and
+    products together (§34): each collection's own (via
+    :func:`resolve_collections`) plus each product's own unknown
+    ``collection_slug`` (via :func:`product_collection_slug_reference_problem`).
+    The one place this pair of loops runs, called by both ``vpress status``
+    and ``pipeline.attention.build_attention_report`` so the two can never
+    drift apart (ADR 0011).
+    """
+    problems = [
+        problem
+        for resolved in resolve_collections(collections, config, known_assets)
+        for problem in resolved.reference_problems
+    ]
+    problems.extend(
+        problem
+        for product in products
+        if (problem := product_collection_slug_reference_problem(product, config, collections))
+        is not None
+    )
+    return problems
+
+
 def product_collection_slug_reference_problem(
     product: Product, config: CatalogConfig, known_collections: list[Collection]
 ) -> MetadataProblem | None:
