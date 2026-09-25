@@ -148,6 +148,39 @@ def asset_derivative_statuses(
     return statuses
 
 
+def reviewable_output_filename(
+    asset: Asset,
+    asset_dir_path: Path,
+    derivative_type: DerivativeType,
+    config: CatalogConfig | None,
+) -> tuple[str | None, str | None]:
+    """The generated output filename for one asset's derivative of
+    ``derivative_type``, when there is a file to act on (``CURRENT`` or
+    ``STALE``), else ``None`` paired with why there is not (§10, §24): a
+    derivative type with no recipe yet, or one that is ``missing`` or
+    ``impossible`` for this asset.
+
+    The one answer to "is there a file here to act on right now" shared by
+    every action that gates on it: :mod:`vectorpress.pipeline.review`
+    (approve/reject/regenerate) and :mod:`vectorpress.pipeline.open_editor`
+    (``vpress open``).
+    """
+    status = next(
+        (
+            s
+            for s in asset_derivative_statuses(asset, asset_dir_path, config)
+            if s.derivative_type is derivative_type
+        ),
+        None,
+    )
+    if status is None:
+        return None, f"{derivative_type.value} has no recipe yet"
+    if status.state not in (DerivativeState.CURRENT, DerivativeState.STALE):
+        return None, f"{derivative_type.value} is {status.state.value}"
+    assert status.output_filename is not None  # CURRENT/STALE always carry a filename
+    return status.output_filename, None
+
+
 def count_derivative_states(
     assets: list[Asset], root: Path, config: CatalogConfig
 ) -> DerivativeStateCounts:

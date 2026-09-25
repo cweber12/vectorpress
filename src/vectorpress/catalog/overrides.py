@@ -6,8 +6,11 @@ generated derivative's filename for a type, is that type's override: the
 **effective derivative** every other consumer (``vpress asset``,
 ``validate``, ``vpress status``) resolves through
 :func:`effective_derivative` instead of reading ``derived/`` directly.
-``overrides/`` is read-only to the tool (ADR 0003, ADR 0005, §6.8): nothing
-in this module ever writes, moves or deletes anything under it.
+``overrides/`` is otherwise read-only to the tool (ADR 0003, ADR 0005,
+§6.8): nothing in this module writes, moves or deletes anything under it,
+except :func:`create_override_from_generated` -- ``vpress open --override``'s
+create-only copy, made only on that explicit request, and never overwriting
+a file already there (CONTEXT.md "Override").
 
 An override's own status and provenance are tool-owned state under
 ``derived/`` instead -- their own pair of files, distinct from the
@@ -102,6 +105,42 @@ def list_unrecognized_overrides(asset_dir_path: Path, known_filenames: Iterable[
         for entry in overrides_dir.iterdir()
         if entry.is_file() and entry.name not in known
     )
+
+
+def create_override_from_generated(
+    asset: Asset,
+    asset_dir_path: Path,
+    recipe: Recipe,
+    output_filename: str,
+    generated_bytes: bytes,
+) -> Path:
+    """Start an override for one (asset, ``recipe``'s type) by copying the
+    current generated file into ``overrides/`` byte-for-byte (``vpress open
+    --override``, §6.8, §24) -- the one sanctioned write under
+    ``overrides/`` this module otherwise never makes, on the user's explicit
+    request only. Create-only: a file already there is returned untouched,
+    never rewritten, so a second call is a no-op.
+
+    Records the override's provenance immediately
+    (:func:`ensure_override_provenance`) the moment it is created, rather
+    than waiting for a later ``validate`` or ``approve``, so a source change
+    afterward is detectable as staleness right away.
+    """
+    path = override_path(asset_dir_path, output_filename)
+    if path.is_file():
+        return path
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        with path.open("xb") as file:
+            file.write(generated_bytes)
+    except FileExistsError:
+        # Created by someone else between the check above and here: the
+        # file that won is what matters, not which call wrote it.
+        return path
+
+    ensure_override_provenance(asset, asset_dir_path, recipe, output_filename, generated_bytes)
+    return path
 
 
 # --- override provenance: the source hash it was edited against (§6.8, ADR 0004) ----

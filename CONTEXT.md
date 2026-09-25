@@ -54,6 +54,10 @@ the source it was edited against has changed.
 **Override** — A hand-edited derivative placed under `overrides/`. It is the
 **effective derivative** for that type, is validated and approved like any other, is
 never overwritten, and can be discarded to revert to the generated version.
+`vpress open --override` may create one, on that explicit request only, by
+copying the current generated file into `overrides/`: create-only, never
+overwriting an override already there — the one write the tool ever makes
+under `overrides/`.
 
 **Effective derivative** — The file a product actually uses for a given asset and
 derivative type: the override if present, else the generated file.

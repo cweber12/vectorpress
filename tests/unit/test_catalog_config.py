@@ -75,3 +75,44 @@ def test_wrongly_typed_assets_dir_is_rejected() -> None:
 
     errors = exc_info.value.errors()
     assert any(error["loc"] == ("assets_dir",) for error in errors)
+
+
+# --- editor: unset by default, a program plus optional arguments --------------------
+
+
+def test_editor_defaults_to_unset() -> None:
+    config = CatalogConfig.model_validate({"name": "Tide Pool Studio"})
+
+    assert config.editor is None
+
+
+def test_editor_can_be_a_program_plus_arguments() -> None:
+    config = CatalogConfig.model_validate(
+        {"name": "Tide Pool Studio", "editor": ["myeditor", "--flag"]}
+    )
+
+    assert config.editor == ["myeditor", "--flag"]
+
+
+def test_editor_as_a_bare_string_instead_of_a_list_is_rejected() -> None:
+    with pytest.raises(ValidationError) as exc_info:
+        CatalogConfig.model_validate({"name": "Tide Pool Studio", "editor": "myeditor"})
+
+    errors = exc_info.value.errors()
+    assert any(error["loc"] == ("editor",) for error in errors)
+
+
+def test_editor_as_an_empty_list_is_rejected() -> None:
+    with pytest.raises(ValidationError) as exc_info:
+        CatalogConfig.model_validate({"name": "Tide Pool Studio", "editor": []})
+
+    errors = exc_info.value.errors()
+    assert any(error["loc"] == ("editor",) for error in errors)
+
+
+def test_editor_with_a_blank_entry_is_rejected() -> None:
+    with pytest.raises(ValidationError) as exc_info:
+        CatalogConfig.model_validate({"name": "Tide Pool Studio", "editor": ["myeditor", ""]})
+
+    errors = exc_info.value.errors()
+    assert any(error["loc"] == ("editor",) for error in errors)

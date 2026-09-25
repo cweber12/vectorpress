@@ -17,6 +17,7 @@ from vectorpress.catalog.overrides import (
     EffectiveDerivative,
     OverrideProvenance,
     asset_override_status,
+    create_override_from_generated,
     effective_derivative,
     effective_derivative_status,
     ensure_override_provenance,
@@ -377,3 +378,79 @@ def test_read_override_bytes_is_none_with_no_override_file(tmp_path: Path) -> No
     asset_dir = _make_asset_dir(tmp_path)
 
     assert read_override_bytes(asset_dir, FILENAME) is None
+
+
+# --- create_override_from_generated: create-only, records provenance immediately ----
+
+
+def test_create_override_from_generated_copies_the_generated_file_byte_for_byte(
+    tmp_path: Path,
+) -> None:
+    asset_dir = _make_asset_dir(tmp_path)
+    from vectorpress.pipeline.generate import generate_asset
+
+    generate_asset(_asset(), asset_dir)
+    generated_bytes = (asset_dir / DERIVED_DIRNAME / FILENAME).read_bytes()
+
+    path = create_override_from_generated(
+        _asset(), asset_dir, RECIPES[DerivativeType.CUT_SVG], FILENAME, generated_bytes
+    )
+
+    assert path == override_path(asset_dir, FILENAME)
+    assert path.read_bytes() == generated_bytes
+
+
+def test_create_override_from_generated_records_provenance_immediately(tmp_path: Path) -> None:
+    """The ruling behind this issue: the override's provenance is written the
+    moment it is created, not deferred to a later validate/approve, so a
+    source change afterward is detectable as staleness right away."""
+    asset_dir = _make_asset_dir(tmp_path)
+    from vectorpress.pipeline.generate import generate_asset
+
+    generate_asset(_asset(), asset_dir)
+    generated_bytes = (asset_dir / DERIVED_DIRNAME / FILENAME).read_bytes()
+
+    create_override_from_generated(
+        _asset(), asset_dir, RECIPES[DerivativeType.CUT_SVG], FILENAME, generated_bytes
+    )
+
+    provenance = read_override_provenance(asset_dir / DERIVED_DIRNAME, FILENAME)
+    assert provenance is not None
+    assert provenance.output_hash == sha256_bytes(generated_bytes)
+
+
+def test_create_override_from_generated_never_overwrites_an_existing_override(
+    tmp_path: Path,
+) -> None:
+    asset_dir = _make_asset_dir(tmp_path)
+    from vectorpress.pipeline.generate import generate_asset
+
+    generate_asset(_asset(), asset_dir)
+    generated_bytes = (asset_dir / DERIVED_DIRNAME / FILENAME).read_bytes()
+    hand_edited_bytes = b"<svg>already hand-edited</svg>"
+    existing_path = _write_override(asset_dir, FILENAME, hand_edited_bytes)
+    mtime_before = existing_path.stat().st_mtime_ns
+
+    path = create_override_from_generated(
+        _asset(), asset_dir, RECIPES[DerivativeType.CUT_SVG], FILENAME, generated_bytes
+    )
+
+    assert path == existing_path
+    assert existing_path.read_bytes() == hand_edited_bytes
+    assert existing_path.stat().st_mtime_ns == mtime_before
+
+
+def test_create_override_from_generated_is_idempotent_on_a_second_call(tmp_path: Path) -> None:
+    asset_dir = _make_asset_dir(tmp_path)
+    from vectorpress.pipeline.generate import generate_asset
+
+    generate_asset(_asset(), asset_dir)
+    generated_bytes = (asset_dir / DERIVED_DIRNAME / FILENAME).read_bytes()
+    recipe = RECIPES[DerivativeType.CUT_SVG]
+
+    first = create_override_from_generated(_asset(), asset_dir, recipe, FILENAME, generated_bytes)
+    mtime_before = first.stat().st_mtime_ns
+    second = create_override_from_generated(_asset(), asset_dir, recipe, FILENAME, generated_bytes)
+
+    assert second == first
+    assert second.stat().st_mtime_ns == mtime_before
