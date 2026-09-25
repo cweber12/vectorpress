@@ -33,11 +33,13 @@ from vectorpress.catalog.provenance import (
     sha256_bytes,
     write_derivative,
 )
+from vectorpress.catalog.status import read_status, write_status
 from vectorpress.domain.asset import Asset, Source
 from vectorpress.domain.catalog_config import DEFAULT_REFERENCE_SIZE_IN, CatalogConfig
 from vectorpress.domain.derivative_state import DerivativeState
 from vectorpress.domain.derivative_type import DerivativeType, derivative_filename
 from vectorpress.domain.recipe import RECIPES, Recipe
+from vectorpress.domain.status import status_after_generation
 from vectorpress.pipeline.registry import get_generator
 
 
@@ -220,25 +222,32 @@ def _generate_one(
     config: CatalogConfig | None,
 ) -> str:
     """Run ``recipe``'s generator against ``source`` and persist the result
-    with provenance (§35, §36). Returns the output filename.
+    with provenance and status (§22.1, §35, §36). Returns the output
+    filename.
 
     ``catalog.provenance.read_source_bytes`` is the only source read; the
     generator itself takes only bytes and its *effective* parameters
     (:func:`_effective_parameters` -- ``recipe.parameters`` plus, for
-    ``cut_svg``, the catalog's reference size, issue #36) and never touches
-    the filesystem (ADR 0006). Those same effective parameters are what gets
+    ``cut_svg``, the catalog's reference size) and never touches the
+    filesystem (ADR 0006). Those same effective parameters are what gets
     recorded in provenance and hashed into ``recipe_hash``, so a later
     ``reference_size_in`` change is detected as a recipe change the same way
     any other parameter change is.
 
+    After provenance is written, the status record is updated to match
+    (:func:`~vectorpress.domain.status.status_after_generation`, §22.1): a
+    new derivative or one whose output hash just changed goes to
+    ``needs_review``; one regenerated to identical bytes keeps its existing
+    status untouched.
+
     Every step -- reading the source, running the generator, and writing
-    the result -- is wrapped in one :class:`GeneratorError` (issue #27,
-    §35): an undecodable source fails the same way a raising generator or a
-    failed write does, and in every case nothing is written for this
-    derivative (:func:`~vectorpress.catalog.provenance.write_derivative`
-    itself writes the output before the provenance record, so a failure
-    partway through a write leaves, at worst, an output file with no
-    provenance yet -- reported ``missing``, never ``current``, by
+    the result -- is wrapped in one :class:`GeneratorError` (§35): an
+    undecodable source fails the same way a raising generator or a failed
+    write does, and in every case nothing is written for this derivative
+    (:func:`~vectorpress.catalog.provenance.write_derivative` itself writes
+    the output before the provenance record, so a failure partway through a
+    write leaves, at worst, an output file with no provenance yet --
+    reported ``missing``, never ``current``, by
     :func:`~vectorpress.catalog.provenance.derivative_currency`). Caught by
     :func:`generate_asset` so one failing derivative does not stop
     generation for the rest of the asset or catalog.
@@ -252,6 +261,7 @@ def _generate_one(
         effective_parameters = _effective_parameters(recipe, config)
         output = generator(source_bytes, effective_parameters)
         filename = derivative_filename(asset.display_name, recipe.derivative_type)
+        output_hash = sha256_bytes(output.output_bytes)
 
         provenance = Provenance(
             source_file=source.file,
@@ -262,10 +272,14 @@ def _generate_one(
             recipe_hash=recipe_identity_hash(recipe, effective_parameters),
             generator_versions={"vectorpress": __version__, **output.library_versions},
             output_file=filename,
-            output_hash=sha256_bytes(output.output_bytes),
+            output_hash=output_hash,
         )
-        write_derivative(
-            asset_dir_path / DERIVED_DIRNAME, filename, output.output_bytes, provenance
+        derived_dir = asset_dir_path / DERIVED_DIRNAME
+        write_derivative(derived_dir, filename, output.output_bytes, provenance)
+        write_status(
+            derived_dir,
+            recipe.derivative_type,
+            status_after_generation(read_status(derived_dir, recipe.derivative_type), output_hash),
         )
     except Exception as exc:
         raise GeneratorError(str(exc)) from exc
