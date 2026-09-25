@@ -1,0 +1,291 @@
+# serializer version: 1
+# name: test_attention_json_shape_is_locked_by_snapshot
+  dict({
+    'asset_publication_counts': dict({
+      'approved': 0,
+      'awaiting_review': 10,
+      'blocked': 1,
+    }),
+    'blocked_assets': list([
+      dict({
+        'asset_id': 'gumboot_chiton',
+        'reasons': list([
+          dict({
+            'derivative_type': None,
+            'kind': 'rights_status',
+            'value': 'do_not_publish',
+          }),
+        ]),
+      }),
+    ]),
+    'is_empty': False,
+    'missing_derivatives': list([
+      dict({
+        'asset_id': 'acorn_barnacle',
+        'derivative_type': 'transparent_png',
+        'reason': None,
+        'state': 'missing',
+      }),
+      dict({
+        'asset_id': 'acorn_barnacle',
+        'derivative_type': 'silhouette_svg',
+        'reason': None,
+        'state': 'missing',
+      }),
+      dict({
+        'asset_id': 'acorn_barnacle',
+        'derivative_type': 'cut_svg',
+        'reason': None,
+        'state': 'missing',
+      }),
+      dict({
+        'asset_id': 'bat_star',
+        'derivative_type': 'transparent_png',
+        'reason': None,
+        'state': 'missing',
+      }),
+      dict({
+        'asset_id': 'bat_star',
+        'derivative_type': 'silhouette_svg',
+        'reason': None,
+        'state': 'missing',
+      }),
+      dict({
+        'asset_id': 'bat_star',
+        'derivative_type': 'cut_svg',
+        'reason': None,
+        'state': 'missing',
+      }),
+      dict({
+        'asset_id': 'coralline_algae',
+        'derivative_type': 'transparent_png',
+        'reason': None,
+        'state': 'missing',
+      }),
+      dict({
+        'asset_id': 'coralline_algae',
+        'derivative_type': 'silhouette_svg',
+        'reason': None,
+        'state': 'missing',
+      }),
+      dict({
+        'asset_id': 'coralline_algae',
+        'derivative_type': 'cut_svg',
+        'reason': None,
+        'state': 'missing',
+      }),
+      dict({
+        'asset_id': 'giant_green_anemone',
+        'derivative_type': 'transparent_png',
+        'reason': None,
+        'state': 'missing',
+      }),
+      dict({
+        'asset_id': 'giant_green_anemone',
+        'derivative_type': 'silhouette_svg',
+        'reason': None,
+        'state': 'missing',
+      }),
+      dict({
+        'asset_id': 'giant_green_anemone',
+        'derivative_type': 'cut_svg',
+        'reason': None,
+        'state': 'missing',
+      }),
+      dict({
+        'asset_id': 'gumboot_chiton',
+        'derivative_type': 'transparent_png',
+        'reason': None,
+        'state': 'missing',
+      }),
+      dict({
+        'asset_id': 'gumboot_chiton',
+        'derivative_type': 'silhouette_svg',
+        'reason': None,
+        'state': 'missing',
+      }),
+      dict({
+        'asset_id': 'gumboot_chiton',
+        'derivative_type': 'cut_svg',
+        'reason': None,
+        'state': 'missing',
+      }),
+      dict({
+        'asset_id': 'keyhole_limpet',
+        'derivative_type': 'transparent_png',
+        'reason': None,
+        'state': 'missing',
+      }),
+      dict({
+        'asset_id': 'keyhole_limpet',
+        'derivative_type': 'silhouette_svg',
+        'reason': None,
+        'state': 'missing',
+      }),
+      dict({
+        'asset_id': 'keyhole_limpet',
+        'derivative_type': 'cut_svg',
+        'reason': None,
+        'state': 'missing',
+      }),
+      dict({
+        'asset_id': 'nudibranch',
+        'derivative_type': 'transparent_png',
+        'reason': None,
+        'state': 'missing',
+      }),
+      dict({
+        'asset_id': 'nudibranch',
+        'derivative_type': 'silhouette_svg',
+        'reason': None,
+        'state': 'missing',
+      }),
+      dict({
+        'asset_id': 'nudibranch',
+        'derivative_type': 'cut_svg',
+        'reason': None,
+        'state': 'missing',
+      }),
+      dict({
+        'asset_id': 'ochre_sea_star',
+        'derivative_type': 'transparent_png',
+        'reason': None,
+        'state': 'missing',
+      }),
+      dict({
+        'asset_id': 'ochre_sea_star',
+        'derivative_type': 'silhouette_svg',
+        'reason': None,
+        'state': 'missing',
+      }),
+      dict({
+        'asset_id': 'ochre_sea_star',
+        'derivative_type': 'cut_svg',
+        'reason': None,
+        'state': 'missing',
+      }),
+      dict({
+        'asset_id': 'ochre_sea_star',
+        'derivative_type': 'flatcolor_svg',
+        'reason': None,
+        'state': 'missing',
+      }),
+      dict({
+        'asset_id': 'owl_limpet',
+        'derivative_type': 'transparent_png',
+        'reason': None,
+        'state': 'missing',
+      }),
+      dict({
+        'asset_id': 'owl_limpet',
+        'derivative_type': 'silhouette_svg',
+        'reason': None,
+        'state': 'missing',
+      }),
+      dict({
+        'asset_id': 'owl_limpet',
+        'derivative_type': 'cut_svg',
+        'reason': None,
+        'state': 'missing',
+      }),
+      dict({
+        'asset_id': 'purple_sea_urchin',
+        'derivative_type': 'transparent_png',
+        'reason': None,
+        'state': 'missing',
+      }),
+      dict({
+        'asset_id': 'purple_sea_urchin',
+        'derivative_type': 'silhouette_svg',
+        'reason': None,
+        'state': 'missing',
+      }),
+      dict({
+        'asset_id': 'purple_sea_urchin',
+        'derivative_type': 'cut_svg',
+        'reason': None,
+        'state': 'missing',
+      }),
+      dict({
+        'asset_id': 'turban_snail',
+        'derivative_type': 'transparent_png',
+        'reason': None,
+        'state': 'missing',
+      }),
+      dict({
+        'asset_id': 'turban_snail',
+        'derivative_type': 'silhouette_svg',
+        'reason': None,
+        'state': 'missing',
+      }),
+      dict({
+        'asset_id': 'turban_snail',
+        'derivative_type': 'cut_svg',
+        'reason': None,
+        'state': 'missing',
+      }),
+    ]),
+    'missing_metadata': list([
+    ]),
+    'needs_review': list([
+    ]),
+    'stale_overrides': list([
+    ]),
+    'warnings': list([
+      dict({
+        'asset_id': 'acorn_barnacle',
+        'messages': list([
+          'accuracy status: not reviewed',
+        ]),
+      }),
+      dict({
+        'asset_id': 'bat_star',
+        'messages': list([
+          'accuracy status: not reviewed',
+        ]),
+      }),
+      dict({
+        'asset_id': 'coralline_algae',
+        'messages': list([
+          'accuracy status: not reviewed',
+        ]),
+      }),
+      dict({
+        'asset_id': 'giant_green_anemone',
+        'messages': list([
+          'accuracy status: not reviewed',
+        ]),
+      }),
+      dict({
+        'asset_id': 'gumboot_chiton',
+        'messages': list([
+          'accuracy status: not reviewed',
+        ]),
+      }),
+      dict({
+        'asset_id': 'keyhole_limpet',
+        'messages': list([
+          'accuracy status: not reviewed',
+        ]),
+      }),
+      dict({
+        'asset_id': 'nudibranch',
+        'messages': list([
+          'accuracy status: not reviewed',
+        ]),
+      }),
+      dict({
+        'asset_id': 'owl_limpet',
+        'messages': list([
+          'accuracy status: not reviewed',
+        ]),
+      }),
+      dict({
+        'asset_id': 'turban_snail',
+        'messages': list([
+          'accuracy status: not reviewed',
+        ]),
+      }),
+    ]),
+  })
+# ---
