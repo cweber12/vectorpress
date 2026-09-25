@@ -5,12 +5,20 @@ No I/O anywhere here: every case is built from bare enum values and
 :class:`~vectorpress.domain.eligibility.IncludedDerivative` values, never a
 real asset folder (``tests/integration/test_eligibility.py`` exercises the
 CLI end to end, against a real fixture asset).
+
+``blocking_reasons`` is structured (:class:`~vectorpress.domain.eligibility.
+BlockingReason`), not pre-rendered text: these tests assert on
+``kind``/``derivative_type``/``value`` directly, the same shape
+``vectorpress.cli.app._render_blocking_reason`` renders to text
+(``tests/integration/test_eligibility.py`` locks that rendered text).
 """
 
 from vectorpress.domain.asset import AccuracyStatus, Asset, RightsStatus, Source
 from vectorpress.domain.derivative_state import DerivativeState
 from vectorpress.domain.derivative_type import DerivativeType
 from vectorpress.domain.eligibility import (
+    BlockingReason,
+    BlockingReasonKind,
     Eligibility,
     IncludedDerivative,
     asset_eligibility,
@@ -73,7 +81,9 @@ def test_rights_do_not_publish_blocks() -> None:
     )
 
     assert result.eligibility is Eligibility.BLOCKED
-    assert result.blocking_reasons == ["rights status: do not publish"]
+    assert result.blocking_reasons == [
+        BlockingReason(BlockingReasonKind.RIGHTS_STATUS, None, "do_not_publish")
+    ]
     assert result.warnings == []
 
 
@@ -83,7 +93,9 @@ def test_rights_review_required_blocks() -> None:
     )
 
     assert result.eligibility is Eligibility.BLOCKED
-    assert result.blocking_reasons == ["rights status: rights review required"]
+    assert result.blocking_reasons == [
+        BlockingReason(BlockingReasonKind.RIGHTS_STATUS, None, "rights_review_required")
+    ]
     assert result.warnings == []
 
 
@@ -93,7 +105,9 @@ def test_accuracy_issue_found_blocks() -> None:
     )
 
     assert result.eligibility is Eligibility.BLOCKED
-    assert result.blocking_reasons == ["accuracy status: issue found"]
+    assert result.blocking_reasons == [
+        BlockingReason(BlockingReasonKind.ACCURACY_STATUS, None, "issue_found")
+    ]
     assert result.warnings == []
 
 
@@ -107,7 +121,9 @@ def test_an_unapproved_included_derivative_blocks_naming_its_status() -> None:
     )
 
     assert result.eligibility is Eligibility.BLOCKED
-    assert result.blocking_reasons == ["cut_svg: needs review"]
+    assert result.blocking_reasons == [
+        BlockingReason(BlockingReasonKind.DERIVATIVE_STATUS, DerivativeType.CUT_SVG, "needs_review")
+    ]
 
 
 def test_a_rejected_included_derivative_blocks_naming_rejected() -> None:
@@ -117,7 +133,9 @@ def test_a_rejected_included_derivative_blocks_naming_rejected() -> None:
         RightsStatus.ORIGINAL_ARTWORK, AccuracyStatus.APPROVED, [], [rejected]
     )
 
-    assert result.blocking_reasons == ["cut_svg: rejected"]
+    assert result.blocking_reasons == [
+        BlockingReason(BlockingReasonKind.DERIVATIVE_STATUS, DerivativeType.CUT_SVG, "rejected")
+    ]
 
 
 def test_a_missing_included_derivative_blocks_naming_the_missing_state() -> None:
@@ -128,7 +146,9 @@ def test_a_missing_included_derivative_blocks_naming_the_missing_state() -> None
     )
 
     assert result.eligibility is Eligibility.BLOCKED
-    assert result.blocking_reasons == ["cut_svg: missing"]
+    assert result.blocking_reasons == [
+        BlockingReason(BlockingReasonKind.DERIVATIVE_STATE, DerivativeType.CUT_SVG, "missing")
+    ]
 
 
 def test_an_impossible_included_derivative_blocks_naming_the_impossible_state() -> None:
@@ -139,7 +159,11 @@ def test_an_impossible_included_derivative_blocks_naming_the_impossible_state() 
     )
 
     assert result.eligibility is Eligibility.BLOCKED
-    assert result.blocking_reasons == ["flatcolor_svg: impossible"]
+    assert result.blocking_reasons == [
+        BlockingReason(
+            BlockingReasonKind.DERIVATIVE_STATE, DerivativeType.FLATCOLOR_SVG, "impossible"
+        )
+    ]
 
 
 def test_every_unapproved_included_type_gets_its_own_reason() -> None:
@@ -158,7 +182,14 @@ def test_every_unapproved_included_type_gets_its_own_reason() -> None:
     )
 
     assert result.eligibility is Eligibility.BLOCKED
-    assert result.blocking_reasons == ["cut_svg: needs review", "silhouette_svg: missing"]
+    assert result.blocking_reasons == [
+        BlockingReason(
+            BlockingReasonKind.DERIVATIVE_STATUS, DerivativeType.CUT_SVG, "needs_review"
+        ),
+        BlockingReason(
+            BlockingReasonKind.DERIVATIVE_STATE, DerivativeType.SILHOUETTE_SVG, "missing"
+        ),
+    ]
 
 
 # --- §10.1 warnings, each in isolation: never block ----------------------------------
@@ -220,7 +251,9 @@ def test_blocking_reasons_and_warnings_are_both_reported_together() -> None:
     )
 
     assert result.eligibility is Eligibility.BLOCKED
-    assert result.blocking_reasons == ["cut_svg: needs review"]
+    assert result.blocking_reasons == [
+        BlockingReason(BlockingReasonKind.DERIVATIVE_STATUS, DerivativeType.CUT_SVG, "needs_review")
+    ]
     assert result.warnings == [
         "accuracy status: not reviewed",
         "missing optional metadata: scientific_name",

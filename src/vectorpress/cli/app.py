@@ -4,6 +4,7 @@ The CLI is a thin layer: every command calls into ``vectorpress.build``,
 ``vectorpress.catalog`` and friends. No domain logic lives here.
 """
 
+import json
 from collections.abc import Callable
 from pathlib import Path
 from typing import Protocol
@@ -39,13 +40,22 @@ from vectorpress.domain.asset import Asset
 from vectorpress.domain.catalog_config import CatalogConfig
 from vectorpress.domain.derivative_state import DerivativeState
 from vectorpress.domain.derivative_type import DerivativeType, derivative_filename
-from vectorpress.domain.eligibility import EligibilityResult
+from vectorpress.domain.eligibility import BlockingReason, BlockingReasonKind, EligibilityResult
 from vectorpress.domain.finding import Finding, ValidationOutcome
 from vectorpress.domain.numeric_format import format_number
 from vectorpress.domain.product import Product
 from vectorpress.domain.recipe import RECIPES
 from vectorpress.domain.reference_size import resolve_reference_size_in
 from vectorpress.domain.status import Status
+from vectorpress.pipeline.attention import (
+    AttentionReport,
+    BlockedAssetItem,
+    MissingDerivativeItem,
+    NeedsReviewItem,
+    StaleOverrideItem,
+    WarningItem,
+    build_attention_report,
+)
 from vectorpress.pipeline.eligibility import asset_eligibility_for, possible_derivative_types
 from vectorpress.pipeline.generate import (
     DerivativeStatus,
@@ -188,9 +198,12 @@ def status(ctx: typer.Context) -> None:
     scripts.
     \f
     Aggregates problems from catalog config, assets, collections, products
-    and brand. Missing, impossible and stale derivative counts, and the
-    stale override count, are inventory, not problems, and never affect the
-    exit code.
+    and brand. Missing, impossible and stale derivative counts, the stale
+    override count, and the §34 asset publication counts, are inventory,
+    not problems, and never affect the exit code. The asset publication
+    counts (approved / awaiting review / blocked) come from
+    vectorpress.pipeline.attention.build_attention_report, the same model
+    'vpress attention' renders, so the two always agree.
     """
     root = _locate_root(ctx)
     catalog = load_catalog(root)
@@ -218,6 +231,15 @@ def status(ctx: typer.Context) -> None:
     typer.echo(f"Approved: {status_counts.approved}")
     typer.echo(f"Rejected: {status_counts.rejected}")
     typer.echo(f"Regenerate: {status_counts.regenerate}")
+
+    report = build_attention_report(catalog, root)
+    publication_counts = report.asset_publication_counts
+    typer.echo(f"Approved assets: {publication_counts.approved}")
+    typer.echo(f"Assets awaiting review: {publication_counts.awaiting_review}")
+    typer.echo(f"Blocked assets: {publication_counts.blocked}")
+    if not report.is_empty:
+        typer.echo("Run 'vpress attention' for details.")
+
     _echo_problems(catalog.problems)
 
     if catalog.problems:
@@ -362,6 +384,24 @@ def _echo_stale_override_resolutions(asset_id: str, derivative_type: DerivativeT
     )
 
 
+def _render_blocking_reason(reason: BlockingReason) -> str:
+    """One :class:`~vectorpress.domain.eligibility.BlockingReason` as text
+    (§10.1): the only place a reason is turned into a message a human reads
+    (``vectorpress.domain.eligibility`` never formats one itself). A
+    per-derivative reason (``derivative_state``/``derivative_status``) reads
+    ``<type>: <value>``; an asset-level one (``rights_status``/
+    ``accuracy_status``) reads ``rights status: <value>`` or ``accuracy
+    status: <value>`` -- underscores in the value itself always become
+    spaces, whichever enum it came from."""
+    text = reason.value.replace("_", " ")
+    if reason.derivative_type is not None:
+        return f"{reason.derivative_type.value}: {text}"
+    label = (
+        "rights status" if reason.kind is BlockingReasonKind.RIGHTS_STATUS else "accuracy status"
+    )
+    return f"{label}: {text}"
+
+
 def _echo_eligibility(derivative_types: list[DerivativeType], result: EligibilityResult) -> None:
     """``vpress asset``'s eligibility section (§10, §10.1): eligible or
     blocked for the shown set of types, one indented line per blocking
@@ -370,7 +410,7 @@ def _echo_eligibility(derivative_types: list[DerivativeType], result: Eligibilit
     type_list = ", ".join(derivative_type.value for derivative_type in derivative_types)
     typer.echo(f"Eligibility ({type_list}): {result.eligibility.value}")
     for reason in result.blocking_reasons:
-        typer.echo(f"  {reason}")
+        typer.echo(f"  {_render_blocking_reason(reason)}")
     if result.warnings:
         typer.echo("Warnings:")
         for warning in result.warnings:
@@ -1282,3 +1322,181 @@ def products(ctx: typer.Context) -> None:
             assert loaded.membership is not None  # enforced by Product's own validation
             collection_ref = f"inline ({loaded.membership.form.value})"
         typer.echo(f"{loaded.slug}\t{title}\t{loaded.tier.value}\t{collection_ref}")
+
+
+# --- vpress attention: the inbox (§34, §24, CONTEXT.md "Attention report / Inbox") ---
+
+
+def _echo_needs_review(items: list[NeedsReviewItem]) -> None:
+    typer.echo(f"Needs review: {len(items)}")
+    for item in items:
+        text = item.status.value.replace("_", " ")
+        if item.note:
+            text += f" ({item.note})"
+        if item.findings is not None:
+            text += f", findings: {item.findings.value.replace('_', ' ')}"
+        type_name = item.derivative_type.value
+        typer.echo(f"  {item.asset_id}\t{type_name}\t{text}")
+        typer.echo(
+            f"    resolve: vpress approve {item.asset_id} {type_name}"
+            f" | vpress reject {item.asset_id} {type_name}"
+            f" | vpress regenerate {item.asset_id} {type_name}"
+        )
+
+
+def _echo_stale_overrides(items: list[StaleOverrideItem]) -> None:
+    typer.echo(f"Stale overrides: {len(items)}")
+    for item in items:
+        typer.echo(f"  {item.asset_id}\t{item.derivative_type.value}\tstale ({item.reason})")
+        _echo_stale_override_resolutions(item.asset_id, item.derivative_type)
+
+
+def _echo_blocked_assets(items: list[BlockedAssetItem]) -> None:
+    typer.echo(f"Blocked assets: {len(items)}")
+    for item in items:
+        reasons = "; ".join(_render_blocking_reason(reason) for reason in item.reasons)
+        typer.echo(f"  {item.asset_id}\t{reasons}")
+        typer.echo(
+            f"    resolve: edit assets/{item.asset_id}/asset.toml's rights_status/accuracy_status"
+        )
+
+
+def _echo_missing_derivatives(items: list[MissingDerivativeItem]) -> None:
+    typer.echo(f"Missing derivatives: {len(items)}")
+    for item in items:
+        state_text = (
+            item.state.value if item.reason is None else f"{item.state.value} ({item.reason})"
+        )
+        typer.echo(f"  {item.asset_id}\t{item.derivative_type.value}\t{state_text}")
+        typer.echo(f"    resolve: vpress generate {item.asset_id}")
+
+
+def _echo_missing_metadata(problems: list[MetadataProblem]) -> None:
+    typer.echo(f"Missing metadata: {len(problems)}")
+    for problem in problems:
+        typer.echo(f"  {problem}")
+        typer.echo(f"    resolve: edit {problem.path}")
+
+
+def _echo_warnings(items: list[WarningItem]) -> None:
+    """Warnings (§10.1) never block and never count toward whether the
+    inbox is empty -- listed last, and only when there is at least one. The
+    header deliberately avoids the exact "nothing needs attention" phrase,
+    so a script checking for that line is never confused by this one."""
+    if not items:
+        return
+    typer.echo("Warnings (informational only, never block):")
+    for item in items:
+        for message in item.messages:
+            typer.echo(f"  {item.asset_id}\t{message}")
+
+
+def _blocking_reason_to_json(reason: BlockingReason) -> dict[str, object]:
+    return {
+        "kind": reason.kind.value,
+        "derivative_type": (
+            reason.derivative_type.value if reason.derivative_type is not None else None
+        ),
+        "value": reason.value,
+    }
+
+
+def _attention_report_to_json(report: AttentionReport) -> dict[str, object]:
+    """``report`` as a JSON-ready dict (§34, §24): every path relative to
+    the catalog root and posix-separated (never absolute, never a
+    backslash), so ``vpress attention --json`` is byte-identical on ubuntu
+    and windows -- the one requirement a snapshot test of this output must
+    hold either way."""
+    return {
+        "needs_review": [
+            {
+                "asset_id": item.asset_id,
+                "derivative_type": item.derivative_type.value,
+                "status": item.status.value,
+                "note": item.note,
+                "findings": item.findings.value if item.findings is not None else None,
+            }
+            for item in report.needs_review
+        ],
+        "stale_overrides": [
+            {
+                "asset_id": item.asset_id,
+                "derivative_type": item.derivative_type.value,
+                "reason": item.reason,
+            }
+            for item in report.stale_overrides
+        ],
+        "blocked_assets": [
+            {
+                "asset_id": item.asset_id,
+                "reasons": [_blocking_reason_to_json(reason) for reason in item.reasons],
+            }
+            for item in report.blocked_assets
+        ],
+        "missing_derivatives": [
+            {
+                "asset_id": item.asset_id,
+                "derivative_type": item.derivative_type.value,
+                "state": item.state.value,
+                "reason": item.reason,
+            }
+            for item in report.missing_derivatives
+        ],
+        "missing_metadata": [
+            {
+                "path": problem.path.as_posix(),
+                "field": problem.field,
+                "message": problem.message,
+            }
+            for problem in report.missing_metadata
+        ],
+        "warnings": [
+            {"asset_id": item.asset_id, "messages": item.messages} for item in report.warnings
+        ],
+        "asset_publication_counts": {
+            "approved": report.asset_publication_counts.approved,
+            "awaiting_review": report.asset_publication_counts.awaiting_review,
+            "blocked": report.asset_publication_counts.blocked,
+        },
+        "is_empty": report.is_empty,
+    }
+
+
+@app.command()
+def attention(
+    ctx: typer.Context,
+    json_output: bool = typer.Option(
+        False, "--json", help="Emit the report as JSON instead of text."
+    ),
+) -> None:
+    """Show everything in the catalog that needs a human: needs-review
+    derivatives, stale overrides, blocked assets, missing derivatives, and
+    metadata problems -- each item with the command (or edit) that resolves
+    it. Prints "nothing needs attention" when there is none of those.
+
+    Warnings (which never block anything) are listed separately at the end
+    and never make this report non-empty.
+    \f
+    Builds vectorpress.pipeline.attention.build_attention_report and renders
+    it grouped by kind, in the model's own deterministic order. --json
+    emits the same model instead, for scripting and a future ui. Exit code
+    is always 0: unlike 'vpress status', this is a report, not a pass/fail
+    check.
+    """
+    root = _locate_root(ctx)
+    catalog = load_catalog(root)
+    report = build_attention_report(catalog, root)
+
+    if json_output:
+        typer.echo(json.dumps(_attention_report_to_json(report), indent=2, sort_keys=True))
+        return
+
+    if report.is_empty:
+        typer.echo("nothing needs attention")
+    else:
+        _echo_needs_review(report.needs_review)
+        _echo_stale_overrides(report.stale_overrides)
+        _echo_blocked_assets(report.blocked_assets)
+        _echo_missing_derivatives(report.missing_derivatives)
+        _echo_missing_metadata(report.missing_metadata)
+    _echo_warnings(report.warnings)

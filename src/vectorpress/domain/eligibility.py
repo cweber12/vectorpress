@@ -13,6 +13,12 @@ approved blocks, with no exceptions. A later PRD that adds a product-level
 override extends the caller, not this function's contract -- the seam is
 :class:`EligibilityResult`'s ``blocking_reasons`` staying a plain list a
 caller can filter before deciding what to show.
+
+Each blocking reason is a :class:`BlockingReason` -- a kind, the derivative
+type it concerns (when it concerns one), and the value driving it -- rather
+than pre-rendered text: a catalog-wide attention report groups and counts
+by kind (asset-level rights/accuracy blocks versus per-derivative ones),
+and only ``cli`` turns a reason into a message a human reads.
 """
 
 from collections.abc import Sequence
@@ -57,6 +63,56 @@ class Eligibility(StrEnum):
     BLOCKED = "blocked"
 
 
+class BlockingReasonKind(StrEnum):
+    """What kind of fact is behind one :class:`BlockingReason` (§10.1):
+    ``RIGHTS_STATUS`` and ``ACCURACY_STATUS`` are asset-level -- true of the
+    asset regardless of any derivative type -- while ``DERIVATIVE_STATE``
+    (missing/impossible) and ``DERIVATIVE_STATUS`` (needs_review/rejected/
+    regenerate) each concern one included derivative type. A catalog-wide
+    attention report uses this split: an asset-level reason is worth its
+    own "blocked" line, a per-derivative one is already covered by that
+    derivative's own needs-review line."""
+
+    RIGHTS_STATUS = "rights_status"
+    ACCURACY_STATUS = "accuracy_status"
+    DERIVATIVE_STATE = "derivative_state"
+    DERIVATIVE_STATUS = "derivative_status"
+
+
+#: Every :class:`BlockingReasonKind` that is true of the asset as a whole,
+#: not of one derivative type -- what an attention report's "blocked
+#: assets" kind reports, and what makes an asset stay blocked even once
+#: every one of its derivatives is approved (CONTEXT.md "Blocked",
+#: ``gumboot_chiton`` in the fixture catalog).
+ASSET_LEVEL_BLOCKING_REASON_KINDS = (
+    BlockingReasonKind.RIGHTS_STATUS,
+    BlockingReasonKind.ACCURACY_STATUS,
+)
+
+
+@dataclass(frozen=True)
+class BlockingReason:
+    """One reason an asset is blocked from publication (§10.1): ``kind``
+    says what kind of fact it is, ``derivative_type`` names which type it
+    concerns (set exactly for :attr:`BlockingReasonKind.DERIVATIVE_STATE`
+    and :attr:`BlockingReasonKind.DERIVATIVE_STATUS`, ``None`` for the two
+    asset-level kinds), and ``value`` is the underlying enum's own string
+    value (a :class:`~vectorpress.domain.asset.RightsStatus`,
+    :class:`~vectorpress.domain.asset.AccuracyStatus`,
+    :class:`~vectorpress.domain.derivative_state.DerivativeState` or
+    :class:`~vectorpress.domain.status.Status`, always a plain string here
+    since every one of those is itself a ``StrEnum``).
+
+    Rendered to text only in ``cli``: this module never formats a message,
+    so a catalog-wide attention report and a future ``ui`` can group, count
+    and route on ``kind``/``derivative_type`` without parsing strings.
+    """
+
+    kind: BlockingReasonKind
+    derivative_type: DerivativeType | None
+    value: str
+
+
 @dataclass(frozen=True)
 class IncludedDerivative:
     """One derivative type a candidate set of products would include: its
@@ -75,16 +131,20 @@ class IncludedDerivative:
     status: Status | None
 
 
-def _derivative_blocking_reason(included: IncludedDerivative) -> str | None:
+def _derivative_blocking_reason(included: IncludedDerivative) -> BlockingReason | None:
     """The §10.1 blocking reason for one included derivative, or ``None``
     when it is approved and blocks nothing: names ``included``'s state when
     it has no output at all (``missing``/``impossible``), else its status."""
     if included.state in (DerivativeState.MISSING, DerivativeState.IMPOSSIBLE):
-        return f"{included.derivative_type.value}: {included.state.value}"
+        return BlockingReason(
+            BlockingReasonKind.DERIVATIVE_STATE, included.derivative_type, included.state.value
+        )
     if included.status is Status.APPROVED:
         return None
     assert included.status is not None  # CURRENT/STALE always carry a status
-    return f"{included.derivative_type.value}: {included.status.value.replace('_', ' ')}"
+    return BlockingReason(
+        BlockingReasonKind.DERIVATIVE_STATUS, included.derivative_type, included.status.value
+    )
 
 
 @dataclass(frozen=True)
@@ -94,7 +154,7 @@ class EligibilityResult:
     every warning. Warnings never affect :attr:`eligibility`."""
 
     eligibility: Eligibility
-    blocking_reasons: list[str]
+    blocking_reasons: list[BlockingReason]
     warnings: list[str]
 
 
@@ -117,14 +177,18 @@ def asset_eligibility(
     ``eligibility`` is :attr:`Eligibility.BLOCKED` iff ``blocking_reasons``
     is non-empty.
     """
-    blocking_reasons: list[str] = []
+    blocking_reasons: list[BlockingReason] = []
     warnings: list[str] = []
 
     if rights_status in (RightsStatus.DO_NOT_PUBLISH, RightsStatus.RIGHTS_REVIEW_REQUIRED):
-        blocking_reasons.append(f"rights status: {rights_status.value.replace('_', ' ')}")
+        blocking_reasons.append(
+            BlockingReason(BlockingReasonKind.RIGHTS_STATUS, None, rights_status.value)
+        )
 
     if accuracy_status is AccuracyStatus.ISSUE_FOUND:
-        blocking_reasons.append(f"accuracy status: {accuracy_status.value.replace('_', ' ')}")
+        blocking_reasons.append(
+            BlockingReason(BlockingReasonKind.ACCURACY_STATUS, None, accuracy_status.value)
+        )
     elif accuracy_status is AccuracyStatus.NOT_REVIEWED:
         warnings.append(f"accuracy status: {accuracy_status.value.replace('_', ' ')}")
 
