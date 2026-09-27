@@ -87,25 +87,44 @@ def fill_small_holes(mask: NDArray[np.bool_], min_area_px: float) -> NDArray[np.
     return mask | fill[labels]
 
 
-def _disk_structure(radius: int) -> NDArray[np.bool_]:
-    """A round structuring element of ``radius`` pixels (odd-sized
-    ``(2r+1, 2r+1)``), used for the morphological opening below -- a disk
-    rather than a square so the opening's effect does not depend on a
-    feature's own orientation."""
-    offsets = np.arange(-radius, radius + 1)
-    y, x = np.meshgrid(offsets, offsets, indexing="ij")
-    result: NDArray[np.bool_] = (x * x + y * y) <= radius * radius
-    return result
+def _distance_to_nearest_false(mask: NDArray[np.bool_]) -> NDArray[np.float64]:
+    """``scipy.ndimage.distance_transform_edt`` narrowed to the plain
+    distance array it returns when asked for nothing else: each pixel's
+    Euclidean distance, between pixel centres, to the nearest ``False``
+    pixel (``0.0`` on a ``False`` pixel itself)."""
+    return cast("NDArray[np.float64]", ndi.distance_transform_edt(mask))
 
 
 def open_narrow_features(mask: NDArray[np.bool_], width_px: float) -> NDArray[np.bool_]:
     """Erase anything narrower than ``width_px`` (a hairline spur, for
-    example) with a morphological opening (erode, then dilate back) sized
-    from it, leaving a solid region far wider than ``width_px`` -- like a
-    piece's own main body -- essentially unchanged. A sub-pixel or
-    zero-radius structuring element would have no effect at all, so it is
-    skipped rather than passed to ``scipy.ndimage`` as a no-op disk."""
+    example) with a morphological opening (erode, then dilate back) by a
+    disk of radius ``round(width_px / 2)`` pixels, leaving a solid region
+    far wider than ``width_px`` -- like a piece's own main body --
+    essentially unchanged. A disk rather than a square so the opening's
+    effect does not depend on a feature's own orientation. A sub-pixel or
+    zero-radius disk would have no effect at all, so it is skipped.
+
+    Computed from two distance transforms rather than
+    ``scipy.ndimage.binary_opening`` with a disk structuring element (issue
+    #86): that costs pixels times disk area, and the radius grows with the
+    source's own pixels per inch, so a 2508px source took 10s; this is
+    linear in pixels. The two are the same operation, pixel for pixel
+    (locked by ``tests/unit/test_pipeline_ndimage_cleanup.py``), so the
+    traced cut file is unchanged:
+
+    - erosion keeps a pixel when every pixel within ``radius`` of it is ink,
+      i.e. its nearest background pixel is *farther* than ``radius``;
+      outside the array counts as background (``binary_erosion``'s own
+      ``border_value=0``), hence the one-pixel background pad
+    - dilation sets a pixel when some eroded pixel lies within ``radius``
+    """
     radius = round(width_px / 2)
     if radius < 1:
         return mask
-    return cast("NDArray[np.bool_]", ndi.binary_opening(mask, structure=_disk_structure(radius)))
+    padded = np.pad(mask, 1)
+    eroded = (_distance_to_nearest_false(padded) > radius)[1:-1, 1:-1]
+    if not eroded.any():
+        # nothing survives erosion, so nothing grows back -- and with no
+        # False pixel at all, ``~eroded`` has no distance to measure
+        return np.zeros_like(mask)
+    return _distance_to_nearest_false(~eroded) <= radius
