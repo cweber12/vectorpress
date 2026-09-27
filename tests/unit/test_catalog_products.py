@@ -213,7 +213,10 @@ def test_eps_without_explicit_enablement_is_a_problem(catalog_copy: Path) -> Non
     assert len(inventory.problems) == 1
 
 
-def test_pdf_with_explicit_enablement_is_accepted(catalog_copy: Path) -> None:
+def test_pdf_with_explicit_enablement_is_still_a_format_type_mismatch(catalog_copy: Path) -> None:
+    """ADR 0013: no type fills pdf in this PRD, so enabling it is not
+    enough on its own -- the product still fails to load, same as an
+    unfilled format the build could never satisfy."""
     path = _product_toml(catalog_copy, "kelp_forest_mini_pack")
     text = path.read_text(encoding="utf-8").replace(
         'formats = ["svg"]', 'formats = ["svg", "pdf"]\nenable_pdf_eps = true'
@@ -223,8 +226,30 @@ def test_pdf_with_explicit_enablement_is_accepted(catalog_copy: Path) -> None:
 
     inventory = load_products(catalog_copy, config)
 
-    assert "kelp_forest_mini_pack" in {p.slug for p in inventory.products}
-    assert inventory.problems == []
+    assert "kelp_forest_mini_pack" not in {p.slug for p in inventory.products}
+    problems = [p for p in inventory.problems if "kelp_forest_mini_pack" in str(p.path)]
+    assert any(p.field == "formats" and "pdf" in p.message for p in problems)
+
+
+def test_format_type_mismatch_is_a_problem_naming_the_file(catalog_copy: Path) -> None:
+    """ADR 0013: a listed format no included type fills is a product
+    metadata problem at load time, same as any other invalid product --
+    not a build failure."""
+    path = _product_toml(catalog_copy, "kelp_forest_mini_pack")
+    text = (
+        path.read_text(encoding="utf-8")
+        .replace('derivative_types = ["cut_svg"]', 'derivative_types = ["flatcolor_svg"]')
+        .replace('formats = ["svg"]', 'formats = ["dxf"]')
+    )
+    path.write_text(text, encoding="utf-8")
+    config = load_catalog_config(catalog_copy)
+
+    inventory = load_products(catalog_copy, config)
+
+    slugs = {p.slug for p in inventory.products}
+    assert "kelp_forest_mini_pack" not in slugs
+    problems = [p for p in inventory.problems if "kelp_forest_mini_pack" in str(p.path)]
+    assert any(p.field == "formats" and "dxf" in p.message for p in problems)
 
 
 def test_unknown_listing_key_is_a_problem_naming_file_and_field(catalog_copy: Path) -> None:

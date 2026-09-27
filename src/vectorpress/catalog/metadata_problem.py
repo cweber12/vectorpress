@@ -11,7 +11,7 @@ from pathlib import Path
 
 from pydantic import ValidationError
 
-from vectorpress.domain.metadata_field_error import MetadataFieldError
+from vectorpress.domain.metadata_field_error import MetadataFieldError, MetadataFieldsError
 
 
 @dataclass(frozen=True)
@@ -46,7 +46,10 @@ def problems_from_validation_error(path: Path, exc: ValidationError) -> list[Met
     whenever present (issue #16). A cross-field ``model_validator`` check
     has an empty ``loc`` — pydantic has no single field to blame — so when
     the raised exception is a ``MetadataFieldError`` its ``field`` is used
-    instead (issue #16).
+    instead (issue #16). A ``MetadataFieldsError`` (plural) raise — one
+    check that found several independent problems — expands into that many
+    ``MetadataProblem``\\ s instead of one, since pydantic itself only ever
+    raises the single exception a validator raised.
     """
     problems: list[MetadataProblem] = []
     for error in exc.errors():
@@ -54,6 +57,9 @@ def problems_from_validation_error(path: Path, exc: ValidationError) -> list[Met
         message = error["msg"]
 
         raised = error.get("ctx", {}).get("error")
+        if isinstance(raised, MetadataFieldsError):
+            problems.extend(MetadataProblem(path, f, m) for f, m in raised.problems)
+            continue
         if isinstance(raised, Exception):
             message = str(raised)
             if field is None and isinstance(raised, MetadataFieldError):
