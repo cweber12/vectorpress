@@ -10,10 +10,21 @@ marketplace-ready packs. A local, single-user production tool.
 
 ## Status
 
-PRDs 1–3 are done: load and check a catalog (`vpress status`, `assets`, `asset`,
-`collections`, `products`), generate derivatives with provenance (`vpress generate`),
-and validate cut files into findings (`vpress validate`). Review, products and builds
-come next; see the PRD roadmap in `docs/PLAN.md`.
+PRDs 1–5 are done:
+
+- **Load and check a catalog:** `vpress status`, `assets`, `asset`.
+- **Generate derivatives with provenance:** `vpress generate`.
+- **Validate cut files into findings:** `vpress validate`.
+- **Review, approve and override derivatives:** `vpress approve`, `reject`,
+  `regenerate`, `override`, `open`, `attention`.
+- **Resolve collections and products into eligible, excluded and missing members:**
+  `vpress collections`, `collection`, `products`, `product`.
+
+Product builds and packaging (PRD 6) come next; see the PRD roadmap in `docs/PLAN.md`.
+
+There is no import command yet: assets and collections are hand-authored TOML (ADR 0005).
+To bring in a folder or zip of PNGs, use a catalog-side script, as described under
+"After PRD 10" in `docs/PLAN.md`.
 
 ## Development
 

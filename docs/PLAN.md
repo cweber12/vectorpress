@@ -443,3 +443,36 @@ gaps, those become ADRs and a PRD 11.
 
 Explicitly deferred (§37, §40): scene composition, physical mockups, PDF/EPS,
 marketplace APIs, any database.
+
+### Candidate — Catalog import (not yet scheduled)
+
+**Goal.** `vpress import <folder|zip>` turns a set of PNGs into assets and a
+collection in one command.
+
+**Why it isn't a PRD yet.** It has to write `asset.toml` and collection TOML, and
+ADR 0005 makes hand-authored TOML read-only to the tool, with one exception:
+drafting a product's `[listing]`. It therefore needs a new ADR amending ADR 0005
+before a PRD can be written.
+
+**Prior art.** A catalog-side script, `tools/import_set.py` in the catalog repo, does
+this today and serves as the working spec. For each PNG it:
+
+- derives an asset ID from the file name, dropping ordering prefixes like `01-`
+  and numbering generic names like "ChatGPT Image…" or "IMG_1234";
+- takes an optional `--id-prefix`, since asset IDs are catalog-global;
+- keeps the untouched file under `_originals/`;
+- writes a silhouette copy and a flat-color copy with near-identical shades
+  merged (the workaround for issue #83);
+- writes `asset.toml` defaulting to `rights_status = "rights_review_required"`.
+
+It then creates the collection, or appends to an existing collection's explicit
+`asset_ids`. It runs generate and validate for only the new assets, and writes an
+HTML contact sheet for the whole collection.
+
+**Real-catalog lessons it encodes:**
+
+- One file cannot serve two source roles, so each role gets its own copy.
+- AI-generated sources are not truly flat-color (issue #83).
+- On Windows, piped `vpress` output uses the legacy code page, and findings text
+  contains `in²`.
+- Detailed line art loses most of its cut lines at the 3in catalog reference size.
