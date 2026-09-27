@@ -101,10 +101,12 @@ class FindingsReport:
     used should be recorded with the validation result") so a later change
     to either is detectable the same way a recipe change is for provenance.
 
-    ``excessive_complexity_reference_size_in`` is the catalog reference size
-    that kind alone was measured at (ADR 0010) -- equal to
-    ``reference_size_in`` for a catalog-default report, the catalog default
-    for a product-size one.
+    ``excessive_complexity_reference_size_in`` is the cut file's own
+    **cleanup size** that kind alone was measured at (ADR 0010 as amended by
+    ADR 0012) -- the asset's own ``[derivatives.cut_svg] reference_size_in``
+    when it set one, else the catalog default; the same value at every
+    reference size this cut file is ever validated at, catalog default or
+    product override alike.
     """
 
     validated_file: str

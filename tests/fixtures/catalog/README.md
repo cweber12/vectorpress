@@ -50,7 +50,14 @@ images tagged with a role (§4.1, ADR 0003):
 
 - `ochre_sea_star` — real artwork: a hand-drawn sea star `silhouette` and a matching
   `lineart` outline. Its `flatcolor` source (three concentric rings plus a detached
-  island, four flat colors) is still synthetic.
+  island, four flat colors) is still synthetic. Its own `[derivatives.cut_svg]
+  reference_size_in = 6.0` (ADR 0012, issue #91) is the fixture's **cleanup size**
+  example: larger than the catalog's 3.0in default, so its cut file is cleaned
+  as if sold larger, retaining detail a 3in cleanup would have removed -- a real
+  difference in its cut file's own SVG content, chosen (empirically, the same way
+  the synthetic subjects below are tuned) to introduce no finding at the
+  catalog-default validation size it still passes at. No other fixture asset's
+  provenance or findings change because of it.
 - `purple_sea_urchin` — real artwork: a spiny `silhouette`. It passes at the catalog's
   3in default, but its spine tips are too thin to cut at `kelp_forest_mini_pack`'s
   1in override (`narrow_feature` findings).

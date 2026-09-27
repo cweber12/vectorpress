@@ -1,4 +1,13 @@
 # Hand-authored asset metadata (ADR 0005). The asset ID is this folder's name.
+#
+# [derivatives.cut_svg]'s reference_size_in is this asset's own cleanup size
+# (ADR 0012): larger than the catalog's 3.0in default, so its cut_svg is
+# cleaned as if sold larger, retaining detail a 3in cleanup would remove.
+# Chosen so the difference is real -- its cut file's own SVG content changes
+# -- without introducing a finding at the catalog-default validation size
+# this asset still passes at (this asset's silhouette has no fine detail
+# near either size's cleanup thresholds); no other fixture asset's provenance
+# or findings are affected.
 
 common_name = "Ochre sea star"
 display_name = "Ochre Sea Star"
@@ -32,3 +41,8 @@ file = "lineart.png"
 [[sources]]
 role = "flatcolor"
 file = "flatcolor.png"
+
+# Per-asset derivative settings (ADR 0012): no source pin, only this
+# asset's own cut_svg cleanup size.
+[derivatives.cut_svg]
+reference_size_in = 6.0

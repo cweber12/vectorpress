@@ -401,6 +401,48 @@ def test_pin_to_a_file_with_an_unaccepted_role_is_a_problem(catalog_copy: Path) 
     assert "flatcolor_svg" in problem.message
 
 
+def test_cleanup_size_with_no_source_pin_loads_cleanly(catalog_copy: Path) -> None:
+    """Acceptance criterion 1: ``[derivatives.cut_svg] reference_size_in =
+    6`` with no ``source`` is a valid per-asset setting (ADR 0012) --
+    ``source`` is optional, so this loads the same as a source-only pin
+    does."""
+    path = _asset_toml(catalog_copy, "purple_sea_urchin")
+    text = path.read_text(encoding="utf-8")
+    text += "\n[derivatives.cut_svg]\nreference_size_in = 6\n"
+    path.write_text(text, encoding="utf-8")
+    config = load_catalog_config(catalog_copy)
+
+    inventory = load_assets(catalog_copy, config)
+
+    assert inventory.problems == []
+    urchin = next(a for a in inventory.assets if a.id == "purple_sea_urchin")
+    assert urchin.derivatives["cut_svg"].source is None
+    assert urchin.derivatives["cut_svg"].reference_size_in == 6.0
+
+
+def test_cleanup_size_on_a_type_other_than_cut_svg_is_a_problem_naming_the_field(
+    catalog_copy: Path,
+) -> None:
+    """Acceptance criterion 1: ``reference_size_in`` is accepted on
+    ``cut_svg`` only (ADR 0012) -- setting it on ``silhouette_svg`` is a
+    metadata problem naming the field, the same way an unaccepted pin is."""
+    path = _asset_toml(catalog_copy, "purple_sea_urchin")
+    text = path.read_text(encoding="utf-8")
+    text += "\n[derivatives.silhouette_svg]\nreference_size_in = 6\n"
+    path.write_text(text, encoding="utf-8")
+    config = load_catalog_config(catalog_copy)
+
+    inventory = load_assets(catalog_copy, config)
+
+    ids = {asset.id for asset in inventory.assets}
+    assert "purple_sea_urchin" not in ids
+    assert len(inventory.problems) == 1
+    problem = inventory.problems[0]
+    assert problem.field == "derivatives.silhouette_svg.reference_size_in"
+    assert "cut_svg" in problem.message
+    assert "silhouette_svg" in problem.message
+
+
 def test_pin_for_a_type_with_no_recipe_is_a_problem(catalog_copy: Path) -> None:
     """outline_svg is a real derivative type but has no recipe yet (PRD 3's
     remaining slices / PRD 10) -- cut_svg had this role until issue #36 gave

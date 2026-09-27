@@ -39,15 +39,19 @@ def select_source(asset: Asset, recipe: Recipe) -> DerivativeSelection:
     """Pick the source one asset's derivative of ``recipe``'s type would
     use, or explain why none can be picked (ADR 0003, issue #22).
 
-    Precedence: the asset's pin for this type, if it has one (assumed valid
-    here -- :mod:`vectorpress.catalog.assets` rejects an asset whose pin
-    names an undeclared file, a file with an unaccepted role, or a type with
-    no recipe, so the asset would not have loaded at all); else the recipe's
-    accepted roles in preference order, the first declared source with the
-    first role present (first-declared source wins a tie within one role).
+    Precedence: the asset's pin for this type, if it has one and it names a
+    source (a ``[derivatives.<type>]`` table's ``source`` is optional --
+    ADR 0012 -- so a table present only for a setting like
+    ``reference_size_in`` falls through here the same as no table at all;
+    assumed valid when present here -- :mod:`vectorpress.catalog.assets`
+    rejects an asset whose pin names an undeclared file, a file with an
+    unaccepted role, or a type with no recipe, so the asset would not have
+    loaded at all); else the recipe's accepted roles in preference order, the
+    first declared source with the first role present (first-declared source
+    wins a tie within one role).
     """
     pin = asset.derivatives.get(recipe.derivative_type.value)
-    if pin is not None:
+    if pin is not None and pin.source is not None:
         pinned_source = next((s for s in asset.sources if s.file == pin.source), None)
         assert pinned_source is not None, (
             "an asset with an invalid pin does not load (vectorpress.catalog.assets)"

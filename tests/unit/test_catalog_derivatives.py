@@ -103,6 +103,22 @@ def test_pin_is_selected_over_the_preference_order_default() -> None:
     assert selection.source == Source(role="lineart", file="lineart.png")
 
 
+def test_a_pin_with_no_source_falls_through_to_the_preference_order() -> None:
+    """ADR 0012: ``source`` is optional on a ``[derivatives.<type>]`` table
+    -- a table present only for ``reference_size_in`` selects a source the
+    same way having no table at all does."""
+    asset = _asset(
+        [Source(role="silhouette", file="silhouette.png")],
+        derivatives={"cut_svg": DerivativePin(reference_size_in=6.0)},
+    )
+    recipe = RECIPES[DerivativeType.CUT_SVG]
+
+    selection = select_source(asset, recipe)
+
+    assert selection.state is DerivativeState.MISSING
+    assert selection.source == Source(role="silhouette", file="silhouette.png")
+
+
 # --- select_derivatives: only recipe-bearing types, in declaration order ----------
 
 

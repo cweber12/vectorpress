@@ -57,7 +57,7 @@ from vectorpress.domain.finding import Finding, ValidationOutcome
 from vectorpress.domain.numeric_format import format_number
 from vectorpress.domain.product import Product
 from vectorpress.domain.recipe import RECIPES
-from vectorpress.domain.reference_size import resolve_reference_size_in
+from vectorpress.domain.reference_size import resolve_cleanup_size_in, resolve_reference_size_in
 from vectorpress.domain.status import Status
 from vectorpress.pipeline.attention import (
     AttentionReport,
@@ -357,6 +357,17 @@ def _findings_display(
     return "pass" if currency.result is ValidationOutcome.PASS else "needs review"
 
 
+def _cleanup_size_note(config: CatalogConfig, asset_obj: Asset) -> str:
+    """``vpress asset``'s cleanup-size note on its ``cut_svg`` line (ADR
+    0012): empty when the asset has no override or it equals the catalog
+    default (the common case), else ``(cleanup size: <N>in)`` naming the
+    size its cut file was actually cleaned at."""
+    cleanup_size_in = resolve_cleanup_size_in(config, asset_obj)
+    if cleanup_size_in == config.reference_size_in:
+        return ""
+    return f"(cleanup size: {format_number(cleanup_size_in)}in)"
+
+
 def _status_display(
     status: DerivativeStatus, root: Path, config: CatalogConfig, asset_id: str
 ) -> str:
@@ -539,8 +550,10 @@ def asset(
     type's state (current, stale, missing or impossible), publication
     eligibility, and the collections and products it currently belongs to.
 
-    The cut_svg line also shows its findings result: pass, needs review,
-    findings stale, or not validated. A type overridden under overrides/
+    The cut_svg line also shows its findings result (pass, needs review,
+    findings stale, or not validated) and, when this asset sets its own
+    cleanup size for cut_svg, a "cleanup size: <N>in" note (empty when it
+    matches the catalog default). A type overridden under overrides/
     shows override (generated: <state>) instead, with the override's own
     status and findings; a stale override (its edited-against source has
     since changed) shows override, stale (source changed) and a line
@@ -595,6 +608,9 @@ def asset(
             if status.derivative_type is DerivativeType.CUT_SVG:
                 derived_dir = asset_dir_path / DERIVED_DIRNAME
                 line += f"\t{_override_findings_display(effective, derived_dir, candidate_filename, config)}"
+                cleanup_size_note = _cleanup_size_note(config, found)
+                if cleanup_size_note:
+                    line += f"\t{cleanup_size_note}"
             typer.echo(line)
             if label != "override":
                 _echo_stale_override_resolutions(found.id, status.derivative_type)
@@ -620,6 +636,9 @@ def asset(
         # Only cut_svg is validated, so only its line carries a findings result.
         if status.derivative_type is DerivativeType.CUT_SVG:
             line += f"\t{_findings_display(status, root, config, found.id)}"
+            cleanup_size_note = _cleanup_size_note(config, found)
+            if cleanup_size_note:
+                line += f"\t{cleanup_size_note}"
         typer.echo(line)
 
     unrecognized = list_unrecognized_overrides(asset_dir_path, known_filenames)

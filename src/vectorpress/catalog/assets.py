@@ -22,6 +22,7 @@ from vectorpress.catalog.metadata_problem import (
 )
 from vectorpress.domain.asset import Asset, AssetId
 from vectorpress.domain.catalog_config import CatalogConfig
+from vectorpress.domain.derivative_type import DerivativeType
 from vectorpress.domain.recipe import recipe_for
 
 ASSET_CONFIG_FILENAME = "asset.toml"
@@ -283,44 +284,63 @@ def _validate_sources(
 
 
 def _validate_derivatives(toml_rel_path: Path, asset: Asset) -> list[MetadataProblem]:
-    """Check every ``[derivatives.<type>]`` pin against the asset's declared
-    sources and the domain's recipes (ADR 0003, issue #22).
+    """Check every ``[derivatives.<type>]`` table against the asset's
+    declared sources and the domain's recipes (ADR 0003, ADR 0012, issue
+    #22).
 
-    A pin naming a file not declared under ``[[sources]]``, a file whose
-    role the type's recipe does not accept, or a type with no recipe at all
-    (not yet one of the three this PRD slice covers, or not a real
-    derivative type) each produce one problem naming ``asset.toml`` and the
-    offending field -- the same rule declared-source problems follow (the
-    asset does not load).
+    A type with no recipe at all (not yet one of the ones this PRD slice
+    covers, or not a real derivative type) is a problem regardless of which
+    settings the table carries -- there is nothing to pin or clean up.
+    Otherwise: a ``source`` naming a file not declared under ``[[sources]]``,
+    or one whose role the type's recipe does not accept, is a problem (the
+    same rule declared-source problems follow); ``source`` itself is optional
+    (ADR 0012 -- an asset may set only ``reference_size_in``, or nothing at
+    all). A ``reference_size_in`` on any type but ``cut_svg`` is a problem
+    naming the field, since no other type's recipe reads it. Each problem
+    names ``asset.toml`` and the offending field -- the asset does not load.
     """
     problems: list[MetadataProblem] = []
     sources_by_file = {source.file: source for source in asset.sources}
 
     for type_name, pin in asset.derivatives.items():
-        field = f"derivatives.{type_name}.source"
-
         recipe = recipe_for(type_name)
         if recipe is None:
             problems.append(
-                MetadataProblem(toml_rel_path, field, f"{type_name!r} has no recipe to pin")
+                MetadataProblem(
+                    toml_rel_path,
+                    f"derivatives.{type_name}.source",
+                    f"{type_name!r} has no recipe to pin",
+                )
             )
             continue
 
-        source = sources_by_file.get(pin.source)
-        if source is None:
-            problems.append(
-                MetadataProblem(toml_rel_path, field, f"pinned source not declared: {pin.source!r}")
-            )
-            continue
+        if pin.source is not None:
+            field = f"derivatives.{type_name}.source"
+            source = sources_by_file.get(pin.source)
+            if source is None:
+                problems.append(
+                    MetadataProblem(
+                        toml_rel_path, field, f"pinned source not declared: {pin.source!r}"
+                    )
+                )
+            elif source.role not in recipe.accepted_roles:
+                accepted = ", ".join(recipe.accepted_roles)
+                problems.append(
+                    MetadataProblem(
+                        toml_rel_path,
+                        field,
+                        f"pinned source {pin.source!r} has role {source.role!r}, "
+                        f"not accepted by {type_name} ({accepted})",
+                    )
+                )
 
-        if source.role not in recipe.accepted_roles:
-            accepted = ", ".join(recipe.accepted_roles)
+        pins_a_non_cut_svg_type = recipe.derivative_type is not DerivativeType.CUT_SVG
+        if pin.reference_size_in is not None and pins_a_non_cut_svg_type:
             problems.append(
                 MetadataProblem(
                     toml_rel_path,
-                    field,
-                    f"pinned source {pin.source!r} has role {source.role!r}, "
-                    f"not accepted by {type_name} ({accepted})",
+                    f"derivatives.{type_name}.reference_size_in",
+                    f"reference_size_in is only accepted on cut_svg, not {type_name!r}",
                 )
             )
 

@@ -366,6 +366,49 @@ def test_findings_json_records_hash_reference_size_and_thresholds(
     assert isinstance(report.thresholds, dict)
 
 
+@pytest.mark.integration
+def test_excessive_complexity_reference_size_in_follows_the_assets_own_cleanup_size(
+    monkeypatch: pytest.MonkeyPatch, temp_catalog_root: Path
+) -> None:
+    """Acceptance criterion 3 (ADR 0010 as amended by ADR 0012, issue #91):
+    ``ochre_sea_star``'s own cleanup size (6.0in, its committed fixture
+    setting) is what the findings JSON records for
+    ``excessive_complexity_reference_size_in``, at the catalog-default
+    validation size and unaffected by a product override either -- every
+    other asset here has no cleanup size of its own, so its findings still
+    record the catalog default (3.0in)."""
+    monkeypatch.chdir(temp_catalog_root)
+    runner.invoke(app, ["generate", "--all"])
+
+    default_result = runner.invoke(app, ["validate", "--all"])
+    assert default_result.exit_code == 0, default_result.output
+    product_result = runner.invoke(
+        app, ["validate", "ochre_sea_star", "--product", "kelp_forest_mini_pack"]
+    )
+    assert product_result.exit_code == 0, product_result.output
+
+    ochre_default = read_findings_report(
+        _derived_dir(temp_catalog_root, "ochre_sea_star"), "ochre-sea-star-cut.svg"
+    )
+    assert ochre_default is not None
+    assert ochre_default.reference_size_in == 3.0
+    assert ochre_default.excessive_complexity_reference_size_in == 6.0
+
+    ochre_product = read_findings_report(
+        _derived_dir(temp_catalog_root, "ochre_sea_star"), "ochre-sea-star-cut.svg", at_size=1.0
+    )
+    assert ochre_product is not None
+    assert ochre_product.reference_size_in == 1.0
+    assert ochre_product.excessive_complexity_reference_size_in == 6.0
+
+    for asset_id, filename in FIXTURE_CUT_FILES:
+        if asset_id == "ochre_sea_star":
+            continue
+        other = read_findings_report(_derived_dir(temp_catalog_root, asset_id), filename)
+        assert other is not None
+        assert other.excessive_complexity_reference_size_in == 3.0
+
+
 def _assert_at_most_four_decimal_places(value: object, where: str) -> None:
     if isinstance(value, bool) or not isinstance(value, int | float):
         return

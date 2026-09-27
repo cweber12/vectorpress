@@ -190,8 +190,11 @@ def test_generate_all_writes_every_cut_svg_with_provenance(
         assert provenance.output_hash == sha256_bytes(output_path.read_bytes())
         # the effective reference size is part of the recorded provenance
         # parameters, not just the recipe's own static declaration (issue
-        # #36's "reference size in the recipe identity").
-        assert provenance.parameters["reference_size_in"] == 3.0
+        # #36's "reference size in the recipe identity") -- ochre_sea_star's
+        # own cleanup size (ADR 0012, issue #91) in place of the catalog
+        # default for every other asset here.
+        expected_reference_size_in = 6.0 if asset_id == "ochre_sea_star" else 3.0
+        assert provenance.parameters["reference_size_in"] == expected_reference_size_in
 
         asset_result = runner.invoke(app, ["asset", asset_id])
         assert asset_result.exit_code == 0, asset_result.output
@@ -949,7 +952,14 @@ def test_changing_reference_size_in_marks_every_cut_svg_stale_and_nothing_else(
     measured against, §9.1) makes every ``cut_svg`` derivative
     ``stale (recipe changed)`` -- it is merged into the effective recipe
     identity (ADR 0004) -- and leaves every other recipe-bearing type
-    ``current``: none of them read ``reference_size_in`` at all."""
+    ``current``: none of them read ``reference_size_in`` at all.
+
+    ``ochre_sea_star`` is the one exception (ADR 0012, issue #91): its own
+    ``[derivatives.cut_svg] reference_size_in`` (6.0, already the value this
+    test moves the catalog default *to*) is its cleanup size regardless of
+    the catalog default, so its cut_svg was already generated at 6.0 and
+    stays ``current`` -- unaffected by a catalog-wide change that changes
+    everyone else's."""
     monkeypatch.chdir(temp_catalog_root)
     first = runner.invoke(app, ["generate", "--all"])
     assert first.exit_code == 1, first.output
@@ -963,7 +973,10 @@ def test_changing_reference_size_in_marks_every_cut_svg_stale_and_nothing_else(
     for asset_id, filename in FIXTURE_CUT_SVG_OUTPUTS:
         result = runner.invoke(app, ["asset", asset_id])
         assert result.exit_code == 0, result.output
-        assert f"cut_svg\tstale (recipe changed)\t{filename}" in result.stdout
+        if asset_id == "ochre_sea_star":
+            assert f"cut_svg\tcurrent\t{filename}" in result.stdout
+        else:
+            assert f"cut_svg\tstale (recipe changed)\t{filename}" in result.stdout
 
     for asset_id, filename in FIXTURE_OUTPUTS:
         result = runner.invoke(app, ["asset", asset_id])
@@ -980,11 +993,75 @@ def test_changing_reference_size_in_marks_every_cut_svg_stale_and_nothing_else(
 
     status_result = runner.invoke(app, ["status"])
     assert status_result.exit_code == 0, status_result.output
-    # every asset in FIXTURE_CUT_SVG_OUTPUTS -- the four original cut_svg
-    # subjects, issue #39's four area-finding fixtures and issue #40's two
-    # shape-finding fixtures -- contributes one stale cut_svg (asserted
-    # individually above), ten overall.
-    assert "Stale derivatives: 10" in status_result.stdout
+    # Every asset in FIXTURE_CUT_SVG_OUTPUTS but ochre_sea_star -- the three
+    # remaining original cut_svg subjects, issue #39's four area-finding
+    # fixtures and issue #40's two shape-finding fixtures -- contributes one
+    # stale cut_svg (asserted individually above), nine overall.
+    assert "Stale derivatives: 9" in status_result.stdout
+
+
+@pytest.mark.integration
+def test_asset_cleanup_size_marks_only_its_own_cut_svg_stale_and_regenerates_differently(
+    monkeypatch: pytest.MonkeyPatch, temp_catalog_root: Path
+) -> None:
+    """Acceptance criterion 2 (ADR 0012, issue #91): setting one asset's own
+    cleanup size (``[derivatives.cut_svg] reference_size_in``) is a recipe
+    parameter change for that asset alone -- it marks only its own cut_svg
+    ``stale (recipe changed)``; every other asset's cut_svg, and this
+    asset's own other recipe-bearing types, stay current with their
+    provenance byte-for-byte unchanged. Regenerating writes a genuinely
+    different cut file, not just a different recorded parameter."""
+    monkeypatch.chdir(temp_catalog_root)
+    first = runner.invoke(app, ["generate", "--all"])
+    assert first.exit_code == 1, first.output
+
+    def _provenance_path(asset_id: str, filename: str) -> Path:
+        return (
+            temp_catalog_root
+            / "assets"
+            / asset_id
+            / DERIVED_DIRNAME
+            / f"{filename}.provenance.json"
+        )
+
+    provenance_before = {
+        asset_id: _provenance_path(asset_id, filename).read_bytes()
+        for asset_id, filename in FIXTURE_CUT_SVG_OUTPUTS
+    }
+    urchin_cut_svg = (
+        temp_catalog_root
+        / "assets"
+        / "purple_sea_urchin"
+        / DERIVED_DIRNAME
+        / "purple-sea-urchin-cut.svg"
+    )
+    original_bytes = urchin_cut_svg.read_bytes()
+
+    asset_toml = temp_catalog_root / "assets" / "purple_sea_urchin" / "asset.toml"
+    asset_toml.write_text(
+        asset_toml.read_text(encoding="utf-8")
+        + "\n[derivatives.cut_svg]\nreference_size_in = 6.0\n",
+        encoding="utf-8",
+    )
+
+    for asset_id, filename in FIXTURE_CUT_SVG_OUTPUTS:
+        result = runner.invoke(app, ["asset", asset_id])
+        assert result.exit_code == 0, result.output
+        if asset_id == "purple_sea_urchin":
+            assert f"cut_svg\tstale (recipe changed)\t{filename}" in result.stdout
+        else:
+            assert f"cut_svg\tcurrent\t{filename}" in result.stdout
+            assert _provenance_path(asset_id, filename).read_bytes() == provenance_before[asset_id]
+
+    urchin_result = runner.invoke(app, ["asset", "purple_sea_urchin"])
+    assert urchin_result.exit_code == 0, urchin_result.output
+    assert "transparent_png\tcurrent" in urchin_result.stdout
+    assert "silhouette_svg\tcurrent" in urchin_result.stdout
+
+    generate_result = runner.invoke(app, ["generate", "purple_sea_urchin"])
+    assert generate_result.exit_code == 0, generate_result.output
+    assert "purple_sea_urchin\tcut_svg\tgenerated" in generate_result.stdout
+    assert urchin_cut_svg.read_bytes() != original_bytes
 
 
 @pytest.mark.integration

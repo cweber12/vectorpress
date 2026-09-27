@@ -51,20 +51,30 @@ class Source(BaseModel):
 
 
 class DerivativePin(BaseModel):
-    """A ``[derivatives.<type>]`` table pinning one derivative type to a
-    specific source (ADR 0003, CONTEXT.md "Recipe").
+    """A ``[derivatives.<type>]`` table of per-asset settings for one
+    derivative type (ADR 0003, ADR 0012, CONTEXT.md "Recipe", "Cleanup
+    size"): a source pin, a cleanup-size override, or neither (an empty
+    table is valid and means no settings).
 
-    ``source`` names a file the same way ``Source.file`` does: relative to
-    the asset's ``sources/`` directory. Checking that it names a declared
-    source whose role the type's recipe accepts, and that the type has a
-    recipe at all, is the ``catalog`` layer's job (this module has no recipe
-    or filesystem awareness, per ADR 0006); an asset with an invalid pin does
-    not load (same rule declared sources follow).
+    ``source``, when set, names a file the same way ``Source.file`` does:
+    relative to the asset's ``sources/`` directory. Checking that it names a
+    declared source whose role the type's recipe accepts, and that the type
+    has a recipe at all, is the ``catalog`` layer's job (this module has no
+    recipe or filesystem awareness, per ADR 0006); an asset with an invalid
+    pin does not load (same rule declared sources follow).
+
+    ``reference_size_in`` is the asset's own **cleanup size** for
+    ``cut_svg`` -- the size its one cut file is cleaned at in place of the
+    catalog default. Checking that it is only ever set on ``cut_svg`` is
+    also the ``catalog`` layer's job, for the same reason: this model has no
+    idea which type's table it is. Enforced here regardless of type: a
+    non-positive size cleans nothing.
     """
 
     model_config = ConfigDict(strict=True, extra="forbid", frozen=True)
 
-    source: str
+    source: str | None = None
+    reference_size_in: float | None = Field(default=None, gt=0)
 
 
 class Asset(BaseModel):
@@ -83,11 +93,13 @@ class Asset(BaseModel):
 
     ``derivatives`` maps a derivative type's name (a
     :class:`~vectorpress.domain.derivative_type.DerivativeType` value, e.g.
-    ``"transparent_png"``) to a pinned source, one entry per
-    ``[derivatives.<type>]`` table. Kept a plain ``str`` key here rather than
-    ``DerivativeType`` for the same reason ``Source.role`` is a plain
-    ``str``: whether the key names a real derivative type with a recipe, and
-    whether the pin is valid, is the ``catalog`` layer's job.
+    ``"transparent_png"``) to its per-asset settings, one entry per
+    ``[derivatives.<type>]`` table (ADR 0012). Kept a plain ``str`` key here
+    rather than ``DerivativeType`` for the same reason ``Source.role`` is a
+    plain ``str``: whether the key names a real derivative type with a
+    recipe, whether a source pin is valid, and whether a setting like
+    ``reference_size_in`` applies to that type at all, is the ``catalog``
+    layer's job.
     """
 
     model_config = ConfigDict(strict=True, extra="forbid", frozen=True)
