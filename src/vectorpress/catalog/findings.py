@@ -311,11 +311,12 @@ def write_findings_report(
 class FindingsCurrencyState(StrEnum):
     """Whether an on-disk findings report still reflects the derivative it
     was computed from (ADR 0004, issue #37): ``NOT_VALIDATED`` (no report
-    exists yet), ``CURRENT`` (its recorded content hash, reference size and
-    thresholds all still match), or ``STALE`` (a report exists but at least
-    one of those has since changed -- the derivative was regenerated, hand-
-    edited on disk, the catalog's reference size changed, or a threshold
-    changed)."""
+    exists yet), ``CURRENT`` (its recorded content hash, reference size,
+    cleanup size and thresholds all still match), or ``STALE`` (a report
+    exists but at least one of those has since changed -- the derivative
+    was regenerated, hand-edited on disk, the catalog's reference size
+    changed, the cut file's own cleanup size changed (ADR 0012), or a
+    threshold changed)."""
 
     NOT_VALIDATED = "not_validated"
     CURRENT = "current"
@@ -339,14 +340,27 @@ def findings_currency(
     reference_size_in: float,
     thresholds: Mapping[str, float],
     *,
+    excessive_complexity_reference_size_in: float,
     is_override: bool = False,
 ) -> FindingsCurrency:
     """A findings report is current iff its recorded content hash,
-    reference size and thresholds all match ``svg_bytes``,
-    ``reference_size_in`` and ``thresholds`` as given (issue #37's "A
-    findings report is current iff its recorded SVG hash, reference size and
-    threshold identity all match"). ``is_override`` (§6.8) checks the
-    override's own coexisting report instead of the generated derivative's."""
+    reference size, cleanup size and thresholds all match ``svg_bytes``,
+    ``reference_size_in``, ``excessive_complexity_reference_size_in`` and
+    ``thresholds`` as given (issue #37's "A findings report is current iff
+    its recorded SVG hash, reference size and threshold identity all
+    match", widened for the cleanup size ADR 0012 adds).
+
+    ``excessive_complexity_reference_size_in`` is the caller's already-
+    resolved cleanup size for this derivative's asset
+    (:func:`vectorpress.domain.reference_size.resolve_cleanup_size_in`),
+    not something this module re-derives: an override under ``overrides/``
+    can sit unchanged on disk while the asset's own
+    ``[derivatives.cut_svg] reference_size_in`` changes underneath it, and
+    that alone must make its findings stale -- ``excessive_complexity`` was
+    measured at the old cleanup size, not the current one, even though
+    nothing about the override's bytes changed. ``is_override`` (§6.8)
+    checks the override's own coexisting report instead of the generated
+    derivative's."""
     report = read_findings_report(derived_dir, validated_filename, is_override=is_override)
     if report is None:
         return FindingsCurrency(FindingsCurrencyState.NOT_VALIDATED, None)
@@ -354,6 +368,7 @@ def findings_currency(
     if (
         report.content_hash != sha256_bytes(svg_bytes)
         or report.reference_size_in != reference_size_in
+        or report.excessive_complexity_reference_size_in != excessive_complexity_reference_size_in
         or report.thresholds != dict(thresholds)
     ):
         return FindingsCurrency(FindingsCurrencyState.STALE, None)

@@ -1,6 +1,6 @@
 """domain.reference_size: the functions that resolve a reference size in
 effect -- product override else catalog default (§9.1, ADR 0008, issue #38),
-and an asset's own cleanup size (ADR 0012, issue #91)."""
+and an asset's own cleanup size (ADR 0012)."""
 
 from vectorpress.domain.asset import AccuracyStatus, Asset, DerivativePin, RightsStatus
 from vectorpress.domain.catalog_config import CatalogConfig
@@ -63,7 +63,7 @@ def test_a_zero_override_is_still_honored_not_treated_as_falsy() -> None:
 
 
 # --- resolve_cleanup_size_in: asset's own cut_svg reference_size_in, else the
-# catalog default (ADR 0012, issue #91) -------------------------------------
+# catalog default (ADR 0012) -------------------------------------------------
 
 
 def test_cleanup_size_returns_the_assets_own_setting_when_set() -> None:

@@ -346,7 +346,7 @@ def test_regenerate_then_generate_regenerates_only_the_marked_derivative(
     assert "needs review" in cut_svg_line
     # The old approval's own note no longer applies; matched parenthesized
     # (not a bare "clean" substring, which also matches this asset's own
-    # "cleanup size" note, ADR 0012, issue #91).
+    # "cleanup size" note, ADR 0012).
     assert "(clean)" not in cut_svg_line
 
 

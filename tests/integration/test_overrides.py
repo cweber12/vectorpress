@@ -30,7 +30,7 @@ import pytest
 from PIL import Image
 from typer.testing import CliRunner
 
-from vectorpress.catalog.findings import findings_path
+from vectorpress.catalog.findings import findings_path, read_findings_report
 from vectorpress.catalog.overrides import (
     override_path,
     override_provenance_path,
@@ -263,6 +263,54 @@ def test_editing_the_override_returns_it_to_needs_review_and_stales_its_findings
     assert "needs review" in cut_svg_line
     assert "approved" not in cut_svg_line
     assert "findings stale" in cut_svg_line
+
+
+@pytest.mark.integration
+def test_changing_the_assets_cleanup_size_stales_an_overrides_findings_too(
+    monkeypatch: pytest.MonkeyPatch, temp_catalog_root: Path
+) -> None:
+    """ADR 0012: an override's bytes never change on disk when
+    only the asset's own ``[derivatives.cut_svg] reference_size_in``
+    changes, but ``excessive_complexity`` was measured at the old cleanup
+    size -- the override's findings must go stale from that alone, the same
+    way a hand edit or a threshold change already does."""
+    monkeypatch.chdir(temp_catalog_root)
+    runner.invoke(app, ["generate", ASSET_ID])
+    generated_bytes = (_derived_dir(temp_catalog_root) / FILENAME).read_bytes()
+    _write_override(temp_catalog_root, _hand_edit(generated_bytes))
+    runner.invoke(app, ["validate", ASSET_ID])  # writes the override's own findings report
+
+    before = runner.invoke(app, ["asset", ASSET_ID])
+    before_line = next(
+        line for line in before.stdout.splitlines() if line.strip().startswith("cut_svg")
+    )
+    assert "pass" in before_line
+    assert "findings stale" not in before_line
+
+    asset_toml = temp_catalog_root / "assets" / ASSET_ID / "asset.toml"
+    asset_toml.write_text(
+        asset_toml.read_text(encoding="utf-8")
+        + "\n[derivatives.cut_svg]\nreference_size_in = 6.0\n",
+        encoding="utf-8",
+    )
+
+    after = runner.invoke(app, ["asset", ASSET_ID])
+    assert after.exit_code == 0, after.output
+    after_line = next(
+        line for line in after.stdout.splitlines() if line.strip().startswith("cut_svg")
+    )
+    assert "findings stale" in after_line
+    assert "pass" not in after_line
+
+    # The override's own file and findings report are untouched -- staleness
+    # is detected from the resolved cleanup size, not a rewrite.
+    override_findings_path = findings_path(
+        _derived_dir(temp_catalog_root), FILENAME, is_override=True
+    )
+    report = read_findings_report(_derived_dir(temp_catalog_root), FILENAME, is_override=True)
+    assert report is not None
+    assert report.excessive_complexity_reference_size_in == 3.0
+    assert override_findings_path.is_file()
 
 
 # --- acceptance criterion 4: override provenance; overrides/ is never written -------

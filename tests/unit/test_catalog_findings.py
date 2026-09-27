@@ -167,7 +167,14 @@ def test_write_findings_report_leaves_no_temp_file_behind(tmp_path: Path) -> Non
 
 
 def test_currency_is_not_validated_when_no_report_exists(tmp_path: Path) -> None:
-    currency = findings_currency(tmp_path, "ochre-sea-star-cut.svg", SVG_BYTES, 3.0, {})
+    currency = findings_currency(
+        tmp_path,
+        "ochre-sea-star-cut.svg",
+        SVG_BYTES,
+        3.0,
+        {},
+        excessive_complexity_reference_size_in=3.0,
+    )
 
     assert currency.state is FindingsCurrencyState.NOT_VALIDATED
     assert currency.result is None
@@ -177,7 +184,14 @@ def test_currency_is_current_right_after_validation(tmp_path: Path) -> None:
     report = _report()
     write_findings_report(tmp_path, report)
 
-    currency = findings_currency(tmp_path, report.validated_file, SVG_BYTES, 3.0, {})
+    currency = findings_currency(
+        tmp_path,
+        report.validated_file,
+        SVG_BYTES,
+        3.0,
+        {},
+        excessive_complexity_reference_size_in=3.0,
+    )
 
     assert currency.state is FindingsCurrencyState.CURRENT
     assert currency.result is ValidationOutcome.NEEDS_REVIEW
@@ -191,7 +205,12 @@ def test_currency_is_stale_when_the_svg_bytes_changed(tmp_path: Path) -> None:
     write_findings_report(tmp_path, report)
 
     currency = findings_currency(
-        tmp_path, report.validated_file, b"<svg>different bytes now</svg>", 3.0, {}
+        tmp_path,
+        report.validated_file,
+        b"<svg>different bytes now</svg>",
+        3.0,
+        {},
+        excessive_complexity_reference_size_in=3.0,
     )
 
     assert currency.state is FindingsCurrencyState.STALE
@@ -202,7 +221,14 @@ def test_currency_is_stale_when_the_reference_size_changed(tmp_path: Path) -> No
     report = _report()
     write_findings_report(tmp_path, report)
 
-    currency = findings_currency(tmp_path, report.validated_file, SVG_BYTES, 6.0, {})
+    currency = findings_currency(
+        tmp_path,
+        report.validated_file,
+        SVG_BYTES,
+        6.0,
+        {},
+        excessive_complexity_reference_size_in=3.0,
+    )
 
     assert currency.state is FindingsCurrencyState.STALE
 
@@ -212,7 +238,34 @@ def test_currency_is_stale_when_the_thresholds_changed(tmp_path: Path) -> None:
     write_findings_report(tmp_path, report)
 
     currency = findings_currency(
-        tmp_path, report.validated_file, SVG_BYTES, 3.0, {"island_min_area_in2": 0.5}
+        tmp_path,
+        report.validated_file,
+        SVG_BYTES,
+        3.0,
+        {"island_min_area_in2": 0.5},
+        excessive_complexity_reference_size_in=3.0,
+    )
+
+    assert currency.state is FindingsCurrencyState.STALE
+
+
+def test_currency_is_stale_when_the_cleanup_size_changed(tmp_path: Path) -> None:
+    """ADR 0012: an override's bytes and the report's own
+    ``reference_size_in`` (the *validation* size) can both stay the same
+    while the asset's own ``[derivatives.cut_svg] reference_size_in``
+    changes underneath it -- ``excessive_complexity`` was measured at the
+    old cleanup size, so the report is stale even though nothing else about
+    it changed."""
+    report = _report()
+    write_findings_report(tmp_path, report)
+
+    currency = findings_currency(
+        tmp_path,
+        report.validated_file,
+        SVG_BYTES,
+        3.0,
+        {},
+        excessive_complexity_reference_size_in=6.0,
     )
 
     assert currency.state is FindingsCurrencyState.STALE

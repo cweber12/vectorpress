@@ -191,8 +191,8 @@ def test_generate_all_writes_every_cut_svg_with_provenance(
         # the effective reference size is part of the recorded provenance
         # parameters, not just the recipe's own static declaration (issue
         # #36's "reference size in the recipe identity") -- ochre_sea_star's
-        # own cleanup size (ADR 0012, issue #91) in place of the catalog
-        # default for every other asset here.
+        # own cleanup size (ADR 0012) in place of the catalog default for
+        # every other asset here.
         expected_reference_size_in = 6.0 if asset_id == "ochre_sea_star" else 3.0
         assert provenance.parameters["reference_size_in"] == expected_reference_size_in
 
@@ -954,7 +954,7 @@ def test_changing_reference_size_in_marks_every_cut_svg_stale_and_nothing_else(
     identity (ADR 0004) -- and leaves every other recipe-bearing type
     ``current``: none of them read ``reference_size_in`` at all.
 
-    ``ochre_sea_star`` is the one exception (ADR 0012, issue #91): its own
+    ``ochre_sea_star`` is the one exception (ADR 0012): its own
     ``[derivatives.cut_svg] reference_size_in`` (6.0, already the value this
     test moves the catalog default *to*) is its cleanup size regardless of
     the catalog default, so its cut_svg was already generated at 6.0 and
@@ -1004,7 +1004,7 @@ def test_changing_reference_size_in_marks_every_cut_svg_stale_and_nothing_else(
 def test_asset_cleanup_size_marks_only_its_own_cut_svg_stale_and_regenerates_differently(
     monkeypatch: pytest.MonkeyPatch, temp_catalog_root: Path
 ) -> None:
-    """Acceptance criterion 2 (ADR 0012, issue #91): setting one asset's own
+    """Acceptance criterion 2 (ADR 0012): setting one asset's own
     cleanup size (``[derivatives.cut_svg] reference_size_in``) is a recipe
     parameter change for that asset alone -- it marks only its own cut_svg
     ``stale (recipe changed)``; every other asset's cut_svg, and this

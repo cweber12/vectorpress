@@ -418,7 +418,7 @@ def test_asset_lists_derivatives_for_the_asset_with_a_flatcolor_source(
 def test_asset_shows_its_own_cleanup_size_when_it_differs_from_the_catalog_default(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Visibility (ADR 0012, issue #91): ``ochre_sea_star``'s committed
+    """Visibility (ADR 0012): ``ochre_sea_star``'s committed
     ``[derivatives.cut_svg] reference_size_in = 6.0`` shows on its cut_svg
     line as a cleanup-size note, naming the size that differs from the
     catalog's 3.0in default."""
@@ -436,8 +436,8 @@ def test_asset_shows_its_own_cleanup_size_when_it_differs_from_the_catalog_defau
 def test_asset_shows_no_cleanup_size_note_when_it_matches_the_catalog_default(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The common case (ADR 0012, issue #91): an asset with no cleanup-size
-    override of its own shows no note at all."""
+    """The common case (ADR 0012): an asset with no cleanup-size override of
+    its own shows no note at all."""
     monkeypatch.chdir(FIXTURE_CATALOG_ROOT)
 
     result = runner.invoke(app, ["asset", "purple_sea_urchin"])

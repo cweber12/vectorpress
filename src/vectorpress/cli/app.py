@@ -327,17 +327,17 @@ def assets(ctx: typer.Context) -> None:
 
 
 def _findings_display(
-    status: DerivativeStatus, root: Path, config: CatalogConfig, asset_id: str
+    status: DerivativeStatus, root: Path, config: CatalogConfig, asset_obj: Asset
 ) -> str:
     """The findings column on ``vpress asset``'s ``cut_svg`` line: ``pass`` /
     ``needs review`` for a current catalog-default findings report,
     ``findings stale`` when the report no longer matches the file, reference
-    size or thresholds, else ``not validated``."""
+    size, cleanup size or thresholds, else ``not validated``."""
     if status.state not in (DerivativeState.CURRENT, DerivativeState.STALE):
         return "not validated"
 
     assert status.output_filename is not None  # CURRENT/STALE always carry a filename
-    derived_dir = asset_dir(root, config, asset_id) / DERIVED_DIRNAME
+    derived_dir = asset_dir(root, config, asset_obj.id) / DERIVED_DIRNAME
     svg_bytes = read_derivative_bytes(derived_dir, status.output_filename)
     if svg_bytes is None:
         return "not validated"
@@ -348,6 +348,7 @@ def _findings_display(
         svg_bytes,
         config.reference_size_in,
         THRESHOLDS,
+        excessive_complexity_reference_size_in=resolve_cleanup_size_in(config, asset_obj),
     )
     if currency.state is FindingsCurrencyState.NOT_VALIDATED:
         return "not validated"
@@ -411,16 +412,23 @@ def _override_findings_display(
     derived_dir: Path,
     output_filename: str,
     config: CatalogConfig,
+    asset_obj: Asset,
 ) -> str:
     """The findings column on an overridden ``cut_svg`` line: the override's
     own findings currency (§6.8), mirroring :func:`_findings_display` but
-    for the override's own coexisting report."""
+    for the override's own coexisting report.
+
+    Checked against ``asset_obj``'s own cleanup size, not only the
+    override's bytes (ADR 0012): an override sits unchanged on disk while
+    the asset's own cleanup size changes underneath it, and that alone
+    makes its ``excessive_complexity`` finding stale."""
     currency = findings_currency(
         derived_dir,
         output_filename,
         effective.bytes,
         config.reference_size_in,
         THRESHOLDS,
+        excessive_complexity_reference_size_in=resolve_cleanup_size_in(config, asset_obj),
         is_override=True,
     )
     if currency.state is FindingsCurrencyState.NOT_VALIDATED:
@@ -607,7 +615,7 @@ def asset(
             )
             if status.derivative_type is DerivativeType.CUT_SVG:
                 derived_dir = asset_dir_path / DERIVED_DIRNAME
-                line += f"\t{_override_findings_display(effective, derived_dir, candidate_filename, config)}"
+                line += f"\t{_override_findings_display(effective, derived_dir, candidate_filename, config, found)}"
                 cleanup_size_note = _cleanup_size_note(config, found)
                 if cleanup_size_note:
                     line += f"\t{cleanup_size_note}"
@@ -635,7 +643,7 @@ def asset(
             line += f"\t{status_text}"
         # Only cut_svg is validated, so only its line carries a findings result.
         if status.derivative_type is DerivativeType.CUT_SVG:
-            line += f"\t{_findings_display(status, root, config, found.id)}"
+            line += f"\t{_findings_display(status, root, config, found)}"
             cleanup_size_note = _cleanup_size_note(config, found)
             if cleanup_size_note:
                 line += f"\t{cleanup_size_note}"
@@ -1385,11 +1393,11 @@ def validate(
 
     if reference_size_in != config.reference_size_in:
         # Said once per run, not per asset: excessive_complexity alone is
-        # judged at the catalog size (ADR 0010).
-        typer.echo(
-            f"excessive_complexity is measured at the "
-            f"{format_number(config.reference_size_in)}in catalog size"
-        )
+        # judged at each cut file's own cleanup size (ADR 0010 as amended by
+        # ADR 0012), never this run's own validation size -- naming one
+        # number here would be wrong for any asset with its own cleanup
+        # size, so the rule is stated instead of a specific size.
+        typer.echo("excessive_complexity is measured at each cut file's own cleanup size")
 
     failure_count = 0
     for target in targets:
