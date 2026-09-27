@@ -4,14 +4,16 @@ import pytest
 from pydantic import ValidationError
 
 from vectorpress.domain.derivative_type import DerivativeType
-from vectorpress.domain.metadata_field_error import MetadataFieldError
+from vectorpress.domain.metadata_field_error import MetadataFieldError, MetadataFieldsError
 from vectorpress.domain.product import Format, Product, ProductTier
 
 VALID_WITH_COLLECTION_SLUG = {
     "slug": "pacific_coast_tide_pool_standard_pack",
     "collection_slug": "pacific_coast_tide_pool",
+    # Both types are *_svg, so "svg" alone carries them (ADR 0013); no
+    # transparent_png here, so a "png" format would be an unfilled mismatch.
     "derivative_types": ["cut_svg", "silhouette_svg"],
-    "formats": ["svg", "png"],
+    "formats": ["svg"],
     "tier": "standard_pack",
     "price": 12.0,
 }
@@ -32,7 +34,7 @@ def test_product_over_a_collection_slug_parses() -> None:
     assert product.collection_slug == "pacific_coast_tide_pool"
     assert product.membership is None
     assert product.derivative_types == [DerivativeType.CUT_SVG, DerivativeType.SILHOUETTE_SVG]
-    assert product.formats == [Format.SVG, Format.PNG]
+    assert product.formats == [Format.SVG]
     assert product.tier is ProductTier.STANDARD_PACK
     assert product.listing is None
 
@@ -111,12 +113,18 @@ def test_eps_format_without_enablement_is_rejected() -> None:
         Product.model_validate(data)
 
 
-def test_pdf_format_with_explicit_enablement_is_accepted() -> None:
+def test_pdf_format_with_explicit_enablement_is_still_a_format_type_mismatch() -> None:
+    """ADR 0013: no type fills pdf in this PRD, so enabling it does not
+    make it valid -- a product still cannot claim a format the build will
+    never produce."""
     data = {**VALID_WITH_COLLECTION_SLUG, "formats": ["svg", "pdf"], "enable_pdf_eps": True}
 
-    product = Product.model_validate(data)
+    with pytest.raises(ValidationError) as exc_info:
+        Product.model_validate(data)
 
-    assert Format.PDF in product.formats
+    raised = exc_info.value.errors()[0].get("ctx", {}).get("error")
+    assert isinstance(raised, MetadataFieldsError)
+    assert any(field == "formats" and "pdf" in message for field, message in raised.problems)
 
 
 def test_empty_derivative_types_is_rejected() -> None:
@@ -231,6 +239,59 @@ def test_product_tier_has_exactly_the_documented_tiers() -> None:
 
 def test_format_has_exactly_the_documented_formats() -> None:
     assert {member.value for member in Format} == {"svg", "png", "dxf", "pdf", "eps"}
+
+
+# --- ADR 0013 format/derivative-type mismatch is a load-time problem ------
+
+
+def test_dxf_format_without_a_dxf_source_type_is_rejected_naming_dxf() -> None:
+    data = {
+        **VALID_WITH_COLLECTION_SLUG,
+        "derivative_types": ["flatcolor_svg"],
+        "formats": ["dxf"],
+    }
+
+    with pytest.raises(ValidationError) as exc_info:
+        Product.model_validate(data)
+
+    errors = exc_info.value.errors()
+    assert len(errors) == 1
+    raised = errors[0].get("ctx", {}).get("error")
+    assert isinstance(raised, MetadataFieldsError)
+    assert any(field == "formats" and "dxf" in message for field, message in raised.problems)
+
+
+def test_transparent_png_without_png_format_is_rejected_naming_both_fields() -> None:
+    data = {
+        **VALID_WITH_COLLECTION_SLUG,
+        "derivative_types": ["transparent_png"],
+        "formats": ["svg"],
+    }
+
+    with pytest.raises(ValidationError) as exc_info:
+        Product.model_validate(data)
+
+    errors = exc_info.value.errors()
+    assert len(errors) == 1
+    raised = errors[0].get("ctx", {}).get("error")
+    assert isinstance(raised, MetadataFieldsError)
+    assert any(
+        field == "derivative_types" and "transparent_png" in message
+        for field, message in raised.problems
+    )
+    assert any(field == "formats" and "svg" in message for field, message in raised.problems)
+
+
+def test_matching_formats_and_derivative_types_load_cleanly() -> None:
+    data = {
+        **VALID_WITH_COLLECTION_SLUG,
+        "derivative_types": ["cut_svg", "silhouette_svg", "transparent_png"],
+        "formats": ["svg", "png", "dxf"],
+    }
+
+    product = Product.model_validate(data)
+
+    assert product.formats == [Format.SVG, Format.PNG, Format.DXF]
 
 
 def test_derivative_type_has_exactly_the_documented_types() -> None:

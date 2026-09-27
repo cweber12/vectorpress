@@ -24,3 +24,21 @@ class MetadataFieldError(ValueError):
     def __init__(self, field: str, message: str) -> None:
         super().__init__(message)
         self.field = field
+
+
+class MetadataFieldsError(ValueError):
+    """Raised in place of :class:`MetadataFieldError` when one cross-field
+    check finds several independent problems, each with its own message
+    and field (for example, ADR 0013's format/derivative-type mismatch: a
+    listed format no included type fills, and an included type no listed
+    format carries, can both be true on one product at once).
+
+    A pydantic validator can only raise one exception, so ``problems``
+    carries every ``(field, message)`` pair found; the ``catalog`` layer's
+    converter expands them into that many separate ``MetadataProblem``\\ s
+    rather than collapsing them into one.
+    """
+
+    def __init__(self, problems: list[tuple[str, str]]) -> None:
+        super().__init__("; ".join(f"{field}: {message}" for field, message in problems))
+        self.problems = problems

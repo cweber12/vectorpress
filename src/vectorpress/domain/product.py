@@ -20,27 +20,14 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validat
 
 from vectorpress.domain.collection import CollectionSlug
 from vectorpress.domain.derivative_type import DerivativeType
+from vectorpress.domain.format import Format
+from vectorpress.domain.format_folder import format_type_mismatch_problems
 from vectorpress.domain.listing import Listing
 from vectorpress.domain.membership import Membership
-from vectorpress.domain.metadata_field_error import MetadataFieldError
+from vectorpress.domain.metadata_field_error import MetadataFieldError, MetadataFieldsError
 
 #: A product's stable identifier; also its file's stem (CONTEXT.md).
 ProductSlug = str
-
-
-class Format(StrEnum):
-    """A customer deliverable file format (§7).
-
-    SVG, PNG and DXF are supported without further configuration; PDF and
-    EPS are disabled by default and accepted on a product only when it
-    explicitly sets ``enable_pdf_eps``.
-    """
-
-    SVG = "svg"
-    PNG = "png"
-    DXF = "dxf"
-    PDF = "pdf"
-    EPS = "eps"
 
 
 class ProductTier(StrEnum):
@@ -103,3 +90,13 @@ class Product(BaseModel):
         if not enable_pdf_eps and any(fmt in (Format.PDF, Format.EPS) for fmt in formats):
             raise ValueError("pdf and eps formats require enable_pdf_eps = true")
         return formats
+
+    @model_validator(mode="after")
+    def _formats_and_derivative_types_agree_with_the_format_folder_table(self) -> "Product":
+        """A listed format no included type fills, or an included type no
+        listed format carries, is a product metadata problem at load time
+        (ADR 0013), not a build failure."""
+        problems = format_type_mismatch_problems(self.formats, self.derivative_types)
+        if problems:
+            raise MetadataFieldsError(problems)
+        return self
