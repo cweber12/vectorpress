@@ -84,10 +84,24 @@ mechanical roll-up from validation, not a human review decision.
 
 **Reference size** — The physical size (e.g. 3 in on the longest side) at which
 cut-file thresholds are evaluated. Catalog default; product override; recorded with
-findings. Cut-file cleanup always uses the catalog default; a product override changes
-validation only (ADR 0009).
+findings. A product override changes validation only (ADR 0012).
 
-**Rights status** — Asset-level licensing state (§26). Hand-authored.
+**Cleanup size** — The reference size an asset's one cut file is cleaned at: the
+asset's own setting, else the catalog default (ADR 0012). A product sold larger than
+a member's cleanup size gets a build warning, since removed detail cannot surface as
+findings.
+
+**Brand config** — The catalog's `brand.toml`: name, mark, typography, card style,
+wording, and the license template shipped as every package's `LICENSE.txt` (§27).
+Required to build; optional to load a catalog.
+
+**Rights status** — Asset-level licensing state (§26). Hand-authored. Mixes origin
+(`original_artwork`, `licensed_source`, `public_domain_source`, `ai_generated`) with
+verification (`rights_verified`, `rights_review_required`, `do_not_publish`).
+
+**AI-generated** — The rights status of an asset whose artwork came from an AI image
+tool whose terms permit commercial use. Not blocking, but requires licensing notes
+naming the tool and terms. Permanent: hand edits (overrides) do not remove it.
 
 **Accuracy status** — Asset-level scientific-accuracy state (§25). Hand-authored.
 
@@ -96,6 +110,10 @@ validation only (ADR 0009).
 
 **Eligible** — An asset that, for a given set of derivative types, has every included
 effective derivative approved and is not blocked.
+
+**Excluded member** — A member of a product's collection left out of its build
+because it is not eligible, under a product set to `exclude`. A product set to
+`refuse` (the default) fails to build instead. Recorded with reasons in the manifest.
 
 **Collection** — A named membership of assets: explicit list, metadata rule, union of
 other collections, or a mix. Not sellable; has no formats or price.
