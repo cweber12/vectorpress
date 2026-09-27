@@ -43,6 +43,10 @@ generates into a **temporary copy** of this fixture (issue #23) — never here: 
 committed fixture never contains `derived/`. Later slices add `overrides/`
 (hand-edited effective derivatives) — see ADR 0005 and ADR 0007.
 
+`builds/<product-slug>/` is the tool-owned output of `vpress build`: a package
+directory, its ZIP, and `manifest.json`, all written under a temporary copy of this
+fixture, never here and never anywhere else in the catalog (ADR 0005).
+
 ## Assets
 
 Eleven tide-pool subjects from §30, each with valid metadata and one or more source
