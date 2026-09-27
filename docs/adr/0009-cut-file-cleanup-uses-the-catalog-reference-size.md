@@ -1,6 +1,6 @@
 # 0009 — Cut-file cleanup uses the catalog reference size; products change validation only
 
-Status: accepted; amended by 0010 (excessive complexity is measured at the catalog size)
+Status: superseded by 0012 (per-asset cleanup size); amended by 0010
 Date: 2026-09-24
 
 ## Context

@@ -662,8 +662,17 @@ Suggested states:
 - Rights verified
 - Rights review required
 - Do not publish
+- AI-generated
 
 An asset marked `Do not publish` must not be included in final sellable packages.
+
+`AI-generated` states origin: the artwork was made with an AI image tool whose terms
+permit commercial use. It does not block publication, but the asset's licensing notes
+must name the tool and its terms; an `AI-generated` asset with empty licensing notes is
+blocked. Hand edits to its derivatives do not change it: the source and any unedited
+derivatives remain AI output, and marketplaces ask about AI use anywhere in creation.
+The status is kept so listings can disclose AI use and license wording does not
+overstate copyright.
 
 The system must keep licensing notes available internally.
 
@@ -679,6 +688,7 @@ A brand configuration should be able to define product-level presentation requir
 - Product-card styling
 - Standard wording
 - License naming
+- License text (the terms shipped as `LICENSE.txt`)
 - Copyright wording
 - Standard README text
 

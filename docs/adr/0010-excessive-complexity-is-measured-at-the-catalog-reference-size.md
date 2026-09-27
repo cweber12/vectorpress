@@ -1,6 +1,6 @@
 # 0010 — Excessive complexity is measured at the catalog reference size
 
-Status: accepted (amends 0009)
+Status: accepted (amends 0009; "catalog reference size" reads "the cut file's cleanup size" under 0012)
 Date: 2026-09-24
 
 ## Context
