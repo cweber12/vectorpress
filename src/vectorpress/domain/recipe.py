@@ -96,6 +96,21 @@ RECIPES: dict[DerivativeType, Recipe] = {
             # seam, however many distinct shades it breaks into -- from
             # winning its own palette slot and so its own sliver <path>.
             "min_color_share": 0.01,
+            # Shades within this Euclidean RGB distance of a more frequent
+            # shade count as that shade when the palette is chosen (issue
+            # #83): per-pixel noise inside a flat region, unlike an edge
+            # blend, is spread across the whole region, so several of its
+            # shades clear min_color_share on their own. Measured on real
+            # noisy sources, 8 is the smallest distance that settles on the
+            # visible palette; 16 leaves margin while keeping two colors a
+            # viewer can tell apart from merging.
+            "shade_merge_tolerance": 16.0,
+            # A color whose pixels form more separate fragments than this
+            # fails generation instead of being traced (issue #83, §35):
+            # the source is not flat-color. Real flat-color regions number
+            # in the tens per color; the noisy sources that hung the tracer
+            # had 5,000-20,000.
+            "max_fragments_per_color": 1000,
         },
     ),
 }

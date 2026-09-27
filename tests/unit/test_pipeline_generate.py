@@ -11,6 +11,7 @@ to end).
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 import pytest
 from PIL import Image
 
@@ -299,6 +300,32 @@ def test_generate_asset_continues_past_a_failed_derivative_to_the_next(tmp_path:
     assert results[DerivativeType.TRANSPARENT_PNG].outcome is GenerationOutcome.GENERATED
     output_path = asset_dir / DERIVED_DIRNAME / "ochre-sea-star-color.png"
     assert output_path.is_file()
+
+
+def test_generate_asset_reports_a_flatcolor_source_that_is_not_flat_color_as_failed(
+    tmp_path: Path,
+) -> None:
+    """Issue #83, §35: a flatcolor-role source whose pixels are every one
+    their own color fails ``flatcolor_svg`` alone, with a reason that says
+    what is wrong with the source -- ``transparent_png`` still generates
+    from the very same file, and nothing is written for the failed type."""
+    asset_dir = tmp_path / "ochre_sea_star"
+    source_path = asset_dir / SOURCES_DIRNAME / "flatcolor.png"
+    source_path.parent.mkdir(parents=True, exist_ok=True)
+    pixels = np.random.default_rng(83).integers(0, 256, size=(300, 300, 4), dtype=np.uint8)
+    pixels[:, :, 3] = 255
+    Image.fromarray(pixels, mode="RGBA").save(source_path, format="PNG")
+    asset = _asset(sources=[Source(role="flatcolor", file="flatcolor.png")])
+
+    results = {r.derivative_type: r for r in generate_asset(asset, asset_dir)}
+
+    failed = results[DerivativeType.FLATCOLOR_SVG]
+    assert failed.outcome is GenerationOutcome.FAILED
+    assert failed.source_file == "flatcolor.png"
+    assert "source is not flat-color" in failed.detail
+    assert "fragments in color #" in failed.detail
+    assert results[DerivativeType.TRANSPARENT_PNG].outcome is GenerationOutcome.GENERATED
+    assert not any((asset_dir / DERIVED_DIRNAME).glob("*.svg*"))
 
 
 # --- idempotence (§36) -------------------------------------------------------------

@@ -83,7 +83,8 @@ def test_silhouette_svg_has_a_landed_generator_with_its_tracing_parameters() -> 
 
 def test_flatcolor_svg_has_a_landed_generator_with_its_parameters() -> None:
     """Issue #25: the flat-color SVG generator, with its quantization
-    parameters (``max_colors``, ``min_color_share`` -- review fix round 1)
+    parameters (``max_colors``, ``min_color_share`` -- review fix round 1;
+    ``shade_merge_tolerance``, ``max_fragments_per_color`` -- issue #83)
     alongside the same three tracing parameters ``silhouette_svg`` uses, all
     part of the recipe identity (ADR 0004)."""
     recipe = RECIPES[DerivativeType.FLATCOLOR_SVG]
@@ -95,6 +96,8 @@ def test_flatcolor_svg_has_a_landed_generator_with_its_parameters() -> None:
         "speckle_size": 2,
         "max_colors": 16,
         "min_color_share": 0.01,
+        "shade_merge_tolerance": 16.0,
+        "max_fragments_per_color": 1000,
     }
 
 

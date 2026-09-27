@@ -11,9 +11,10 @@ documentation guarantees for the arguments this module always passes it
 (e.g. ``label`` always returns ``(label_array, num_features)`` when called
 without its optional ``output`` array, which nothing here ever supplies).
 Isolating every touch of its API in this one small, non-strict module keeps
-:mod:`vectorpress.pipeline.cut_svg` itself fully strict-checked: the
-boundary this module exposes (three plain ``NDArray[np.bool_]`` in,
-``NDArray[np.bool_]`` out functions) is completely typed, so no ``Unknown``
+:mod:`vectorpress.pipeline.cut_svg` and
+:mod:`vectorpress.pipeline.flatcolor_svg` themselves fully strict-checked:
+the boundary this module exposes (plain ``NDArray[np.bool_]`` in, plain
+``NDArray[np.bool_]`` or ``int`` out) is completely typed, so no ``Unknown``
 leaks past it -- the same split :mod:`vectorpress.pipeline._potrace_trace`
 uses for ``potracer``.
 """
@@ -42,6 +43,13 @@ def _areas(mask: NDArray[np.bool_], labels: NDArray[np.int32], count: int) -> ND
     """The pixel area (``True`` count) of each of ``labels``'s ``1..count``
     components, as a plain float array indexed ``[label_id - 1]``."""
     return cast("NDArray[np.float64]", ndi.sum(mask, labels, index=np.arange(1, count + 1)))
+
+
+def count_islands(mask: NDArray[np.bool_]) -> int:
+    """How many connected ``True`` components ``mask`` has, of any size
+    (issue #83)."""
+    _labels, count = _label(mask)
+    return count
 
 
 def remove_small_islands(mask: NDArray[np.bool_], min_area_px: float) -> NDArray[np.bool_]:
