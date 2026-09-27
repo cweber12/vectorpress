@@ -155,12 +155,17 @@ def validate_cut_file(
     ``reference_size_in`` physical inches (§9.1); each detector contributes
     its own findings to the same result.
 
-    ``catalog_reference_size_in`` is the catalog's default reference size,
-    the size the cut file was traced at (ADR 0009).
-    :mod:`vectorpress.validate.excessive_complexity` alone is judged there
-    rather than at ``reference_size_in`` (ADR 0010): complexity is a property
-    of the traced geometry, not of how large it is cut. Every other detector
-    judges what can physically be cut at ``reference_size_in``.
+    ``catalog_reference_size_in`` is the size the cut file was actually
+    cleaned and traced at (ADR 0009): the catalog default, unless the asset
+    behind it set its own cleanup size (ADR 0012) -- the caller resolves
+    which one applies (:func:`vectorpress.domain.reference_size.
+    resolve_cleanup_size_in` for a catalog asset; the catalog default itself
+    for ``vpress validate --file``, which has no asset to carry an
+    override). :mod:`vectorpress.validate.excessive_complexity` alone is
+    judged there rather than at ``reference_size_in`` (ADR 0010, ADR 0012):
+    complexity is a property of the traced geometry, not of how large it is
+    cut. Every other detector judges what can physically be cut at
+    ``reference_size_in``.
 
     The bytes are parsed once (:func:`~vectorpress.validate._svg_document.
     parse_svg_document`), and three views are derived from that one parse:

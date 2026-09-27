@@ -217,8 +217,8 @@
 # ---
 # name: test_findings_json_is_locked_by_snapshot[ochre_sea_star-ochre-sea-star-cut.svg]
   dict({
-    'content_hash': '8b9ba0291c089ef4877a9bbf20df3fe6834a2ee1aa63e0eb8ab71f1158b81d81',
-    'excessive_complexity_reference_size_in': 3.0,
+    'content_hash': '16a93af69a468015b6f2b933272e91fb825373e59c3e104fbfe42dfd62097063',
+    'excessive_complexity_reference_size_in': 6.0,
     'findings': list([
     ]),
     'reference_size_in': 3.0,
@@ -535,8 +535,8 @@
 # ---
 # name: test_product_size_findings_json_is_locked_by_snapshot[ochre_sea_star-ochre-sea-star-cut.svg]
   dict({
-    'content_hash': '8b9ba0291c089ef4877a9bbf20df3fe6834a2ee1aa63e0eb8ab71f1158b81d81',
-    'excessive_complexity_reference_size_in': 3.0,
+    'content_hash': '16a93af69a468015b6f2b933272e91fb825373e59c3e104fbfe42dfd62097063',
+    'excessive_complexity_reference_size_in': 6.0,
     'findings': list([
     ]),
     'reference_size_in': 1.0,

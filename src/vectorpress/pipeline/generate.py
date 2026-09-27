@@ -37,37 +37,42 @@ from vectorpress.catalog.provenance import (
 )
 from vectorpress.catalog.status import asset_derivative_status, read_status, write_status
 from vectorpress.domain.asset import Asset, Source
-from vectorpress.domain.catalog_config import DEFAULT_REFERENCE_SIZE_IN, CatalogConfig
+from vectorpress.domain.catalog_config import CatalogConfig
 from vectorpress.domain.derivative_state import DerivativeState
 from vectorpress.domain.derivative_type import DerivativeType, derivative_filename
 from vectorpress.domain.recipe import RECIPES, Recipe
+from vectorpress.domain.reference_size import resolve_cleanup_size_in
 from vectorpress.domain.status import Status, status_after_generation
 from vectorpress.pipeline.registry import get_generator
 
 
-def _effective_parameters(recipe: Recipe, config: CatalogConfig | None) -> Mapping[str, object]:
-    """``recipe.parameters``, augmented with catalog-level values a
-    generator needs but that are not part of a recipe's own static
-    declaration: currently only ``cut_svg``'s reference size -- its cleanup
-    thresholds are physical (§9.1), and the reference size they are measured
-    against is the catalog default, never a product override (ADR 0009), and
-    not something ``domain.recipe`` has any business knowing about (ADR
-    0006).
+def _effective_parameters(
+    recipe: Recipe, asset: Asset, config: CatalogConfig | None
+) -> Mapping[str, object]:
+    """``recipe.parameters``, augmented with values a generator needs but
+    that are not part of a recipe's own static declaration: currently only
+    ``cut_svg``'s reference size -- its cleanup thresholds are physical
+    (§9.1), and the reference size they are measured against is ``asset``'s
+    own **cleanup size** (CONTEXT.md, ADR 0012): its
+    ``[derivatives.cut_svg] reference_size_in`` when set, else the catalog
+    default, never a product override (ADR 0009) -- not something
+    ``domain.recipe`` has any business knowing about (ADR 0006).
 
     ``config`` is ``None`` for a caller with no catalog in hand at all (a
     unit test exercising generation directly against a fabricated asset
     folder, the same shape ``tests/unit/test_pipeline_generate.py`` already
-    uses for every other recipe) -- falls back to
+    uses for every other recipe) -- falls back to a catalog whose default is
     :data:`~vectorpress.domain.catalog_config.DEFAULT_REFERENCE_SIZE_IN`,
-    matching what an unset ``catalog.toml`` would have resolved to anyway.
+    matching what an unset ``catalog.toml`` would have resolved to anyway,
+    so :func:`~vectorpress.domain.reference_size.resolve_cleanup_size_in`
+    still only has one "asset override, else catalog default" rule to apply.
 
     Every other recipe returns its own ``parameters`` completely unchanged.
     """
     if recipe.derivative_type is not DerivativeType.CUT_SVG:
         return recipe.parameters
-    reference_size_in = (
-        config.reference_size_in if config is not None else DEFAULT_REFERENCE_SIZE_IN
-    )
+    effective_config = config if config is not None else CatalogConfig(name="_")
+    reference_size_in = resolve_cleanup_size_in(effective_config, asset)
     return {**recipe.parameters, "reference_size_in": reference_size_in}
 
 
@@ -110,8 +115,8 @@ def asset_derivative_statuses(
     PRD's types are the ones this still applies to.
 
     ``config`` feeds :func:`_effective_parameters` -- currently only
-    ``cut_svg`` cares (its reference size), so every other type's currency
-    check is unaffected by it either way (issue #36).
+    ``cut_svg`` cares (its cleanup size, ADR 0012), so every other type's
+    currency check is unaffected by it either way (issue #36).
     """
     statuses: list[DerivativeStatus] = []
     for selection in select_derivatives(asset):
@@ -123,7 +128,7 @@ def asset_derivative_statuses(
         if state is DerivativeState.MISSING and recipe.generator is not None:
             assert selection.source is not None  # MISSING always carries a selected source
             candidate = derivative_filename(asset.display_name, recipe.derivative_type)
-            effective_parameters = _effective_parameters(recipe, config)
+            effective_parameters = _effective_parameters(recipe, asset, config)
             currency = derivative_currency(
                 asset_dir_path,
                 candidate,
@@ -263,11 +268,12 @@ def _generate_one(
     ``catalog.provenance.read_source_bytes`` is the only source read; the
     generator itself takes only bytes and its *effective* parameters
     (:func:`_effective_parameters` -- ``recipe.parameters`` plus, for
-    ``cut_svg``, the catalog's reference size) and never touches the
-    filesystem (ADR 0006). Those same effective parameters are what gets
+    ``cut_svg``, ``asset``'s own cleanup size, ADR 0012) and never touches
+    the filesystem (ADR 0006). Those same effective parameters are what gets
     recorded in provenance and hashed into ``recipe_hash``, so a later
-    ``reference_size_in`` change is detected as a recipe change the same way
-    any other parameter change is.
+    ``reference_size_in`` change -- catalog-wide, or this one asset's own --
+    is detected as a recipe change the same way any other parameter change
+    is.
 
     After provenance is written, the status record is updated to match
     (:func:`~vectorpress.domain.status.status_after_generation`, §22.1): a
@@ -303,7 +309,7 @@ def _generate_one(
 
     try:
         source_bytes = read_source_bytes(asset_dir_path, source.file)
-        effective_parameters = _effective_parameters(recipe, config)
+        effective_parameters = _effective_parameters(recipe, asset, config)
         output = generator(source_bytes, effective_parameters)
         filename = derivative_filename(asset.display_name, recipe.derivative_type)
         output_hash = sha256_bytes(output.output_bytes)

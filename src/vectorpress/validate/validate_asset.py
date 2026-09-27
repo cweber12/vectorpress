@@ -37,6 +37,7 @@ from vectorpress.domain.derivative_state import DerivativeState
 from vectorpress.domain.derivative_type import DerivativeType, derivative_filename
 from vectorpress.domain.finding import ValidationResult
 from vectorpress.domain.recipe import RECIPES
+from vectorpress.domain.reference_size import resolve_cleanup_size_in
 from vectorpress.validate.cut_file import THRESHOLDS, validate_cut_file
 
 
@@ -88,7 +89,11 @@ def validate_asset_cut_file(
     ``config`` internally, matching issue #37's "pass the reference size
     explicitly into validation functions" -- the caller decides which
     reference size applies, typically via :func:`vectorpress.domain.
-    reference_size.resolve_reference_size_in`.
+    reference_size.resolve_reference_size_in`. ``excessive_complexity`` alone
+    is always judged at ``asset``'s own **cleanup size** instead (ADR 0010 as
+    amended by ADR 0012, :func:`vectorpress.domain.reference_size.
+    resolve_cleanup_size_in`): the size its cut file was actually cleaned and
+    traced at, whatever reference size this call itself validates at.
 
     Checks the *effective* derivative (§6.8, CONTEXT.md "Effective
     derivative"): the override under ``overrides/`` when one exists for
@@ -134,9 +139,10 @@ def validate_asset_cut_file(
     if effective.is_override:
         ensure_override_provenance(asset, asset_dir_path, recipe, filename, svg_bytes)
 
+    cleanup_size_in = resolve_cleanup_size_in(config, asset)
     try:
         validation = validate_cut_file(
-            svg_bytes, reference_size_in, catalog_reference_size_in=config.reference_size_in
+            svg_bytes, reference_size_in, catalog_reference_size_in=cleanup_size_in
         )
     except Exception as exc:  # any parse failure is a reported §35 validation failure, not a crash
         return AssetValidationResult(
@@ -158,7 +164,7 @@ def validate_asset_cut_file(
             validated_file=filename,
             content_hash=sha256_bytes(svg_bytes),
             reference_size_in=reference_size_in,
-            excessive_complexity_reference_size_in=config.reference_size_in,
+            excessive_complexity_reference_size_in=cleanup_size_in,
             thresholds=dict(THRESHOLDS),
             result=validation.outcome,
             findings=validation.findings,

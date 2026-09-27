@@ -415,6 +415,40 @@ def test_asset_lists_derivatives_for_the_asset_with_a_flatcolor_source(
     assert "flatcolor_svg\tmissing\tflatcolor.png (flatcolor)" in result.stdout
 
 
+def test_asset_shows_its_own_cleanup_size_when_it_differs_from_the_catalog_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Visibility (ADR 0012): ``ochre_sea_star``'s committed
+    ``[derivatives.cut_svg] reference_size_in = 6.0`` shows on its cut_svg
+    line as a cleanup-size note, naming the size that differs from the
+    catalog's 3.0in default."""
+    monkeypatch.chdir(FIXTURE_CATALOG_ROOT)
+
+    result = runner.invoke(app, ["asset", "ochre_sea_star"])
+
+    assert result.exit_code == 0
+    cut_svg_line = next(
+        line for line in result.stdout.splitlines() if line.strip().startswith("cut_svg")
+    )
+    assert "cleanup size: 6in" in cut_svg_line
+
+
+def test_asset_shows_no_cleanup_size_note_when_it_matches_the_catalog_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The common case (ADR 0012): an asset with no cleanup-size override of
+    its own shows no note at all."""
+    monkeypatch.chdir(FIXTURE_CATALOG_ROOT)
+
+    result = runner.invoke(app, ["asset", "purple_sea_urchin"])
+
+    assert result.exit_code == 0
+    cut_svg_line = next(
+        line for line in result.stdout.splitlines() if line.strip().startswith("cut_svg")
+    )
+    assert "cleanup size" not in cut_svg_line
+
+
 def test_asset_default_eligibility_covers_every_type_the_asset_can_have(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

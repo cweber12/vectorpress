@@ -366,6 +366,49 @@ def test_findings_json_records_hash_reference_size_and_thresholds(
     assert isinstance(report.thresholds, dict)
 
 
+@pytest.mark.integration
+def test_excessive_complexity_reference_size_in_follows_the_assets_own_cleanup_size(
+    monkeypatch: pytest.MonkeyPatch, temp_catalog_root: Path
+) -> None:
+    """Acceptance criterion 3 (ADR 0010 as amended by ADR 0012):
+    ``ochre_sea_star``'s own cleanup size (6.0in, its committed fixture
+    setting) is what the findings JSON records for
+    ``excessive_complexity_reference_size_in``, at the catalog-default
+    validation size and unaffected by a product override either -- every
+    other asset here has no cleanup size of its own, so its findings still
+    record the catalog default (3.0in)."""
+    monkeypatch.chdir(temp_catalog_root)
+    runner.invoke(app, ["generate", "--all"])
+
+    default_result = runner.invoke(app, ["validate", "--all"])
+    assert default_result.exit_code == 0, default_result.output
+    product_result = runner.invoke(
+        app, ["validate", "ochre_sea_star", "--product", "kelp_forest_mini_pack"]
+    )
+    assert product_result.exit_code == 0, product_result.output
+
+    ochre_default = read_findings_report(
+        _derived_dir(temp_catalog_root, "ochre_sea_star"), "ochre-sea-star-cut.svg"
+    )
+    assert ochre_default is not None
+    assert ochre_default.reference_size_in == 3.0
+    assert ochre_default.excessive_complexity_reference_size_in == 6.0
+
+    ochre_product = read_findings_report(
+        _derived_dir(temp_catalog_root, "ochre_sea_star"), "ochre-sea-star-cut.svg", at_size=1.0
+    )
+    assert ochre_product is not None
+    assert ochre_product.reference_size_in == 1.0
+    assert ochre_product.excessive_complexity_reference_size_in == 6.0
+
+    for asset_id, filename in FIXTURE_CUT_FILES:
+        if asset_id == "ochre_sea_star":
+            continue
+        other = read_findings_report(_derived_dir(temp_catalog_root, asset_id), filename)
+        assert other is not None
+        assert other.excessive_complexity_reference_size_in == 3.0
+
+
 def _assert_at_most_four_decimal_places(value: object, where: str) -> None:
     if isinstance(value, bool) or not isinstance(value, int | float):
         return
@@ -750,20 +793,26 @@ def _complexity_values(
 def test_excessive_complexity_is_judged_at_the_catalog_size_under_a_product_override(
     monkeypatch: pytest.MonkeyPatch, temp_catalog_root: Path
 ) -> None:
-    """Issue #52, ADR 0010: the cut file is traced at the catalog's 3in
-    default, so ``excessive_complexity`` is judged there even under
+    """ADR 0010: the cut file is traced at its own cleanup size, so
+    ``excessive_complexity`` is judged there even under
     ``kelp_forest_mini_pack``'s 1in override. ``coralline_algae`` reads the
     same ~13.4 nodes/in at both sizes; the real-art subjects, whose density
     used to rise ~3x at 1in, are never flagged for complexity. Their other
-    1in findings (the urchin's narrow spines) are still judged at 1in."""
+    1in findings (the urchin's narrow spines) are still judged at 1in.
+
+    The per-run header names no specific size (ADR 0012): naming the
+    catalog default here would be wrong for ``ochre_sea_star``, whose own
+    cleanup size is 6in -- see
+    ``test_excessive_complexity_message_names_no_size_when_an_asset_has_its_own_cleanup_size``
+    below for that case directly."""
     monkeypatch.chdir(temp_catalog_root)
     runner.invoke(app, ["generate", "--all"])
+    header = "excessive_complexity is measured at each cut file's own cleanup size"
     at_default = runner.invoke(app, ["validate", "--all"])
     assert at_default.exit_code == 0, at_default.output
-    assert "catalog size" not in at_default.stdout
+    assert header not in at_default.stdout
     at_product = runner.invoke(app, ["validate", "--all", "--product", "kelp_forest_mini_pack"])
     assert at_product.exit_code == 0, at_product.output
-    header = "excessive_complexity is measured at the 3in catalog size"
     lines = at_product.stdout.splitlines()
     assert lines[0] == header
     assert at_product.stdout.count(header) == 1
@@ -795,6 +844,26 @@ def test_excessive_complexity_is_judged_at_the_catalog_size_under_a_product_over
     assert urchin.reference_size_in == 1.0
     assert urchin.excessive_complexity_reference_size_in == 3.0
     assert FindingKind.NARROW_FEATURE in {f.kind for f in urchin.findings}
+
+
+@pytest.mark.integration
+def test_excessive_complexity_message_names_no_size_when_an_asset_has_its_own_cleanup_size(
+    monkeypatch: pytest.MonkeyPatch, temp_catalog_root: Path
+) -> None:
+    """ADR 0010 as amended by ADR 0012: ``ochre_sea_star``'s own cleanup
+    size is 6in, not the 3in catalog default -- naming "3in" in the
+    per-run header would be wrong for it, so the header names the rule
+    instead of a number."""
+    monkeypatch.chdir(temp_catalog_root)
+    runner.invoke(app, ["generate", "--all"])
+
+    result = runner.invoke(
+        app, ["validate", "ochre_sea_star", "--product", "kelp_forest_mini_pack"]
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "3in catalog size" not in result.stdout
+    assert "excessive_complexity is measured at each cut file's own cleanup size" in result.stdout
 
 
 @pytest.mark.integration

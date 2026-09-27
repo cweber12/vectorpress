@@ -3,7 +3,7 @@
 import pytest
 from pydantic import ValidationError
 
-from vectorpress.domain.asset import AccuracyStatus, Asset, RightsStatus, Source
+from vectorpress.domain.asset import AccuracyStatus, Asset, DerivativePin, RightsStatus, Source
 
 VALID_DATA = {
     "id": "ochre_sea_star",
@@ -88,6 +88,43 @@ def test_accuracy_status_outside_the_allowed_list_is_rejected() -> None:
 
     with pytest.raises(ValidationError):
         Asset.model_validate(data)
+
+
+def test_derivative_pin_empty_table_is_valid_and_means_no_settings() -> None:
+    """ADR 0012: ``[derivatives.<type>]`` with neither ``source`` nor
+    ``reference_size_in`` set is valid, not a metadata problem."""
+    pin = DerivativePin()
+
+    assert pin.source is None
+    assert pin.reference_size_in is None
+
+
+def test_derivative_pin_source_is_optional() -> None:
+    """ADR 0012: an asset may set a cleanup size with no source pin at all
+    -- ``source`` alone is never required."""
+    pin = DerivativePin(reference_size_in=6.0)
+
+    assert pin.source is None
+    assert pin.reference_size_in == 6.0
+
+
+def test_derivative_pin_reference_size_in_must_be_positive() -> None:
+    with pytest.raises(ValidationError):
+        DerivativePin(reference_size_in=0.0)
+    with pytest.raises(ValidationError):
+        DerivativePin(reference_size_in=-3.0)
+
+
+def test_asset_with_a_cut_svg_cleanup_size_and_no_source_pin_loads_cleanly() -> None:
+    """Acceptance criterion 1: ``[derivatives.cut_svg] reference_size_in =
+    6`` with no ``source`` parses as part of the asset -- whether it is
+    accepted for ``cut_svg`` specifically, and whether the type even has a
+    recipe, is ``catalog.assets``' job (ADR 0006), not this model's."""
+    data = {**VALID_DATA, "derivatives": {"cut_svg": {"reference_size_in": 6.0}}}
+
+    asset = Asset.model_validate(data)
+
+    assert asset.derivatives["cut_svg"] == DerivativePin(reference_size_in=6.0)
 
 
 def test_rights_status_has_exactly_the_section_26_states() -> None:

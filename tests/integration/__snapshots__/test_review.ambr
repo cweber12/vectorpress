@@ -3,7 +3,7 @@
   dict({
     'cut_svg': dict({
       'note': 'clean',
-      'output_hash': '8b9ba0291c089ef4877a9bbf20df3fe6834a2ee1aa63e0eb8ab71f1158b81d81',
+      'output_hash': '16a93af69a468015b6f2b933272e91fb825373e59c3e104fbfe42dfd62097063',
       'status': 'approved',
     }),
     'flatcolor_svg': dict({

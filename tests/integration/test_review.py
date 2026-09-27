@@ -344,7 +344,10 @@ def test_regenerate_then_generate_regenerates_only_the_marked_derivative(
         line for line in asset_result.stdout.splitlines() if line.strip().startswith("cut_svg")
     )
     assert "needs review" in cut_svg_line
-    assert "clean" not in cut_svg_line  # the old approval's note no longer applies
+    # The old approval's own note no longer applies; matched parenthesized
+    # (not a bare "clean" substring, which also matches this asset's own
+    # "cleanup size" note, ADR 0012).
+    assert "(clean)" not in cut_svg_line
 
 
 @pytest.mark.integration
