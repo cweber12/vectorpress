@@ -316,7 +316,7 @@ def test_generation_is_byte_deterministic() -> None:
     assert first.output_bytes == second.output_bytes
 
 
-def test_reports_the_potracer_and_numpy_versions_it_used() -> None:
+def test_reports_the_potracer_numpy_and_scipy_versions_it_used() -> None:
     import importlib.metadata
 
     import numpy as np
@@ -326,6 +326,7 @@ def test_reports_the_potracer_and_numpy_versions_it_used() -> None:
     assert result.library_versions == {
         "potracer": importlib.metadata.version("potracer"),
         "numpy": np.__version__,
+        "scipy": importlib.metadata.version("scipy"),
     }
 
 
