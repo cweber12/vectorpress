@@ -15,8 +15,7 @@ land inside the bigger one, even though part of its own boundary sticks
 out) -- so this runs directly over every raw :class:`~vectorpress.validate.
 _subpaths.Subpath`'s own ring, testing every pair (and every subpath
 against itself) for a genuine crossing via :func:`~vectorpress.validate.
-_segment_intersection.find_ring_intersections`/:func:`~vectorpress.
-validate._segment_intersection.find_self_intersections`, never consulting
+_segment_intersection.find_intersections`, never consulting
 :class:`~vectorpress.validate._pieces.Piece`/:class:`~vectorpress.validate.
 _pieces.Hole` at all.
 
@@ -24,7 +23,7 @@ Two subpaths that coincide exactly (:mod:`vectorpress.validate.
 duplicate_geometry`'s own concern) never trip this: their edges run
 collinear on top of each other rather than crossing transversally, and
 :func:`~vectorpress.validate._segment_intersection.
-find_ring_intersections` deliberately does not count that as a crossing.
+find_intersections` deliberately does not count that as a crossing.
 """
 
 from vectorpress.domain.finding import (
@@ -35,10 +34,7 @@ from vectorpress.domain.finding import (
     PathReference,
 )
 from vectorpress.domain.numeric_format import round_number
-from vectorpress.validate._segment_intersection import (
-    find_ring_intersections,
-    find_self_intersections,
-)
+from vectorpress.validate._segment_intersection import find_intersections
 from vectorpress.validate._subpaths import Subpath
 from vectorpress.validate._svg_document import Point
 
@@ -82,10 +78,11 @@ def detect(subpaths: list[Subpath]) -> list[Finding]:
     matching every other detector in this package.
     """
     subpaths = [subpath for subpath in subpaths if len(subpath.points) >= 3]
+    crossings = find_intersections([subpath.points for subpath in subpaths])
 
     self_findings: list[Finding] = []
-    for subpath in subpaths:
-        hits = find_self_intersections(subpath.points)
+    for position, subpath in enumerate(subpaths):
+        hits = crossings.get((position, position))
         if not hits:
             continue
         self_findings.append(
@@ -112,33 +109,33 @@ def detect(subpaths: list[Subpath]) -> list[Finding]:
     )
 
     pair_findings: list[Finding] = []
-    for i in range(len(subpaths)):
-        for j in range(i + 1, len(subpaths)):
-            first, second = subpaths[i], subpaths[j]
-            hits = find_ring_intersections(first.points, second.points)
-            if not hits:
-                continue
-            pair_findings.append(
-                Finding(
-                    kind=_KIND,
-                    classification=_CLASSIFICATION,
-                    message=(
-                        f"unintended overlap: path element {first.element_index}, "
-                        f"subpath {first.subpath_index} overlaps path element "
-                        f"{second.element_index}, subpath {second.subpath_index}"
-                    ),
-                    location=_hits_bbox(hits),
-                    path_reference=PathReference(
-                        element_index=first.element_index,
-                        subpath_index=first.subpath_index,
-                        id=first.element_id,
-                    ),
-                    related_path_reference=PathReference(
-                        element_index=second.element_index,
-                        subpath_index=second.subpath_index,
-                        id=second.element_id,
-                    ),
-                )
+    # ``crossings`` is keyed in ascending (i, j) order, so iterating it
+    # yields pairs in the same order an i < j nested loop would.
+    for (i, j), hits in crossings.items():
+        if i == j:
+            continue
+        first, second = subpaths[i], subpaths[j]
+        pair_findings.append(
+            Finding(
+                kind=_KIND,
+                classification=_CLASSIFICATION,
+                message=(
+                    f"unintended overlap: path element {first.element_index}, "
+                    f"subpath {first.subpath_index} overlaps path element "
+                    f"{second.element_index}, subpath {second.subpath_index}"
+                ),
+                location=_hits_bbox(hits),
+                path_reference=PathReference(
+                    element_index=first.element_index,
+                    subpath_index=first.subpath_index,
+                    id=first.element_id,
+                ),
+                related_path_reference=PathReference(
+                    element_index=second.element_index,
+                    subpath_index=second.subpath_index,
+                    id=second.element_id,
+                ),
             )
+        )
 
     return [*self_findings, *pair_findings]

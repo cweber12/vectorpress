@@ -6,6 +6,10 @@ pipeline.cut_svg` -- ``validate_cut_file`` is a pure function of bytes plus
 a reference size (ADR 0006), so a hand-edited override is checked by
 exactly the same code a generated cut file is (§9's own scope bullet 5)."""
 
+import math
+
+import pytest
+
 from vectorpress.domain.finding import FindingKind, ValidationOutcome
 from vectorpress.validate.cut_file import validate_cut_file
 
@@ -141,3 +145,44 @@ def test_two_crossing_bare_line_segments_are_not_an_overlap() -> None:
 
     kinds = {finding.kind for finding in result.findings}
     assert FindingKind.OVERLAP not in kinds
+
+
+# --- long line-art outlines (issue #86) --------------------------------------------------------
+
+
+def _outline_path(element_id: str, cx: float, cy: float, radius: float, n: int) -> bytes:
+    """A closed ``<path>`` of ``n`` straight segments approximating a
+    circle -- the long-ring shape a traced line-art outline flattens to."""
+    points = [
+        (cx + radius * math.cos(k * 2 * math.pi / n), cy + radius * math.sin(k * 2 * math.pi / n))
+        for k in range(n)
+    ]
+    d = "M" + " L".join(f"{x:.4f},{y:.4f}" for x, y in points) + " Z"
+    return f'<path id="{element_id}" d="{d}"/>'.encode()
+
+
+def test_long_crossing_outlines_yield_one_overlap_finding() -> None:
+    """Two 1,500-segment outlines that cross at exactly two points, both on
+    the vertical line x = 50: one pair finding, located at those crossings.
+    Before issue #86 this all-pairs scan took seconds; it must still find
+    the crossing now that it only tests segments whose bboxes overlap."""
+    svg = (
+        _HEAD
+        + _outline_path("a", 30.0, 50.0, 25.0, 1500)
+        + _outline_path("b", 70.0, 50.0, 25.0, 1500)
+        + _TAIL
+    )
+
+    result = validate_cut_file(svg, REFERENCE_SIZE_IN, catalog_reference_size_in=REFERENCE_SIZE_IN)
+
+    findings = [f for f in result.findings if f.kind is FindingKind.OVERLAP]
+    assert len(findings) == 1
+    finding = findings[0]
+    assert finding.path_reference.id == "a"
+    assert finding.related_path_reference is not None
+    assert finding.related_path_reference.id == "b"
+    assert finding.location is not None
+    assert finding.location.min_x == pytest.approx(50.0, abs=0.01)
+    assert finding.location.max_x == pytest.approx(50.0, abs=0.01)
+    assert finding.location.min_y == pytest.approx(50.0 - 15.0, abs=0.05)
+    assert finding.location.max_y == pytest.approx(50.0 + 15.0, abs=0.05)
