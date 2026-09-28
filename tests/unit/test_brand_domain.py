@@ -16,6 +16,7 @@ VALID_DATA = {
     },
     "standard_wording": "Hand-illustrated, scientifically accurate cut files.",
     "license_name": "Tide Pool Studio Personal & Small Business Use License",
+    "license_file": "license_template.txt",
     "copyright_wording": "© Tide Pool Studio. All rights reserved.",
     "readme_text": "Thank you for your purchase!",
 }
@@ -31,6 +32,7 @@ def test_valid_brand_parses() -> None:
         background_color="#F4F1EC", accent_color="#C45D26", text_color="#1F2A24"
     )
     assert brand.license_name == "Tide Pool Studio Personal & Small Business Use License"
+    assert brand.license_file == "license_template.txt"
 
 
 def test_unknown_key_is_rejected() -> None:

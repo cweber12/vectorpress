@@ -1,0 +1,9 @@
+{brand} Personal & Small Business Use License
+
+This license covers {product}.
+
+You may use these cut files for personal projects and for small-batch
+products you make and sell yourself. You may not resell, redistribute or
+share the files themselves, in original or modified form.
+
+{copyright} {year}

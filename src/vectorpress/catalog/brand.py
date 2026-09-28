@@ -24,9 +24,9 @@ class BrandResult:
     """The catalog's brand, plus every problem found loading it.
 
     ``brand`` is ``None`` when ``brand.toml`` is missing, malformed, fails
-    schema validation, or names a mark file that does not exist under the
-    catalog root; in every such case ``problems`` names the file and, where
-    the problem traces to one, the field.
+    schema validation, or names a mark file or license file that does not
+    exist under the catalog root; in every such case ``problems`` names the
+    file and, where the problem traces to one, the field.
     """
 
     brand: Brand | None
@@ -74,6 +74,18 @@ def load_brand(root: Path) -> BrandResult:
                     rel_path,
                     "mark_file",
                     f"mark file not found: {brand.mark_file}",
+                )
+            ],
+        )
+
+    if not (root / brand.license_file).is_file():
+        return BrandResult(
+            brand=None,
+            problems=[
+                MetadataProblem(
+                    rel_path,
+                    "license_file",
+                    f"license file not found: {brand.license_file}",
                 )
             ],
         )
