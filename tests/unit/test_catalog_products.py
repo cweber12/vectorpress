@@ -271,6 +271,29 @@ def test_unknown_listing_key_is_a_problem_naming_file_and_field(catalog_copy: Pa
     assert problem.field == "listing.not_a_field"
 
 
+def test_listing_suggested_price_is_a_problem_naming_the_field(catalog_copy: Path) -> None:
+    """§18: ``product.price`` is the one price; a ``[listing]`` still
+    carrying ``suggested_price`` is a product metadata problem naming the
+    field and pointing at the product's price."""
+    path = _product_toml(catalog_copy, "pacific_coast_tide_pool_standard_pack")
+    text = path.read_text(encoding="utf-8").replace(
+        'title = "Pacific Coast Tide Pool Cut File Collection"\n',
+        'title = "Pacific Coast Tide Pool Cut File Collection"\nsuggested_price = 12.00\n',
+    )
+    path.write_text(text, encoding="utf-8")
+    config = load_catalog_config(catalog_copy)
+
+    inventory = load_products(catalog_copy, config)
+
+    slugs = {p.slug for p in inventory.products}
+    assert "pacific_coast_tide_pool_standard_pack" not in slugs
+    assert len(inventory.problems) == 1
+    problem = inventory.problems[0]
+    assert "pacific_coast_tide_pool_standard_pack" in str(problem.path)
+    assert problem.field == "listing.suggested_price"
+    assert "price" in problem.message
+
+
 def test_mismatched_slug_is_a_problem_naming_file_and_field(catalog_copy: Path) -> None:
     path = _product_toml(catalog_copy, "kelp_forest_mini_pack")
     path.write_text(

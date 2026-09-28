@@ -6,12 +6,16 @@ lists (included asset count, included formats, asset names, collection
 name, product version, creation/update date) are not stored — they are
 computed at build time from other loaded state, in later PRDs (issue #7).
 
-Hand-authored, and per ADR 0005 the one exception to "the tool never
-rewrites a hand-authored file": the tool drafts a product's ``[listing]``
-once, on its first build (PRD 7), then never touches it again. It is
-optional at load time for exactly that reason — a product can exist before
-its listing has been drafted — but is validated like any other
-hand-authored table whenever it is present.
+Hand-authored, and per ADR 0016 the one exception to "the tool never
+rewrites a hand-authored file": ``vpress listing draft`` appends a
+product's ``[listing]`` once, create-only, then it is user-owned and the
+tool never touches it again. It is optional at load time for exactly that
+reason — a product can exist before its listing has been drafted — but is
+validated like any other hand-authored table whenever it is present.
+
+No price here: ``product.price`` is the one price (§18); a ``[listing]``
+that still carries ``suggested_price`` is a product metadata problem
+(``domain.product``).
 """
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -36,6 +40,5 @@ class Listing(BaseModel):
     region: str | None = None
     species_names: list[str] = Field(default_factory=list)
     category: str
-    suggested_price: float = Field(ge=0)
     license_type: str
     marketplace_notes: str = ""

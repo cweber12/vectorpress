@@ -322,8 +322,8 @@ def test_a_product_that_failed_to_load_exits_1_with_a_distinct_message(
 ) -> None:
     path = temp_catalog_root / "products" / "pacific_coast_tide_pool_standard_pack.toml"
     text = path.read_text(encoding="utf-8")
-    # Anchored on the leading newline so this only matches the top-level
-    # ``price`` field, not ``[listing]``'s own ``suggested_price``.
+    # Anchored on the leading newline so this matches only the top-level
+    # assignment, not some other occurrence of "price = 12.00" elsewhere.
     assert "\nprice = 12.00\n" in text
     path.write_text(text.replace("\nprice = 12.00\n", "\n"), encoding="utf-8")
     monkeypatch.chdir(temp_catalog_root)

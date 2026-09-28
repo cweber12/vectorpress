@@ -15,7 +15,7 @@ catalog awareness, per ADR 0006).
 """
 
 from enum import StrEnum
-from typing import Annotated
+from typing import Annotated, Any, cast
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validator, model_validator
 
@@ -61,11 +61,17 @@ class IneligibleMembersMode(StrEnum):
 class Product(BaseModel):
     """One product's hand-authored metadata (``<slug>.toml``).
 
-    Read-only to the tool (ADR 0005) except for ``listing``, which the tool
-    drafts once on first build (PRD 7) and never touches again. ``slug`` is
-    always the file's stem; the ``catalog`` layer is responsible for
-    checking that a ``slug`` key present in the file agrees with the stem
-    before constructing this model.
+    Read-only to the tool (ADR 0005) except for ``listing``, which
+    ``vpress listing draft`` appends once, create-only, and the tool never
+    touches again (ADR 0016). ``slug`` is always the file's stem; the
+    ``catalog`` layer is responsible for checking that a ``slug`` key
+    present in the file agrees with the stem before constructing this
+    model.
+
+    ``price`` is the one price (§18): a ``[listing]`` still carrying the
+    removed ``suggested_price`` is caught below, before field validation,
+    so it is reported by name rather than as an unrecognized key like any
+    other.
     """
 
     model_config = ConfigDict(strict=True, extra="forbid", frozen=True)
@@ -87,6 +93,25 @@ class Product(BaseModel):
         default=IneligibleMembersMode.REFUSE, strict=False
     )
     listing: Listing | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _listing_carries_no_suggested_price(cls, data: Any) -> Any:
+        """§18: ``price`` above is the one price. A ``[listing]`` still
+        carrying the removed ``suggested_price`` is caught here, before
+        ``Listing`` itself would otherwise reject it as just another
+        unrecognized key (``extra="forbid"``), so the problem names the
+        field and says what replaces it."""
+        raw = data
+        if isinstance(raw, dict):
+            payload = cast(dict[str, Any], raw)
+            listing = payload.get("listing")
+            if isinstance(listing, dict) and "suggested_price" in cast(dict[str, Any], listing):
+                raise MetadataFieldError(
+                    "listing.suggested_price",
+                    "suggested_price is removed; the product's price is the one price",
+                )
+        return data
 
     @model_validator(mode="after")
     def _references_exactly_one_collection(self) -> "Product":
