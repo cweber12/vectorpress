@@ -18624,6 +18624,10 @@
         'rights_status': 'rights_verified',
       }),
     ]),
+    'byte_identical_derivatives': list([
+    ]),
+    'cleanup_size_warnings': list([
+    ]),
     'dxf_members': list([
     ]),
     'excluded_members': list([
