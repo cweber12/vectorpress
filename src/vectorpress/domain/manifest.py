@@ -10,9 +10,9 @@ function of its manifest inputs"). This module only defines that shape;
 ``build`` resolves it from disk, serializes it to JSON, and writes it
 (ADR 0006 -- domain has no I/O).
 
-Deliberately minimal: excluded members and their reasons, admitted-
-unapproved derivatives, rights status and warnings extend this shape as
-further optional fields, never by reshaping ``members`` itself.
+Deliberately minimal: admitted-unapproved derivatives, rights status and
+warnings extend this shape as further optional fields, never by reshaping
+``members`` itself.
 """
 
 from dataclasses import dataclass
@@ -20,6 +20,7 @@ from enum import StrEnum
 
 from vectorpress.domain.asset import AssetId
 from vectorpress.domain.derivative_type import DerivativeType
+from vectorpress.domain.eligibility import BlockingReason
 from vectorpress.domain.product import ProductSlug
 
 
@@ -69,16 +70,29 @@ class ManifestDxfMember:
 
 
 @dataclass(frozen=True)
+class ManifestExcludedMember:
+    """One member an ``exclude`` build left out (§10, CONTEXT.md "Excluded
+    member"): the asset ID and every §10.1 blocking reason product
+    resolution found for it, so a build's manifest alone answers "why isn't
+    this asset in this pack" without re-resolving the product."""
+
+    asset_id: AssetId
+    blocking_reasons: list[BlockingReason]
+
+
+@dataclass(frozen=True)
 class Manifest:
     """One build's complete record (§14, ADR 0004): the product it built,
     the reference size it was built at, the LICENSE.txt build year,
-    the tool version that built it, every included member, and every
+    the tool version that built it, every included member, every excluded
+    one (empty unless the product is set to ``exclude``, §10), and every
     converted ``DXF/`` file. ``members`` and ``dxf_members`` are each sorted
-    by (asset ID, derivative type) so two builds of unchanged inputs produce
-    an identical manifest (§36). ``license_year`` is the one field expected
-    to change on its own with no other input changing -- once a calendar
-    year turns over -- which is why it is recorded rather than left implicit
-    (§27's "must not break the rebuild-is-identical rule within a year")."""
+    by (asset ID, derivative type), and ``excluded_members`` by asset ID, so
+    two builds of unchanged inputs produce an identical manifest (§36).
+    ``license_year`` is the one field expected to change on its own with no
+    other input changing -- once a calendar year turns over -- which is why
+    it is recorded rather than left implicit (§27's "must not break the
+    rebuild-is-identical rule within a year")."""
 
     product_slug: ProductSlug
     reference_size_in: float
@@ -86,3 +100,4 @@ class Manifest:
     tool_version: str
     members: list[ManifestMember]
     dxf_members: list[ManifestDxfMember]
+    excluded_members: list[ManifestExcludedMember]

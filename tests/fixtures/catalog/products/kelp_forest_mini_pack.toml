@@ -7,12 +7,18 @@
 # (§9.1, ADR 0008, issue #38): a mini pack sells at a smaller physical size
 # than the catalog default, and `vpress validate --product
 # kelp_forest_mini_pack` validates at this size instead.
+#
+# ineligible_members = "exclude" (§10): the fixture's one committed
+# "exclude" product, rather than "refuse" (every other fixture product's
+# default) -- it still refuses when its own single rule-matched member is
+# not eligible.
 
 derivative_types = ["cut_svg"]
 formats = ["svg"]
 tier = "mini_pack"
 price = 6.00
 reference_size_in = 1.0
+ineligible_members = "exclude"
 
 [membership.rule]
 field = "ecosystems"

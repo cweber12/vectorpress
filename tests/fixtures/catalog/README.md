@@ -239,7 +239,9 @@ Three valid products (§7, §18, ADR 0008):
   3.0 in default (§9.1, ADR 0008, issue #38): `vpress validate <asset_id>
   --product kelp_forest_mini_pack` validates at this size instead, and its
   findings report is kept side by side with the catalog-default one rather
-  than overwriting it.
+  than overwriting it. Also the fixture's one committed `ineligible_members
+  = "exclude"` product (§10): every other fixture product stays at the
+  default `refuse`.
 
 Whether a referenced collection slug, or an inline membership's asset IDs
 and collection slugs, actually exist is checked live by `vpress product`

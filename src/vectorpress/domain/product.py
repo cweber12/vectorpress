@@ -7,10 +7,11 @@ disk is the ``catalog`` layer's job.
 A product is exactly one collection (referenced by slug) or an inline one
 (the same ``Membership`` shape a collection file uses), plus presentation:
 included derivative types, included deliverable formats, an optional
-reference size override, tier and family labels, price, and an optional
-listing (issue #7, ADR 0008). Whether a referenced collection slug, or an
-inline membership's asset IDs and collection slugs, actually exist is left
-to PRD 5 (this module has no catalog awareness, per ADR 0006).
+reference size override, tier and family labels, price, how an ineligible
+member is handled (§10), and an optional listing (issue #7, ADR 0008).
+Whether a referenced collection slug, or an inline membership's asset IDs
+and collection slugs, actually exist is left to PRD 5 (this module has no
+catalog awareness, per ADR 0006).
 """
 
 from enum import StrEnum
@@ -44,6 +45,19 @@ class ProductTier(StrEnum):
     MEGA_BUNDLE = "mega_bundle"
 
 
+class IneligibleMembersMode(StrEnum):
+    """How a build handles a resolved member that is not eligible for this
+    product's own derivative types (§10, §10.1, CONTEXT.md "Excluded
+    member"): ``refuse`` fails the whole build naming every ineligible
+    member and its reasons (the default); ``exclude`` ships the eligible
+    members instead, recording each excluded one in the manifest with its
+    reasons, and still refuses when none are eligible.
+    """
+
+    REFUSE = "refuse"
+    EXCLUDE = "exclude"
+
+
 class Product(BaseModel):
     """One product's hand-authored metadata (``<slug>.toml``).
 
@@ -69,6 +83,9 @@ class Product(BaseModel):
     tier: ProductTier = Field(strict=False)
     family: str | None = None
     price: float = Field(ge=0)
+    ineligible_members: IneligibleMembersMode = Field(
+        default=IneligibleMembersMode.REFUSE, strict=False
+    )
     listing: Listing | None = None
 
     @model_validator(mode="after")

@@ -3,11 +3,10 @@
 
 ``SVG/`` and ``PNG/`` are copied straight from their effective derivatives;
 ``DXF/`` is converted from the effective ``cut_svg``, else ``silhouette_svg``
-(ADR 0013's fixed table, :mod:`vectorpress.build._dxf_conversion`). The
-``exclude`` ineligibility mode is not built yet. Every package also carries
-a brand-supplied ``README.txt`` and ``LICENSE.txt`` at its top level (§27).
-One function, :func:`build_product`, does the whole thing -- ``cli`` (and
-later ``ui``) only render its :class:`BuildResult`.
+(ADR 0013's fixed table, :mod:`vectorpress.build._dxf_conversion`). Every
+package also carries a brand-supplied ``README.txt`` and ``LICENSE.txt`` at
+its top level (§27). One function, :func:`build_product`, does the whole
+thing -- ``cli`` (and later ``ui``) only render its :class:`BuildResult`.
 
 **Brand gate.** A build refuses -- writes nothing -- without a valid
 ``brand.toml`` naming an existing ``license_file`` (there is no default
@@ -16,10 +15,14 @@ refuses again if that license template names a placeholder besides
 ``{brand}``, ``{product}``, ``{copyright}`` or ``{year}``. Checked before
 membership resolves, since neither depends on it.
 
-**Eligibility gate (default refuse).** A build refuses -- writes nothing --
-if the product's membership does not fully resolve, or if any member is not
-eligible for the product's own derivative types (§10, §10.1). Nothing about
-excluding ineligible members instead (§10's ``exclude`` mode) is built yet.
+**Eligibility gate (§10).** A build refuses -- writes nothing -- if the
+product's membership does not fully resolve. Whether an ineligible member
+also refuses the build depends on ``product.ineligible_members``: the
+default ``refuse`` fails the whole build naming every ineligible member and
+its §10.1 reasons; ``exclude`` instead builds only the eligible members,
+records each excluded one in the manifest with its reasons, and still
+refuses -- the same way, naming every member -- when none are eligible.
+``--allow-unapproved`` is not built yet.
 
 **Customer file name collisions.** Two members whose customer file names
 collide within one format folder also refuse the build, before anything is
@@ -67,6 +70,7 @@ from vectorpress.domain.format_folder import copied_folder, dxf_filename, dxf_so
 from vectorpress.domain.manifest import (
     Manifest,
     ManifestDxfMember,
+    ManifestExcludedMember,
     ManifestMember,
     ManifestMemberSource,
 )
@@ -76,7 +80,7 @@ from vectorpress.domain.package_text import (
     render_license_text,
     render_readme_text,
 )
-from vectorpress.domain.product import Product
+from vectorpress.domain.product import IneligibleMembersMode, Product
 from vectorpress.domain.reference_size import resolve_reference_size_in
 from vectorpress.pipeline.eligibility import included_derivatives
 
@@ -282,8 +286,9 @@ def _product_title(product: Product) -> str:
 
 def _manifest_json_bytes(manifest: Manifest) -> bytes:
     """``manifest`` as deterministic JSON bytes (§36): sorted keys, a fixed
-    2-space indent, and ``members`` already sorted by :func:`build_product`
-    -- so unchanged inputs serialize identically every time."""
+    2-space indent, and ``members``/``excluded_members`` already sorted by
+    :func:`build_product` -- so unchanged inputs serialize identically every
+    time."""
     payload = {
         "product_slug": manifest.product_slug,
         "reference_size_in": manifest.reference_size_in,
@@ -308,6 +313,24 @@ def _manifest_json_bytes(manifest: Manifest) -> bytes:
                 "package_path": member.package_path,
             }
             for member in manifest.dxf_members
+        ],
+        "excluded_members": [
+            {
+                "asset_id": member.asset_id,
+                "blocking_reasons": [
+                    {
+                        "kind": reason.kind.value,
+                        "derivative_type": (
+                            reason.derivative_type.value
+                            if reason.derivative_type is not None
+                            else None
+                        ),
+                        "value": reason.value,
+                    }
+                    for reason in member.blocking_reasons
+                ],
+            }
+            for member in manifest.excluded_members
         ],
     }
     return json.dumps(payload, indent=2, sort_keys=True).encode("utf-8") + b"\n"
@@ -399,7 +422,14 @@ def build_product(
             BuildOutcome.REFUSED_REFERENCE_PROBLEMS,
             reference_problems=resolved.reference_problems,
         )
-    if resolved.excluded_members:
+    # refuse (the default) fails on any ineligible member; exclude only
+    # fails when that would leave nothing to build (§10).
+    should_refuse = (
+        bool(resolved.excluded_members)
+        if product.ineligible_members is IneligibleMembersMode.REFUSE
+        else not resolved.eligible_members
+    )
+    if should_refuse:
         return BuildResult(
             BuildOutcome.REFUSED_INELIGIBLE_MEMBERS,
             ineligible_members=resolved.excluded_members,
@@ -498,6 +528,14 @@ def build_product(
     dxf_manifest_members.sort(
         key=lambda member: (member.asset_id, member.source_derivative_type.value)
     )
+    # Only ever non-empty for ineligible_members = "exclude": the refuse
+    # gate above already returned when resolved.excluded_members is
+    # non-empty in refuse mode.
+    excluded_manifest_members = [
+        ManifestExcludedMember(asset_id=member.asset_id, blocking_reasons=member.blocking_reasons)
+        for member in resolved.excluded_members
+    ]
+    excluded_manifest_members.sort(key=lambda member: member.asset_id)
     manifest = Manifest(
         product_slug=product.slug,
         reference_size_in=reference_size_in,
@@ -505,6 +543,7 @@ def build_product(
         tool_version=__version__,
         members=manifest_members,
         dxf_members=dxf_manifest_members,
+        excluded_members=excluded_manifest_members,
     )
 
     builds_dir = root / BUILDS_DIRNAME

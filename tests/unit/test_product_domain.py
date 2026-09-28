@@ -5,7 +5,7 @@ from pydantic import ValidationError
 
 from vectorpress.domain.derivative_type import DerivativeType
 from vectorpress.domain.metadata_field_error import MetadataFieldError, MetadataFieldsError
-from vectorpress.domain.product import Format, Product, ProductTier
+from vectorpress.domain.product import Format, IneligibleMembersMode, Product, ProductTier
 
 VALID_WITH_COLLECTION_SLUG = {
     "slug": "pacific_coast_tide_pool_standard_pack",
@@ -166,6 +166,34 @@ def test_reference_size_override_is_accepted() -> None:
     product = Product.model_validate(data)
 
     assert product.reference_size_in == 4.5
+
+
+def test_ineligible_members_defaults_to_refuse() -> None:
+    product = Product.model_validate(VALID_WITH_COLLECTION_SLUG)
+
+    assert product.ineligible_members is IneligibleMembersMode.REFUSE
+
+
+def test_ineligible_members_exclude_is_accepted() -> None:
+    data = {**VALID_WITH_COLLECTION_SLUG, "ineligible_members": "exclude"}
+
+    product = Product.model_validate(data)
+
+    assert product.ineligible_members is IneligibleMembersMode.EXCLUDE
+
+
+def test_unknown_ineligible_members_value_is_rejected_naming_the_field() -> None:
+    data = {**VALID_WITH_COLLECTION_SLUG, "ineligible_members": "skip"}
+
+    with pytest.raises(ValidationError) as exc_info:
+        Product.model_validate(data)
+
+    errors = exc_info.value.errors()
+    assert any(error["loc"] == ("ineligible_members",) for error in errors)
+
+
+def test_ineligible_members_mode_has_exactly_the_documented_modes() -> None:
+    assert {member.value for member in IneligibleMembersMode} == {"refuse", "exclude"}
 
 
 def test_unknown_key_is_rejected() -> None:

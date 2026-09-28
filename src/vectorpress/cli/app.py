@@ -1597,6 +1597,7 @@ def product(
     typer.echo(f"Price: {format_number(loaded.price)}")
     typer.echo(f"Derivative types: {', '.join(dt.value for dt in loaded.derivative_types)}")
     typer.echo(f"Formats: {', '.join(fmt.value for fmt in loaded.formats)}")
+    typer.echo(f"Ineligible members: {loaded.ineligible_members.value}")
     reference_size_in = resolve_reference_size_in(config, loaded)
     typer.echo(f"Reference size: {format_number(reference_size_in)}in")
     if loaded.collection_slug is not None:
@@ -1642,16 +1643,17 @@ def build(
     product untouched -- without a valid catalog brand.toml naming an
     existing license template (there is no default brand), if that license
     template names an unknown placeholder, if the product's membership does
-    not fully resolve, if any member is not eligible for this product's
-    derivative types (listing each with its reasons, the same as 'vpress
-    product'), if two members' customer file names collide (naming every
-    asset ID sharing that name), or if a DXF conversion fails (naming the
-    asset). Rebuilding with no changes reproduces the same package and ZIP
-    byte for byte.
+    not fully resolve, if two members' customer file names collide (naming
+    every asset ID sharing that name), or if a DXF conversion fails (naming
+    the asset). An ineligible member (listing each with its reasons, the
+    same as 'vpress product') refuses the build under this product's
+    default ineligible_members = "refuse"; set to "exclude", it ships the
+    eligible members instead, reporting and recording each excluded one --
+    and still refuses, the same way, when none are eligible. Rebuilding
+    with no changes reproduces the same package and ZIP byte for byte.
     \f
     vectorpress.build.product_build.build_product does the whole build;
-    this only renders its BuildResult. --allow-unapproved and the 'exclude'
-    ineligibility mode are not built yet.
+    this only renders its BuildResult. --allow-unapproved is not built yet.
     """
     root, config = _locate_and_load_config(ctx)
     loaded = _lookup_product_or_exit(root, config, slug)
@@ -1725,6 +1727,10 @@ def build(
             f"  {dxf_member.asset_id}\t{dxf_member.source_derivative_type.value}\tdxf\t"
             f"{dxf_member.content_hash}\t{dxf_member.package_path}"
         )
+    typer.echo(f"Excluded: {len(result.manifest.excluded_members)}")
+    for excluded in result.manifest.excluded_members:
+        reasons = "; ".join(_render_blocking_reason(r) for r in excluded.blocking_reasons)
+        typer.echo(f"  {excluded.asset_id}\t{reasons}")
 
 
 # --- vpress attention: the inbox (§34, §24, CONTEXT.md "Attention report / Inbox") ---
