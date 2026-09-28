@@ -21,19 +21,27 @@ This module never rasterizes or vectorizes (ADR 0013): it only walks
 already-vector geometry a generator or a human already produced, the one
 thing a "format conversion" is allowed to do. Every ``<path>``, ``<rect>``,
 ``<circle>``, ``<ellipse>`` and ``<polygon>`` element is converted, each
-with its own ``transform`` attribute already baked into its coordinates --
-an override drawn with a shape primitive, or one placed with a
-``transform``, is exactly as real a cut line as a potrace-traced, untransformed
-``<path>``, and shipping a DXF that silently dropped or misplaced it would
-defeat the point of ADR 0007 treating an override as *the* effective
-derivative. Each element is converted on its own, via
+with its own ``transform`` composed with every ancestor's -- Inkscape puts a
+transform on a layer or group ``<g>`` at least as often as on a shape
+itself, and an override drawn with a shape primitive, placed under a
+transformed group, or transformed directly, is exactly as real a cut line
+as a potrace-traced, untransformed ``<path>``; shipping a DXF that silently
+dropped or misplaced it would defeat the point of ADR 0007 treating an
+override as *the* effective derivative. The tree is walked recursively
+(:func:`_walk`), carrying one composed :class:`~svgelements.Matrix` down
+from the root, rather than via ``root.iter()``'s flat, ancestry-blind
+traversal. Each shape is converted on its own, via
 :meth:`~svgelements.Shape.segments`, never by parsing the whole document
 with ``svgelements.SVG.parse`` -- that also applies the root ``<svg>``'s
 own viewBox-to-viewport scale, which would shift every coordinate away from
 the plain numbers the document itself uses (the same reason
 :mod:`vectorpress.validate._svg_document` parses one ``<path>`` at a time).
 A ``<polyline>``/``<line>`` is left out: this module only ever emits closed
-geometry, and neither closes on its own.
+geometry, and neither closes on its own. A ``<defs>``, ``<clipPath>``,
+``<mask>`` or ``<symbol>`` subtree is skipped outright: geometry inside one
+is never rendered on its own -- only when a ``<use>`` references it
+(``<use>`` expansion is deferred, out of scope here) -- so converting it
+directly would ship a definition or a clip/mask shape as a cut line.
 
 **Determinism.** ``ezdxf`` (added via ``uv add``) is this build's DXF
 writer. Three of its defaults are not reproducible run to run and are all
@@ -108,6 +116,11 @@ _SHAPE_CLASSES: dict[str, type[se.Shape]] = {
     "polygon": se.Polygon,
 }
 
+#: Element kinds whose whole subtree :func:`_walk` skips outright (this
+#: module's own docstring): a definition, clip path, mask or symbol is
+#: never rendered on its own.
+_SKIPPED_CONTAINERS = frozenset({"defs", "clipPath", "mask", "symbol"})
+
 
 class DxfConversionError(Exception):
     """``svg_bytes`` could not be converted to DXF (§35): unparseable XML or
@@ -152,22 +165,37 @@ def _is_closed(subpath: se.Subpath, points: tuple[Point, ...]) -> bool:
     return abs(start_x - end_x) < _CLOSE_TOLERANCE and abs(start_y - end_y) < _CLOSE_TOLERANCE
 
 
-def _shape_subpaths(element: ET.Element, shape_cls: type[se.Shape]) -> list[se.Subpath]:
-    """``element``'s own geometry as subpaths, with its own ``transform``
-    attribute (if any) already baked into every coordinate --
-    ``shape.segments(transformed=True)`` applies exactly that shape's own
-    matrix, never the root ``<svg>``'s viewBox-to-viewport scale (this
-    module's own docstring says why that matters). Every SVG attribute
-    ``element`` carries is forwarded as a keyword (``d`` for a ``<path>``,
-    geometry attributes for a primitive shape, ``transform`` for either);
-    the ones a shape's own constructor does not use are simply ignored by
-    it, the same as ``svgelements`` already does when it parses a full
-    document itself.
+def _own_transform(element: ET.Element) -> se.Matrix:
+    """``element``'s own ``transform`` attribute as a :class:`~svgelements.
+    Matrix`, or the identity matrix when it has none -- ``se.Matrix``
+    itself has no "no transform" case, only a string to parse."""
+    value = element.attrib.get("transform")
+    return se.Matrix(value) if value else se.Matrix()
+
+
+def _shape_subpaths(
+    element: ET.Element, shape_cls: type[se.Shape], matrix: se.Matrix
+) -> list[se.Subpath]:
+    """``element``'s own geometry as subpaths, with ``matrix`` -- every
+    ancestor's own ``transform`` already composed with this element's own
+    (:func:`_walk`) -- baked into every coordinate, overriding whatever
+    ``shape_cls(**element.attrib)`` parsed from ``element``'s ``transform``
+    attribute alone: ``matrix`` already carries that same local transform
+    as part of its own composition, so it is the one true final transform
+    for this element, not merely a starting point to compose further.
+    ``shape.segments(transformed=True)`` never touches the root ``<svg>``'s
+    own viewBox-to-viewport scale (this module's own docstring says why
+    that matters). Every SVG attribute ``element`` carries is forwarded as
+    a keyword to ``shape_cls`` (``d`` for a ``<path>``, geometry attributes
+    for a primitive shape); the ones its constructor does not use are
+    simply ignored, the same as ``svgelements`` already does when it
+    parses a full document itself.
 
     Raises :class:`DxfConversionError` on unparseable geometry (§35).
     """
     try:
         shape = shape_cls(**element.attrib)
+        shape.transform = matrix
         transformed = se.Path(shape.segments(transformed=True))
     except Exception as exc:
         raise DxfConversionError(
@@ -176,18 +204,53 @@ def _shape_subpaths(element: ET.Element, shape_cls: type[se.Shape]) -> list[se.S
     return list(transformed.as_subpaths())
 
 
+def _walk(element: ET.Element, matrix: se.Matrix, rings: list[tuple[Point, ...]]) -> None:
+    """Visit ``element`` and its children, appending every closed subpath's
+    ring to ``rings`` in document order (this module's own docstring).
+    ``matrix`` is every ancestor's own ``transform`` already composed
+    together; ``element``'s own ``transform`` composes onto it -- on the
+    left, since an SVG transform maps *its own* subtree's local coordinates
+    into its parent's space, so it must apply before (and so, in
+    ``svgelements``' own point-then-matrix convention, sit to the left of)
+    whatever already maps that parent's space further out -- and that
+    combined matrix is what both this element's own shape (if it is one)
+    and every child in the recursive call below actually use.
+
+    A ``<defs>``/``<clipPath>``/``<mask>``/``<symbol>`` subtree is skipped
+    outright (:data:`_SKIPPED_CONTAINERS`, this module's own docstring):
+    not walked into at all, so nothing under it is ever converted.
+    """
+    tag = _local_name(element.tag)
+    if tag in _SKIPPED_CONTAINERS:
+        return
+
+    combined_matrix = _own_transform(element) * matrix
+
+    shape_cls = _SHAPE_CLASSES.get(tag)
+    if shape_cls is not None:
+        for subpath in _shape_subpaths(element, shape_cls, combined_matrix):
+            points = _flatten_subpath(subpath)
+            if len(points) < 3:
+                continue
+            if _is_closed(subpath, points):
+                rings.append(points)
+
+    for child in element:
+        _walk(child, combined_matrix, rings)
+
+
 def closed_rings(svg_bytes: bytes) -> list[tuple[Point, ...]]:
     """Every closed subpath of ``svg_bytes``'s ``<path>``, ``<rect>``,
     ``<circle>``, ``<ellipse>`` and ``<polygon>`` elements, flattened to a
-    polygon ring, in document order, each with its own ``transform``
-    already applied (§7's "convert every closed path", this module's own
-    docstring): an explicit ``Z``, or a flattened end landing back on its
-    own start within :data:`_CLOSE_TOLERANCE`. An open subpath -- one a
-    human approved despite it -- is left out rather than failing the
-    conversion: nothing about "closed path" fits it either way. A
-    degenerate subpath (fewer than three distinct points once flattened) is
-    left out too: neither a line nor a point is geometry a DXF polyline
-    entity can usefully carry.
+    polygon ring, in document order, each with its own ``transform`` and
+    every ancestor's already applied (§7's "convert every closed path",
+    this module's own docstring, :func:`_walk`): an explicit ``Z``, or a
+    flattened end landing back on its own start within
+    :data:`_CLOSE_TOLERANCE`. An open subpath -- one a human approved
+    despite it -- is left out rather than failing the conversion: nothing
+    about "closed path" fits it either way. A degenerate subpath (fewer
+    than three distinct points once flattened) is left out too: neither a
+    line nor a point is geometry a DXF polyline entity can usefully carry.
 
     Raises :class:`DxfConversionError` on malformed XML or unparseable
     geometry (§35).
@@ -198,16 +261,7 @@ def closed_rings(svg_bytes: bytes) -> list[tuple[Point, ...]]:
         raise DxfConversionError(f"not a valid SVG document: {exc}") from exc
 
     rings: list[tuple[Point, ...]] = []
-    for element in root.iter():
-        shape_cls = _SHAPE_CLASSES.get(_local_name(element.tag))
-        if shape_cls is None:
-            continue
-        for subpath in _shape_subpaths(element, shape_cls):
-            points = _flatten_subpath(subpath)
-            if len(points) < 3:
-                continue
-            if _is_closed(subpath, points):
-                rings.append(points)
+    _walk(root, se.Matrix(), rings)
     return rings
 
 

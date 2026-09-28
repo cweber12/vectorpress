@@ -65,6 +65,26 @@ _TRANSLATED_RECTANGLE_SVG = b"""<svg xmlns="http://www.w3.org/2000/svg" viewBox=
 <path d="M0,0 L10,0 L10,10 L0,10 Z" transform="translate(10,20)"/>
 </svg>"""
 
+#: The rectangle placed under two nested groups -- an outer ``scale(2)``
+#: around an inner ``translate(10,20)`` -- the way Inkscape puts a
+#: transform on a layer or group at least as often as on a shape itself.
+#: Applying the inner translate first, then the outer scale (SVG's own
+#: nesting order): local (0,0) -> translate -> (10,20) -> scale -> (20,40).
+_NESTED_GROUPS_SVG = b"""<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+<g transform="scale(2)">
+<g transform="translate(10,20)">
+<path d="M0,0 L10,0 L10,10 L0,10 Z"/>
+</g>
+</g>
+</svg>"""
+
+#: A closed path inside ``<defs>`` -- never rendered on its own, only if a
+#: ``<use>`` referenced it (deferred, out of scope) -- must not ship as a
+#: cut line.
+_DEFS_SVG = b"""<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10">
+<defs><path d="M0,0 L10,0 L10,10 L0,10 Z"/></defs>
+</svg>"""
+
 
 def _polyline_rings(dxf_bytes: bytes) -> list[list[tuple[float, float]]]:
     """Every ``POLYLINE`` entity's vertices, read back with ``ezdxf``
@@ -140,6 +160,23 @@ def test_closed_rings_applies_a_paths_own_transform_attribute() -> None:
     (plain_ring,) = closed_rings(_RECTANGLE_SVG)
     (translated_ring,) = closed_rings(_TRANSLATED_RECTANGLE_SVG)
     assert translated_ring == tuple((x + 10.0, y + 20.0) for x, y in plain_ring)
+
+
+def test_closed_rings_composes_nested_group_transforms() -> None:
+    """A shape's own group and every ancestor group's ``transform`` compose
+    together (Inkscape puts a transform on a layer or group at least as
+    often as on a shape itself) -- the inner ``translate`` applies before
+    the outer ``scale`` wrapping it, exactly SVG's own nesting order."""
+    (plain_ring,) = closed_rings(_RECTANGLE_SVG)
+    (nested_ring,) = closed_rings(_NESTED_GROUPS_SVG)
+    assert nested_ring == tuple(((x + 10.0) * 2.0, (y + 20.0) * 2.0) for x, y in plain_ring)
+
+
+def test_closed_rings_skips_geometry_inside_defs() -> None:
+    """A ``<defs>`` subtree is never rendered on its own -- only via a
+    ``<use>`` (deferred, out of scope) -- so it must not ship as a cut
+    line."""
+    assert closed_rings(_DEFS_SVG) == []
 
 
 def test_svg_to_dxf_bytes_writes_one_polyline_entity_per_closed_subpath() -> None:
