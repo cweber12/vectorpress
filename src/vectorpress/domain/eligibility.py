@@ -7,12 +7,13 @@ metadata fields, and each included derivative type's state and (where it
 exists) effective status. Gathering those inputs from disk is
 :mod:`vectorpress.pipeline.eligibility`'s job.
 
-§10's "unless explicitly overridden" is not decided here: nothing in this
-module knows about products, so every included derivative that is not
-approved blocks, with no exceptions. A later PRD that adds a product-level
-override extends the caller, not this function's contract -- the seam is
-:class:`EligibilityResult`'s ``blocking_reasons`` staying a plain list a
-caller can filter before deciding what to show.
+§10's "unless explicitly overridden" is ``allow_unapproved``: a caller (a
+per-build ``--allow-unapproved`` flag) may ask that a ``generated`` or
+``needs_review`` derivative admit rather than block. It never touches a
+rights or accuracy block, and never admits ``rejected`` or ``regenerate``
+-- a human said no, or asked for a new take -- so it is a third outcome per
+included derivative, not a second implementation: see
+:func:`_derivative_outcome`.
 
 Each blocking reason is a :class:`BlockingReason` -- a kind, the derivative
 type it concerns (when it concerns one), and the value driving it -- rather
@@ -29,6 +30,13 @@ from vectorpress.domain.asset import AccuracyStatus, Asset, RightsStatus
 from vectorpress.domain.derivative_state import DerivativeState
 from vectorpress.domain.derivative_type import DerivativeType
 from vectorpress.domain.status import Status
+
+#: Every :class:`~vectorpress.domain.status.Status` ``allow_unapproved`` may
+#: admit (§10.1's "unless explicitly overridden" covers approval only): a
+#: freshly generated or reviewer-pending derivative -- never ``rejected`` (a
+#: human said no) or ``regenerate`` (a human asked for a new take, CONTEXT.md
+#: "Status" lifecycle).
+ADMISSIBLE_UNAPPROVED_STATUSES = (Status.GENERATED, Status.NEEDS_REVIEW)
 
 #: The §5 descriptive fields that are optional on an asset -- absent or
 #: empty is a warning (§10.1's "missing optional metadata"), never a block.
@@ -131,31 +139,67 @@ class IncludedDerivative:
     status: Status | None
 
 
-def _derivative_blocking_reason(included: IncludedDerivative) -> BlockingReason | None:
-    """The §10.1 blocking reason for one included derivative, or ``None``
-    when it is approved and blocks nothing: names ``included``'s state when
-    it has no output at all (``missing``/``impossible``), else its status."""
+@dataclass(frozen=True)
+class AdmittedUnapproved:
+    """One included derivative admitted despite not being approved, under
+    ``allow_unapproved`` (§10.1's "unless explicitly overridden"): its type,
+    and its status at the moment of the decision -- ``generated`` or
+    ``needs_review``, never ``rejected`` or ``regenerate`` (see
+    :data:`ADMISSIBLE_UNAPPROVED_STATUSES`) -- so a build can record and
+    report exactly what shipped unreviewed."""
+
+    derivative_type: DerivativeType
+    status: Status
+
+
+def _derivative_outcome(
+    included: IncludedDerivative, allow_unapproved: bool
+) -> tuple[BlockingReason | None, AdmittedUnapproved | None]:
+    """The §10.1 outcome for one included derivative: a blocking reason, an
+    :class:`AdmittedUnapproved` record, or neither (approved) -- never both.
+
+    A derivative with no output at all (``missing``/``impossible``) always
+    blocks: ``allow_unapproved`` admits a status, not an absent file.
+    ``approved`` blocks nothing. Every other status blocks naming itself,
+    unless ``allow_unapproved`` and the status is one of
+    :data:`ADMISSIBLE_UNAPPROVED_STATUSES`, in which case it is admitted
+    instead -- ``rejected`` and ``regenerate`` block regardless.
+    """
     if included.state in (DerivativeState.MISSING, DerivativeState.IMPOSSIBLE):
-        return BlockingReason(
-            BlockingReasonKind.DERIVATIVE_STATE, included.derivative_type, included.state.value
+        return (
+            BlockingReason(
+                BlockingReasonKind.DERIVATIVE_STATE, included.derivative_type, included.state.value
+            ),
+            None,
         )
-    if included.status is Status.APPROVED:
-        return None
     assert included.status is not None  # CURRENT/STALE always carry a status
-    return BlockingReason(
-        BlockingReasonKind.DERIVATIVE_STATUS, included.derivative_type, included.status.value
+    if included.status is Status.APPROVED:
+        return None, None
+    if allow_unapproved and included.status in ADMISSIBLE_UNAPPROVED_STATUSES:
+        return None, AdmittedUnapproved(included.derivative_type, included.status)
+    return (
+        BlockingReason(
+            BlockingReasonKind.DERIVATIVE_STATUS, included.derivative_type, included.status.value
+        ),
+        None,
     )
 
 
 @dataclass(frozen=True)
 class EligibilityResult:
     """One asset's publication eligibility for a given set of derivative
-    types (§10, §10.1): eligible or blocked, every blocking reason, and
-    every warning. Warnings never affect :attr:`eligibility`."""
+    types (§10, §10.1): eligible or blocked, every blocking reason, every
+    warning, and every :class:`AdmittedUnapproved` derivative
+    ``allow_unapproved`` let through. Warnings never affect
+    :attr:`eligibility`; ``admitted_unapproved`` is populated whether or not
+    the asset ends up eligible overall (another included derivative may
+    still block it), so a caller that cares only about shipped members
+    filters by :attr:`eligibility` itself."""
 
     eligibility: Eligibility
     blocking_reasons: list[BlockingReason]
     warnings: list[str]
+    admitted_unapproved: list[AdmittedUnapproved]
 
 
 def asset_eligibility(
@@ -163,13 +207,21 @@ def asset_eligibility(
     accuracy_status: AccuracyStatus,
     missing_metadata_fields: Sequence[str],
     included_derivatives: Sequence[IncludedDerivative],
+    allow_unapproved: bool = False,
 ) -> EligibilityResult:
     """Whether an asset may ship with ``included_derivatives`` (§10, §10.1).
 
     Blocking: rights status ``do_not_publish`` or ``rights_review_required``;
-    accuracy status ``issue_found``; any included derivative not approved,
-    one reason per type naming its status when it has one, else its state
-    (a missing or impossible derivative counts as not approved).
+    accuracy status ``issue_found``; any included derivative not approved
+    and not admitted, one reason per type naming its status when it has
+    one, else its state (a missing or impossible derivative counts as not
+    approved, and is never admitted).
+
+    ``allow_unapproved`` (§10.1's "unless explicitly overridden") admits a
+    ``generated`` or ``needs_review`` included derivative instead of
+    blocking on it, recorded in ``admitted_unapproved`` -- it never touches
+    a rights or accuracy block, and never admits ``rejected`` or
+    ``regenerate`` (:func:`_derivative_outcome`).
 
     Warnings, which never block: accuracy status ``not_reviewed``; one per
     field named in ``missing_metadata_fields`` ("missing optional metadata").
@@ -179,6 +231,7 @@ def asset_eligibility(
     """
     blocking_reasons: list[BlockingReason] = []
     warnings: list[str] = []
+    admitted_unapproved: list[AdmittedUnapproved] = []
 
     if rights_status in (RightsStatus.DO_NOT_PUBLISH, RightsStatus.RIGHTS_REVIEW_REQUIRED):
         blocking_reasons.append(
@@ -193,11 +246,13 @@ def asset_eligibility(
         warnings.append(f"accuracy status: {accuracy_status.value.replace('_', ' ')}")
 
     for included in included_derivatives:
-        reason = _derivative_blocking_reason(included)
+        reason, admitted = _derivative_outcome(included, allow_unapproved)
         if reason is not None:
             blocking_reasons.append(reason)
+        if admitted is not None:
+            admitted_unapproved.append(admitted)
 
     warnings.extend(f"missing optional metadata: {field}" for field in missing_metadata_fields)
 
     eligibility = Eligibility.BLOCKED if blocking_reasons else Eligibility.ELIGIBLE
-    return EligibilityResult(eligibility, blocking_reasons, warnings)
+    return EligibilityResult(eligibility, blocking_reasons, warnings, admitted_unapproved)

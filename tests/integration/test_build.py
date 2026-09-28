@@ -590,6 +590,7 @@ def test_refuse_mode_fails_naming_the_ineligible_member_and_writes_nothing(
     result = runner.invoke(app, ["build", STANDARD_PACK_SLUG])
 
     assert result.exit_code == 1
+    assert "1 ineligible member(s)" in result.output
     assert "ochre_sea_star\t" in result.output
     assert "cut_svg: rejected" in result.output
     assert not (temp_catalog_root / "builds").exists()
@@ -664,12 +665,19 @@ def test_exclude_product_with_no_eligible_member_refuses_and_writes_nothing(
     """``kelp_forest_mini_pack`` is the fixture's one committed ``exclude``
     product. Even in ``exclude`` mode, a build with nothing eligible still
     refuses the same way ``refuse`` does (§10) -- its single rule-matched
-    member is never generated here at all, so it excludes down to zero."""
+    member is never generated here at all, so it excludes down to zero. The
+    refusal line says so in wording distinct from ``refuse`` mode's "N
+    ineligible member(s)" (carried in from #95's review): "nothing was
+    eligible" reads differently from "N named members block the build"."""
     monkeypatch.chdir(temp_catalog_root)
 
     result = runner.invoke(app, ["build", "kelp_forest_mini_pack"])
 
     assert result.exit_code == 1
+    assert (
+        "build: kelp_forest_mini_pack refused: no eligible member (ineligible_members = exclude)"
+        in result.output
+    )
     assert "purple_sea_urchin\t" in result.output
     assert "cut_svg: missing" in result.output
     assert not (temp_catalog_root / "builds").exists()
@@ -690,6 +698,94 @@ def test_exclude_mode_manifest_excluded_members_are_locked_by_snapshot(
     build_dir = _build_dir(temp_catalog_root, STANDARD_PACK_SLUG)
     manifest = json.loads((build_dir / "manifest.json").read_text(encoding="utf-8"))
     assert manifest["excluded_members"] == snapshot(name="excluded_members")
+
+
+# --- --allow-unapproved: per-build override (§10, §10.1) ----------------------------
+
+
+@pytest.mark.integration
+def test_build_refuses_when_members_are_only_needs_review(
+    monkeypatch: pytest.MonkeyPatch, temp_catalog_root: Path
+) -> None:
+    """``generate --all`` with no approval leaves every member's
+    ``transparent_png`` at ``needs_review`` (§22.1: a freshly generated
+    derivative is recorded straight as ``needs_review``) -- without
+    ``--allow-unapproved``, ``vpress build`` refuses exactly like any other
+    unapproved member (§10.1)."""
+    monkeypatch.chdir(temp_catalog_root)
+    runner.invoke(app, ["generate", "--all"])
+
+    result = runner.invoke(app, ["build", PNG_ONLY_SLUG])
+
+    assert result.exit_code == 1
+    for asset_id in PNG_ONLY_MEMBERS:
+        assert f"{asset_id}\t" in result.output
+        assert "transparent_png: needs review" in result.output
+    assert not (temp_catalog_root / "builds").exists()
+
+
+@pytest.mark.integration
+def test_allow_unapproved_ships_needs_review_members_and_lists_them_in_the_manifest(
+    monkeypatch: pytest.MonkeyPatch, temp_catalog_root: Path
+) -> None:
+    """The same ``needs_review``-only catalog, built with
+    ``--allow-unapproved``: it ships, the build output lists every admitted
+    (asset, derivative type) with its status, and the manifest records the
+    identical list."""
+    monkeypatch.chdir(temp_catalog_root)
+    runner.invoke(app, ["generate", "--all"])
+
+    result = runner.invoke(app, ["build", PNG_ONLY_SLUG, "--allow-unapproved"])
+
+    assert result.exit_code == 0, result.output
+    assert "Admitted unapproved: 3" in result.output
+    for asset_id in PNG_ONLY_MEMBERS:
+        assert f"{asset_id}\ttransparent_png\tneeds_review" in result.output
+
+    build_dir = _build_dir(temp_catalog_root, PNG_ONLY_SLUG)
+    package_dir = build_dir / PNG_ONLY_TOP_LEVEL
+    for filename in PNG_ONLY_FILES.values():
+        assert (package_dir / "PNG" / filename).is_file()
+
+    manifest = json.loads((build_dir / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["admitted_unapproved_members"] == [
+        {"asset_id": asset_id, "derivative_type": "transparent_png", "status": "needs_review"}
+        for asset_id in sorted(PNG_ONLY_MEMBERS)
+    ]
+
+
+@pytest.mark.integration
+def test_allow_unapproved_still_excludes_a_rejected_derivative(
+    monkeypatch: pytest.MonkeyPatch, temp_catalog_root: Path
+) -> None:
+    """A rejected derivative still makes its member ineligible under
+    ``--allow-unapproved`` (§10.1's override "covers approval only"):
+    ``ochre_sea_star``'s rejected ``cut_svg`` still refuses the whole
+    (``refuse`` mode) build, flag or no flag."""
+    _reject_ochre_sea_stars_cut_svg_after_standard_pack_approval(monkeypatch, temp_catalog_root)
+
+    result = runner.invoke(app, ["build", STANDARD_PACK_SLUG, "--allow-unapproved"])
+
+    assert result.exit_code == 1
+    assert "ochre_sea_star\t" in result.output
+    assert "cut_svg: rejected" in result.output
+    assert not (temp_catalog_root / "builds").exists()
+
+
+@pytest.mark.integration
+def test_allow_unapproved_admitted_unapproved_members_are_locked_by_snapshot(
+    monkeypatch: pytest.MonkeyPatch, temp_catalog_root: Path, snapshot: SnapshotAssertion
+) -> None:
+    _fix_license_year(monkeypatch)
+    monkeypatch.chdir(temp_catalog_root)
+    runner.invoke(app, ["generate", "--all"])
+
+    result = runner.invoke(app, ["build", PNG_ONLY_SLUG, "--allow-unapproved"])
+    assert result.exit_code == 0, result.output
+
+    build_dir = _build_dir(temp_catalog_root, PNG_ONLY_SLUG)
+    manifest = json.loads((build_dir / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["admitted_unapproved_members"] == snapshot(name="admitted_unapproved_members")
 
 
 # --- DXF conversion (ADR 0013, §7) -------------------------------------------

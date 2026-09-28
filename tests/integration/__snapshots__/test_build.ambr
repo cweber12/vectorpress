@@ -1,4 +1,23 @@
 # serializer version: 1
+# name: test_allow_unapproved_admitted_unapproved_members_are_locked_by_snapshot[admitted_unapproved_members]
+  list([
+    dict({
+      'asset_id': 'giant_green_anemone',
+      'derivative_type': 'transparent_png',
+      'status': 'needs_review',
+    }),
+    dict({
+      'asset_id': 'ochre_sea_star',
+      'derivative_type': 'transparent_png',
+      'status': 'needs_review',
+    }),
+    dict({
+      'asset_id': 'purple_sea_urchin',
+      'derivative_type': 'transparent_png',
+      'status': 'needs_review',
+    }),
+  ])
+# ---
 # name: test_dxf_is_locked_by_snapshot_and_its_entity_count_matches_the_svgs_closed_paths[ochre_sea_star_cut_dxf]
   '''
     0
@@ -18556,6 +18575,8 @@
 # ---
 # name: test_manifest_and_zip_listing_are_locked_by_snapshot[manifest]
   dict({
+    'admitted_unapproved_members': list([
+    ]),
     'dxf_members': list([
     ]),
     'excluded_members': list([

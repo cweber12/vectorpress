@@ -22,7 +22,15 @@ default ``refuse`` fails the whole build naming every ineligible member and
 its §10.1 reasons; ``exclude`` instead builds only the eligible members,
 records each excluded one in the manifest with its reasons, and still
 refuses -- the same way, naming every member -- when none are eligible.
-``--allow-unapproved`` is not built yet.
+
+``allow_unapproved`` (the per-build ``--allow-unapproved`` override, never
+persisted) widens eligibility itself, not this gate: a ``generated`` or
+``needs_review`` included derivative admits instead of blocking (§10.1's
+"unless explicitly overridden"), recorded in the manifest's
+``admitted_unapproved_members`` with its status at build time. It never
+admits ``rejected`` or ``regenerate``, and never overrides a rights or
+accuracy block -- those members stay ineligible and this gate still applies
+to them exactly as without the flag.
 
 **Customer file name collisions.** Two members whose customer file names
 collide within one format folder also refuse the build, before anything is
@@ -69,6 +77,7 @@ from vectorpress.domain.format import Format
 from vectorpress.domain.format_folder import copied_folder, dxf_filename, dxf_source
 from vectorpress.domain.manifest import (
     Manifest,
+    ManifestAdmittedUnapproved,
     ManifestDxfMember,
     ManifestExcludedMember,
     ManifestMember,
@@ -332,6 +341,14 @@ def _manifest_json_bytes(manifest: Manifest) -> bytes:
             }
             for member in manifest.excluded_members
         ],
+        "admitted_unapproved_members": [
+            {
+                "asset_id": member.asset_id,
+                "derivative_type": member.derivative_type.value,
+                "status": member.status.value,
+            }
+            for member in manifest.admitted_unapproved_members
+        ],
     }
     return json.dumps(payload, indent=2, sort_keys=True).encode("utf-8") + b"\n"
 
@@ -382,6 +399,7 @@ def build_product(
     config: CatalogConfig,
     known_assets: list[Asset],
     known_collections: list[Collection],
+    allow_unapproved: bool = False,
 ) -> BuildResult:
     """Build ``product`` into ``builds/<product.slug>/`` (§14): a package
     directory holding its ``SVG/`` and ``PNG/`` folders, that same package
@@ -390,7 +408,9 @@ def build_product(
 
     Membership resolves exactly the way ``vpress product`` shows it
     (:func:`~vectorpress.build.product_resolution.resolve_product`, ADR
-    0011): no second resolution path.
+    0011): no second resolution path. ``allow_unapproved`` is this one
+    build's ``--allow-unapproved`` override, passed straight through to it
+    and never persisted.
     """
     brand_result = load_brand(root)
     if brand_result.brand is None:
@@ -415,7 +435,9 @@ def build_product(
             unknown_license_placeholders=exc.placeholders,
         )
 
-    resolved = resolve_product(product, root, config, known_assets, known_collections)
+    resolved = resolve_product(
+        product, root, config, known_assets, known_collections, allow_unapproved=allow_unapproved
+    )
 
     if resolved.reference_problems:
         return BuildResult(
@@ -536,6 +558,20 @@ def build_product(
         for member in resolved.excluded_members
     ]
     excluded_manifest_members.sort(key=lambda member: member.asset_id)
+    # Only ever non-empty under --allow-unapproved: without it, nothing
+    # unapproved is ever eligible to admit.
+    admitted_unapproved_members = [
+        ManifestAdmittedUnapproved(
+            asset_id=member.asset_id,
+            derivative_type=admitted.derivative_type,
+            status=admitted.status,
+        )
+        for member in resolved.eligible_members
+        for admitted in member.admitted_unapproved
+    ]
+    admitted_unapproved_members.sort(
+        key=lambda member: (member.asset_id, member.derivative_type.value)
+    )
     manifest = Manifest(
         product_slug=product.slug,
         reference_size_in=reference_size_in,
@@ -544,6 +580,7 @@ def build_product(
         members=manifest_members,
         dxf_members=dxf_manifest_members,
         excluded_members=excluded_manifest_members,
+        admitted_unapproved_members=admitted_unapproved_members,
     )
 
     builds_dir = root / BUILDS_DIRNAME

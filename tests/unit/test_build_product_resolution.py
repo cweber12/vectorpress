@@ -183,6 +183,35 @@ def test_a_rights_blocked_member_is_excluded_with_a_rights_status_reason() -> No
     )
 
 
+def test_allow_unapproved_does_not_admit_a_rights_blocked_member() -> None:
+    """``allow_unapproved`` is §10.1's "unless explicitly overridden", which
+    covers approval only: passing it through does not make a rights-blocked
+    member eligible -- ``gumboot_chiton`` stays excluded, same reason."""
+    config = load_catalog_config(FIXTURE_CATALOG_ROOT)
+    known_assets = load_assets(FIXTURE_CATALOG_ROOT, config).assets
+    product = _product(
+        membership=Membership(asset_ids=["gumboot_chiton"]), derivative_types=["cut_svg"]
+    )
+
+    resolved = resolve_product(
+        product,
+        FIXTURE_CATALOG_ROOT,
+        config,
+        known_assets,
+        known_collections=[],
+        allow_unapproved=True,
+    )
+
+    assert len(resolved.members) == 1
+    member = resolved.members[0]
+    assert member.eligibility is MemberEligibility.EXCLUDED
+    assert any(
+        reason.kind is BlockingReasonKind.RIGHTS_STATUS and reason.value == "do_not_publish"
+        for reason in member.blocking_reasons
+    )
+    assert member.admitted_unapproved == []
+
+
 # --- missing vs impossible: a type with no matching source is impossible ------------
 
 
