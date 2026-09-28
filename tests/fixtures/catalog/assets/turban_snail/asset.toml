@@ -10,10 +10,11 @@
 # threshold) but *needs review* at kelp_forest_mini_pack's own 1in override
 # (about 0.008in^2) -- §9.1's own point that a threshold is only meaningful
 # at a known output size. `vpress validate turban_snail --product
-# kelp_forest_mini_pack` demonstrates it; `--product` resolves only the
-# reference size, never whether this asset actually belongs to the product
-# (validate_asset.py, issue #38), so no collection or product membership
-# needs to change for this to work.
+# kelp_forest_mini_pack` demonstrates it; `--product` scopes to the
+# product's resolved members (build.product_resolution.resolve_product), so
+# the size-sensitivity test adds this asset to kelp_forest_mini_pack's
+# membership in its own temp catalog copy (an ecosystems edit, not a change
+# here) rather than changing this asset's committed ecosystems.
 #
 # ecosystems deliberately match no rule-based fixture collection: neither
 # "Kelp forest" (kelp_forest_ecosystem's rule) nor pacific_coast_tide_pool

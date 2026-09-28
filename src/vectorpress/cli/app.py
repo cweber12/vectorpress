@@ -1326,35 +1326,43 @@ def validate(
         None,
         "--product",
         help=(
-            "Validate at this product's resolved reference size (its own "
-            "override if it has one, else the catalog default) instead of "
-            "the catalog default alone. Only resolves the size -- it does "
-            "not check that an asset belongs to the product. Not supported "
-            "with --file."
+            "Scope validation to this product's resolved members and its "
+            "resolved reference size (its own override if it has one, else "
+            "the catalog default). Given alone, validates every resolved "
+            "member; given with an asset ID, that asset must be one of "
+            "them. Not supported with --file."
         ),
     ),
 ) -> None:
     """Validate cut files and print pass / needs review with each finding's
     kind and location.
 
-    Give exactly one of ASSET_ID, --all or --file. Validating an asset
-    writes a findings report beside its cut file; an asset whose cut file
-    is missing or impossible is reported and skipped. --file checks any SVG
-    on disk and writes nothing. Exits 0 for pass or needs review, 1 if any
-    file could not be read or parsed.
+    Give exactly one of ASSET_ID, --all or --file, or --product alone to
+    validate that product's resolved members. Validating an asset writes a
+    findings report beside its cut file; a member whose cut file is missing
+    or impossible is listed as such rather than skipped silently. --file
+    checks any SVG on disk and writes nothing. A product with no cut_svg
+    reports that there is nothing to validate. Exits 0 for pass or needs
+    review, 1 if any file could not be read or parsed, if the product's
+    membership does not resolve, or if a given asset is not one of its
+    members.
     \f
     Validation runs in the ``validate`` layer; this command only picks the
-    assets and reference size and formats the result. A ``--product``
-    report is saved at its own size-keyed path and never replaces the
-    catalog-default report, which is the one ``vpress asset`` shows.
-    ``vpress generate`` never validates: a findings report exists only
-    because this command ran.
+    assets and reference size and formats the result. ``--product`` scopes
+    through ``build.product_resolution.resolve_product`` (the same
+    resolution ``vpress product`` and ``vpress build`` use, no second
+    path) and refuses like ``vpress build`` when membership has reference
+    problems. Its findings report is saved at its own size-keyed path and
+    never replaces the catalog-default report, which is the one ``vpress
+    asset`` shows. ``vpress generate`` never validates: a findings report
+    exists only because this command ran.
     """
     selectors = [asset_id is not None, all_assets, file is not None]
-    if sum(selectors) != 1:
+    selector_count = sum(selectors)
+    if selector_count > 1 or (selector_count == 0 and product is None):
         raise typer.BadParameter(
-            "Provide exactly one of: an asset ID, --all, --file.",
-            param_hint="asset_id / --all / --file",
+            "Provide exactly one of: an asset ID, --all, --file -- or --product alone.",
+            param_hint="asset_id / --all / --file / --product",
         )
 
     if file is not None:
@@ -1383,14 +1391,43 @@ def validate(
     root, config = _locate_and_load_config(ctx)
     inventory = load_assets(root, config)
 
-    # Resolve the product first: an unknown one stops the run before any
-    # asset is validated.
+    # Resolve the product first: an unknown one, or one whose membership
+    # does not resolve, stops the run before any asset is validated.
     resolved_product = (
         _lookup_product_or_exit(root, config, product) if product is not None else None
     )
     reference_size_in = resolve_reference_size_in(config, resolved_product)
 
-    targets = _select_targets(inventory, config, asset_id)
+    if resolved_product is not None:
+        known_collections = load_collections(root, config).collections
+        product_resolution = resolve_product(
+            resolved_product, root, config, inventory.assets, known_collections
+        )
+        if product_resolution.reference_problems:
+            typer.echo(
+                f"validate: {resolved_product.slug} refused: product membership did not resolve",
+                err=True,
+            )
+            _echo_reference_problems(product_resolution.reference_problems)
+            raise typer.Exit(code=1)
+        if DerivativeType.CUT_SVG not in resolved_product.derivative_types:
+            typer.echo(f"{resolved_product.slug}\tnothing to validate (no cut_svg)")
+            return
+        if asset_id is not None:
+            member = next((m for m in product_resolution.members if m.asset_id == asset_id), None)
+            if member is None:
+                typer.echo(
+                    f"validate: {asset_id} is not a member of product {resolved_product.slug}",
+                    err=True,
+                )
+                raise typer.Exit(code=1)
+            member_ids = [member.asset_id]
+        else:
+            member_ids = [member.asset_id for member in product_resolution.members]
+        assets_by_id = {asset.id: asset for asset in inventory.assets}
+        targets = [assets_by_id[member_id] for member_id in member_ids]
+    else:
+        targets = _select_targets(inventory, config, asset_id)
 
     if reference_size_in != config.reference_size_in:
         # Said once per run, not per asset: excessive_complexity alone is

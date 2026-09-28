@@ -144,6 +144,35 @@ def _derived_dir(root: Path, asset_id: str) -> Path:
     return root / "assets" / asset_id / DERIVED_DIRNAME
 
 
+def _make_kelp_forest_member(root: Path, asset_id: str) -> None:
+    """Add "Kelp forest" to ``asset_id``'s own ecosystems in this temp
+    catalog copy, so ``kelp_forest_mini_pack``'s rule membership resolves
+    it as a member -- without touching the product or collection file."""
+    toml_path = root / "assets" / asset_id / "asset.toml"
+    text = toml_path.read_text(encoding="utf-8")
+    start = text.index("ecosystems = [")
+    end = text.index("]", start)
+    old_line = text[start : end + 1]
+    assert "Kelp forest" not in old_line
+    new_line = old_line[:-1] + ', "Kelp forest"]'
+    toml_path.write_text(text.replace(old_line, new_line, 1), encoding="utf-8")
+
+
+def _add_new_kelp_forest_asset(root: Path, asset_id: str, display_name: str) -> None:
+    """Clone ``bat_star`` (a minimal fixture asset with a real source
+    image and a generatable cut_svg) into a new asset whose ecosystems
+    match ``kelp_forest_mini_pack``'s rule -- the same technique
+    ``tests/integration/test_collection_resolution.py`` uses for the
+    collection rule's own analogous acceptance criterion."""
+    new_dir = root / "assets" / asset_id
+    shutil.copytree(root / "assets" / "bat_star", new_dir)
+    toml_path = new_dir / "asset.toml"
+    text = toml_path.read_text(encoding="utf-8")
+    text = text.replace('display_name = "Bat Star"', f'display_name = "{display_name}"')
+    text = text.replace('ecosystems = ["Subtidal", "Rocky reef"]', 'ecosystems = ["kelp forest"]')
+    toml_path.write_text(text, encoding="utf-8")
+
+
 # --- acceptance criterion 1: pass / needs review, with a located finding ------------------
 
 
@@ -310,7 +339,11 @@ def test_turban_snail_passes_at_the_catalog_default_and_needs_review_at_the_prod
     size (1.0in) -- §9.1's own point that a threshold is only meaningful at
     a known output size. ``turban_snail``'s one hole (about 0.069in^2 at
     3in, about 0.008in^2 at 1in) is sized exactly for this, using the real
-    small_hole detector, not a synthetic one."""
+    small_hole detector, not a synthetic one. Made a ``kelp_forest_mini_pack``
+    member for this temp copy only (its ecosystems otherwise deliberately
+    match no rule-based fixture collection), so ``--product`` scoped to
+    membership still validates it."""
+    _make_kelp_forest_member(temp_catalog_root, "turban_snail")
     monkeypatch.chdir(temp_catalog_root)
     runner.invoke(app, ["generate", "--all"])
 
@@ -376,7 +409,10 @@ def test_excessive_complexity_reference_size_in_follows_the_assets_own_cleanup_s
     ``excessive_complexity_reference_size_in``, at the catalog-default
     validation size and unaffected by a product override either -- every
     other asset here has no cleanup size of its own, so its findings still
-    record the catalog default (3.0in)."""
+    record the catalog default (3.0in). Made a ``kelp_forest_mini_pack``
+    member for this temp copy only, so ``--product`` scoped to membership
+    still validates it."""
+    _make_kelp_forest_member(temp_catalog_root, "ochre_sea_star")
     monkeypatch.chdir(temp_catalog_root)
     runner.invoke(app, ["generate", "--all"])
 
@@ -754,9 +790,9 @@ def test_validate_with_product_resolves_the_products_reference_size(
     monkeypatch: pytest.MonkeyPatch, temp_catalog_root: Path
 ) -> None:
     """``kelp_forest_mini_pack`` overrides the catalog's 3.0 in default down
-    to 1.0 in (issue #38). ``--product`` validates at that resolved size --
-    only the size, never whether the asset belongs to the product (that is
-    PRD 5's job) -- and the report it writes records that size.
+    to 1.0 in, and ``purple_sea_urchin`` (ecosystems include "Kelp forest")
+    is one of its resolved members -- ``--product`` validates it at that
+    resolved size, and the report it writes records that size.
     ``purple_sea_urchin`` passes at the catalog default, but its spines are
     too thin to cut at 1 in, so the product-size result needs review."""
     monkeypatch.chdir(temp_catalog_root)
@@ -804,7 +840,15 @@ def test_excessive_complexity_is_judged_at_the_catalog_size_under_a_product_over
     catalog default here would be wrong for ``ochre_sea_star``, whose own
     cleanup size is 6in -- see
     ``test_excessive_complexity_message_names_no_size_when_an_asset_has_its_own_cleanup_size``
-    below for that case directly."""
+    below for that case directly.
+
+    ``coralline_algae``, ``ochre_sea_star`` and ``giant_green_anemone`` are
+    made ``kelp_forest_mini_pack`` members for this temp copy only (only
+    ``purple_sea_urchin`` matches its rule on the committed fixture), so
+    ``--product`` scoped to membership still validates all four."""
+    _make_kelp_forest_member(temp_catalog_root, "coralline_algae")
+    _make_kelp_forest_member(temp_catalog_root, "ochre_sea_star")
+    _make_kelp_forest_member(temp_catalog_root, "giant_green_anemone")
     monkeypatch.chdir(temp_catalog_root)
     runner.invoke(app, ["generate", "--all"])
     header = "excessive_complexity is measured at each cut file's own cleanup size"
@@ -853,7 +897,10 @@ def test_excessive_complexity_message_names_no_size_when_an_asset_has_its_own_cl
     """ADR 0010 as amended by ADR 0012: ``ochre_sea_star``'s own cleanup
     size is 6in, not the 3in catalog default -- naming "3in" in the
     per-run header would be wrong for it, so the header names the rule
-    instead of a number."""
+    instead of a number. Made a ``kelp_forest_mini_pack`` member for this
+    temp copy only, so ``--product`` scoped to membership still validates
+    it."""
+    _make_kelp_forest_member(temp_catalog_root, "ochre_sea_star")
     monkeypatch.chdir(temp_catalog_root)
     runner.invoke(app, ["generate", "--all"])
 
@@ -892,23 +939,42 @@ def test_validate_with_product_never_touches_the_catalog_default_report(
 
 
 @pytest.mark.integration
-def test_validate_product_combines_with_all(
+def test_validate_product_scopes_to_exactly_the_products_resolved_members(
     monkeypatch: pytest.MonkeyPatch, temp_catalog_root: Path
 ) -> None:
-    """Issue #38's "``--product`` with ``--all`` is allowed, giving every
-    asset at that product's size"."""
+    """``kelp_forest_mini_pack``'s rule (ecosystems include "Kelp forest")
+    resolves to exactly ``purple_sea_urchin`` among the committed fixture
+    assets -- the same membership ``vpress product kelp_forest_mini_pack``
+    lists. Bare ``--product`` validates that one cut file and no other."""
     monkeypatch.chdir(temp_catalog_root)
     runner.invoke(app, ["generate", "--all"])
 
-    result = runner.invoke(app, ["validate", "--all", "--product", "kelp_forest_mini_pack"])
+    result = runner.invoke(app, ["validate", "--product", "kelp_forest_mini_pack"])
 
     assert result.exit_code == 0, result.output
+    assert "purple_sea_urchin\tcut_svg\tpurple-sea-urchin-cut.svg" in result.stdout
     for asset_id, filename in FIXTURE_CUT_FILES:
-        report = read_findings_report(
-            _derived_dir(temp_catalog_root, asset_id), filename, at_size=1.0
-        )
-        assert report is not None
-        assert report.reference_size_in == 1.0
+        if asset_id == "purple_sea_urchin":
+            continue
+        assert filename not in result.stdout
+
+
+@pytest.mark.integration
+def test_validate_product_with_all_adds_nothing_beyond_its_members(
+    monkeypatch: pytest.MonkeyPatch, temp_catalog_root: Path
+) -> None:
+    """``--all`` given alongside ``--product`` is a harmless no-op: the
+    product's own resolved membership decides the scope either way, so the
+    two runs report the same assets."""
+    monkeypatch.chdir(temp_catalog_root)
+    runner.invoke(app, ["generate", "--all"])
+
+    bare = runner.invoke(app, ["validate", "--product", "kelp_forest_mini_pack"])
+    with_all = runner.invoke(app, ["validate", "--all", "--product", "kelp_forest_mini_pack"])
+
+    assert bare.exit_code == 0, bare.output
+    assert with_all.exit_code == 0, with_all.output
+    assert bare.stdout == with_all.stdout
 
 
 @pytest.mark.integration
@@ -948,6 +1014,112 @@ def test_a_product_that_failed_to_load_is_an_actionable_error(
     assert "kelp_forest_mini_pack" in (result.stdout + result.output)
 
 
+# --- --product: scoped to resolved membership (§9, §13, ADR 0012) -----------------------
+
+
+@pytest.mark.integration
+def test_validate_product_reports_a_newly_matching_asset_without_editing_the_product(
+    monkeypatch: pytest.MonkeyPatch, temp_catalog_root: Path
+) -> None:
+    """A new asset whose ecosystems match ``kelp_forest_mini_pack``'s rule
+    appears in the next ``--product`` run without editing the product --
+    membership is live (``build.product_resolution.resolve_product``), the
+    same acceptance criterion ``test_collection_resolution.py`` proves for a
+    bare collection."""
+    product_path = temp_catalog_root / "products" / "kelp_forest_mini_pack.toml"
+    product_toml_before = product_path.read_text(encoding="utf-8")
+    _add_new_kelp_forest_asset(temp_catalog_root, "sunflower_star", "Sunflower Star")
+    monkeypatch.chdir(temp_catalog_root)
+    runner.invoke(app, ["generate", "--all"])
+
+    result = runner.invoke(app, ["validate", "--product", "kelp_forest_mini_pack"])
+
+    assert result.exit_code == 0, result.output
+    assert "sunflower_star\tcut_svg\tsunflower-star-cut.svg" in result.stdout
+    assert product_path.read_text(encoding="utf-8") == product_toml_before
+
+
+@pytest.mark.integration
+def test_validate_product_with_no_cut_svg_reports_nothing_to_validate(
+    monkeypatch: pytest.MonkeyPatch, temp_catalog_root: Path
+) -> None:
+    """``pacific_coast_tide_pool_png_only`` includes only ``transparent_png``
+    -- no cut_svg to validate at all -- so the run says so and exits 0
+    without touching any asset."""
+    monkeypatch.chdir(temp_catalog_root)
+    runner.invoke(app, ["generate", "--all"])
+
+    result = runner.invoke(app, ["validate", "--product", "pacific_coast_tide_pool_png_only"])
+
+    assert result.exit_code == 0, result.output
+    assert "nothing to validate" in result.stdout
+    for _, filename in FIXTURE_CUT_FILES:
+        assert filename not in result.stdout
+
+
+@pytest.mark.integration
+def test_validate_product_combined_with_a_non_member_asset_exits_nonzero(
+    monkeypatch: pytest.MonkeyPatch, temp_catalog_root: Path
+) -> None:
+    """``ochre_sea_star``'s ecosystems do not include "Kelp forest" on the
+    committed fixture, so it is not one of ``kelp_forest_mini_pack``'s
+    resolved members -- combining it with ``--product`` is refused rather
+    than silently validated at the product's size."""
+    monkeypatch.chdir(temp_catalog_root)
+    runner.invoke(app, ["generate", "--all"])
+
+    result = runner.invoke(
+        app, ["validate", "ochre_sea_star", "--product", "kelp_forest_mini_pack"]
+    )
+
+    assert result.exit_code != 0
+    combined = result.stdout + result.output
+    assert "ochre_sea_star" in combined
+    assert "kelp_forest_mini_pack" in combined
+    assert "not a member" in combined
+
+
+@pytest.mark.integration
+def test_validate_product_refuses_when_membership_does_not_resolve(
+    monkeypatch: pytest.MonkeyPatch, temp_catalog_root: Path
+) -> None:
+    """Unresolved membership refuses the run the same way ``vpress build``
+    refuses a build (``build.product_build.build_product``'s
+    ``REFUSED_REFERENCE_PROBLEMS``): an unknown ``collection_slug`` is a
+    reference problem, not a load failure, and validation never starts."""
+    monkeypatch.chdir(temp_catalog_root)
+    product_path = temp_catalog_root / "products" / "pacific_coast_tide_pool_png_only.toml"
+    before = 'collection_slug = "pacific_coast_tide_pool"'
+    text = product_path.read_text(encoding="utf-8")
+    assert before in text
+    product_path.write_text(
+        text.replace(before, 'collection_slug = "no_such_collection"'), encoding="utf-8"
+    )
+    runner.invoke(app, ["generate", "--all"])
+
+    result = runner.invoke(app, ["validate", "--product", "pacific_coast_tide_pool_png_only"])
+
+    assert result.exit_code == 1
+    combined = result.stdout + result.output
+    assert "Reference problems" in combined
+    assert "no_such_collection" in combined
+
+
+@pytest.mark.integration
+def test_validate_product_scoped_output_is_locked_by_snapshot(
+    monkeypatch: pytest.MonkeyPatch, temp_catalog_root: Path, snapshot: SnapshotAssertion
+) -> None:
+    """Locks the scoped ``--product`` report's shape: the header note, the
+    one resolved member's line, and nothing for any other fixture asset."""
+    monkeypatch.chdir(temp_catalog_root)
+    runner.invoke(app, ["generate", "--all"])
+
+    result = runner.invoke(app, ["validate", "--product", "kelp_forest_mini_pack"])
+
+    assert result.exit_code == 0, result.output
+    assert _normalized_output(result.stdout) == snapshot
+
+
 # --- snapshot: product-size findings JSON locked, byte-identical across platforms --------
 
 
@@ -960,6 +1132,12 @@ def test_product_size_findings_json_is_locked_by_snapshot(
     asset_id: str,
     filename: str,
 ) -> None:
+    # Only purple_sea_urchin actually matches kelp_forest_mini_pack's rule
+    # on the committed fixture; every other subject is made a member for
+    # this temp copy only, so this parametrization can lock every fixture
+    # cut file's product-size findings JSON.
+    if asset_id != "purple_sea_urchin":
+        _make_kelp_forest_member(temp_catalog_root, asset_id)
     monkeypatch.chdir(temp_catalog_root)
     runner.invoke(app, ["generate", "--all"])
 
