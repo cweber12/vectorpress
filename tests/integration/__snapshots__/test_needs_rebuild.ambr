@@ -1,0 +1,4 @@
+# serializer version: 1
+# name: test_status_products_needing_rebuild_count_is_locked_by_snapshot
+  "Tide Pool Studio <catalog-root> Brand: Tide Pool Studio Assets: 11 Collections: 3 Products: 3 Products needing rebuild: 0 Missing derivatives: 3 Impossible derivatives: 10 Stale derivatives: 0 Stale overrides: 0 Needs review: 1 Approved: 30 Rejected: 0 Regenerate: 0 Approved assets: 8 Assets awaiting review: 2 Blocked assets: 1 Run 'vpress attention' for details. Metadata problems: none Reference problems: none "
+# ---
