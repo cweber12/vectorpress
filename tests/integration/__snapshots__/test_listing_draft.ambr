@@ -6,7 +6,7 @@
   # The tool never rewrites this table -- edit it by hand, or delete
   # it and run the command again to redraft.
   [listing]
-  title = "Kelp Forest Mini Pack \u2013 SVG Cut Files"
+  title = "Kelp Forest Mini Pack – SVG Cut Files"
   short_title = "Kelp Forest Mini Pack"
   description = "Hand-illustrated, scientifically accurate cut files."
   tags = ["cut file", "svg"]

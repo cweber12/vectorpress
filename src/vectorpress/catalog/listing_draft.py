@@ -13,7 +13,6 @@ atomic_write_bytes` replaces the file -- so a bug in the drafted values can
 never corrupt a hand-authored file.
 """
 
-import json
 import tomllib
 from dataclasses import dataclass
 from datetime import date
@@ -61,17 +60,49 @@ def _detect_newline(data: bytes) -> bytes:
     return b"\r\n" if b"\r\n" in data else b"\n"
 
 
+#: TOML basic-string escapes for the characters with a short form (the TOML
+#: spec's own table); every other control character falls through to
+#: ``_toml_string``'s ``\\u00XX`` case below.
+_TOML_SHORT_ESCAPES = {
+    "\\": "\\\\",
+    '"': '\\"',
+    "\b": "\\b",
+    "\t": "\\t",
+    "\n": "\\n",
+    "\f": "\\f",
+    "\r": "\\r",
+}
+
+
 def _toml_string(value: str) -> str:
-    """One TOML basic string for ``value``. TOML basic-string escaping
-    (backslash, double quote, and control characters as ``\\n``/``\\t``/
-    ``\\u00XX``) is a subset of JSON's, so ``json.dumps`` already produces a
-    valid, already-quoted TOML string for any Python ``str``."""
-    return json.dumps(value)
+    """One TOML basic string for ``value``.
+
+    Only backslash, double quote, and control characters (``U+0000``-
+    ``U+001F`` and ``U+007F``) need escaping; every other character --
+    including one outside the Basic Multilingual Plane, like an emoji -- is
+    written out literally, since a TOML file is UTF-8 text and a basic
+    string may hold any Unicode scalar value as-is. ``json.dumps`` looks
+    equivalent but is not: its default ``ensure_ascii=True`` re-encodes a
+    non-BMP character as a UTF-16 surrogate pair, and TOML has no such
+    escape -- ``tomllib`` rejects it as "not a Unicode scalar value", so a
+    display name or collection description with an emoji would fail this
+    module's own pre-write revalidation on every draft.
+    """
+    escaped: list[str] = []
+    for char in value:
+        short = _TOML_SHORT_ESCAPES.get(char)
+        if short is not None:
+            escaped.append(short)
+        elif ord(char) < 0x20 or ord(char) == 0x7F:
+            escaped.append(f"\\u{ord(char):04x}")
+        else:
+            escaped.append(char)
+    return '"' + "".join(escaped) + '"'
 
 
 def _toml_array(values: list[str]) -> str:
     """One single-line TOML array of strings."""
-    return "[" + ", ".join(json.dumps(value) for value in values) + "]"
+    return "[" + ", ".join(_toml_string(value) for value in values) + "]"
 
 
 def _listing_table_text(listing: Listing, drafted_on: date) -> str:

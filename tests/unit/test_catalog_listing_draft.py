@@ -68,7 +68,10 @@ def test_appends_the_listing_table_and_preserves_every_existing_byte(tmp_path: P
     assert f"# Drafted by `{COMMAND_NAME}` on" in text
     assert "never rewrites this table" in text
     assert "[listing]" in text
-    assert 'title = "Test Product \\u2013 SVG Cut Files"' in text
+    # A non-ASCII character (the en dash) is written out literally, not
+    # escaped: TOML is UTF-8 text, and only control characters and the two
+    # syntax characters ("\", '"') need escaping.
+    assert 'title = "Test Product \u2013 SVG Cut Files"' in text
     assert 'region = "Pacific Coast"' in text
 
 
@@ -82,6 +85,24 @@ def test_appended_text_reparses_to_the_same_listing(tmp_path: Path) -> None:
     assert data["listing"]["title"] == LISTING.title
     assert data["listing"]["tags"] == LISTING.tags
     assert data["listing"]["region"] == LISTING.region
+
+
+def test_a_non_bmp_character_round_trips_through_the_appended_toml(tmp_path: Path) -> None:
+    """``json.dumps``'s default ``ensure_ascii=True`` would re-encode a
+    non-BMP character (an emoji) as a UTF-16 surrogate pair; TOML has no
+    such escape and ``tomllib`` rejects it as "not a Unicode scalar value",
+    so a display name or description with an emoji would previously fail
+    this module's own pre-write revalidation on every draft."""
+    import tomllib
+
+    emoji_listing = LISTING.model_copy(update={"title": "Ocean \U0001f30a Pack"})
+    path = _write_product(tmp_path, "test_product", _BASE_PRODUCT_TOML)
+
+    result = append_listing(tmp_path, CONFIG, "test_product", emoji_listing)
+
+    assert result.outcome is ListingAppendOutcome.APPENDED
+    data = tomllib.loads(path.read_text(encoding="utf-8"))
+    assert data["listing"]["title"] == "Ocean \U0001f30a Pack"
 
 
 def test_running_it_again_refuses_and_leaves_the_file_byte_identical(tmp_path: Path) -> None:

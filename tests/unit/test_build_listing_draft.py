@@ -261,6 +261,30 @@ def test_draft_listing_catalog_template_override_changes_the_description(tmp_pat
     assert listing.description == "Overridden pitch."
 
 
+def test_draft_listing_catalog_template_can_extend_the_shipped_template_it_overrides(
+    tmp_path: Path,
+) -> None:
+    """ADR 0015: ``{% extends %}`` and blocks give partial overrides. A
+    plain ``{% extends "title.txt.j2" %}`` from a catalog override of that
+    same name would resolve back to itself (self-recursion); the fixed
+    ``shipped/`` prefix reaches the shipped file underneath it instead."""
+    override_dir = tmp_path / "templates" / "listing"
+    override_dir.mkdir(parents=True)
+    (override_dir / "title.txt.j2").write_text(
+        '{% extends "shipped/title.txt.j2" %}\n'
+        "{% block title %}Custom: {{ super() }}{% endblock %}\n",
+        encoding="utf-8",
+    )
+    environment = template_environment(tmp_path, "listing")
+
+    collection = _collection()
+    product = _product(formats=[Format.SVG])
+
+    listing = draft_listing(product, collection, [], _brand(), environment)
+
+    assert listing.title == "Custom: Test Collection \u2013 SVG Cut Files"
+
+
 # --- draft_listing_for_product (real membership resolution) --------------
 
 
