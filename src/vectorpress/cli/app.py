@@ -1728,6 +1728,12 @@ def build(
     a rights/accuracy block, still makes its member ineligible regardless.
     Rebuilding with no changes reproduces the same package and ZIP byte for
     byte.
+
+    Two warnings never block the build, and are recorded in the manifest: a
+    member sold larger than its cut file's own cleanup size (cleanup may
+    have removed detail that would cut cleanly at this size), and a member
+    whose included derivatives are byte-identical (both still ship; fix it
+    catalog-side by declaring no source for the redundant type).
     \f
     vectorpress.build.product_build.build_product does the whole build;
     this only renders its BuildResult.
@@ -1824,6 +1830,20 @@ def build(
     for admitted in result.manifest.admitted_unapproved_members:
         typer.echo(
             f"  {admitted.asset_id}\t{admitted.derivative_type.value}\t{admitted.status.value}"
+        )
+    typer.echo(f"Cleanup size warnings: {len(result.manifest.cleanup_size_warnings)}")
+    for cleanup_warning in result.manifest.cleanup_size_warnings:
+        typer.echo(
+            f"  {cleanup_warning.asset_id}\tcleanup size "
+            f"{format_number(cleanup_warning.cleanup_size_in)}in < product reference size "
+            f"{format_number(result.manifest.reference_size_in)}in"
+        )
+    typer.echo(f"Byte-identical derivatives: {len(result.manifest.byte_identical_derivatives)}")
+    for duplicate in result.manifest.byte_identical_derivatives:
+        types = ", ".join(t.value for t in duplicate.derivative_types)
+        typer.echo(
+            f"  {duplicate.asset_id}\t{types} are byte-identical; if unintended, declare no"
+            " source for the redundant type in asset.toml to make it impossible"
         )
 
 

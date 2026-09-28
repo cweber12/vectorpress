@@ -29,6 +29,7 @@ from pathlib import Path
 
 import ezdxf
 import pytest
+from PIL import Image, ImageDraw
 from syrupy.assertion import SnapshotAssertion
 from typer.testing import CliRunner
 
@@ -1084,3 +1085,242 @@ def test_dxf_is_locked_by_snapshot_and_its_entity_count_matches_the_svgs_closed_
     # closed_rings itself: this asset's cut file is potrace-generated, so
     # its own explicit Z count already equals its closed-subpath count.
     assert _entity_count(dxf_bytes) == _count_close_commands(svg_bytes)
+
+
+# --- build warnings: cleanup size, byte-identical derivatives (§9, §20, ADR 0012) ---
+
+OVERSIZED_CUT_SVG_SLUG = "ochre_oversized_cut_svg"
+OVERSIZED_CUT_SVG_TOP_LEVEL = "Ochre-Oversized-Cut-Svg"
+
+
+def _add_oversized_cut_svg_product(root: Path, slug: str) -> None:
+    """A temp-only product (not part of the committed fixture) whose sole
+    member is ``ochre_sea_star``, sold at 8in -- above its own 6in cleanup
+    size (``tests/fixtures/catalog/assets/ochre_sea_star/asset.toml``'s own
+    comment): ADR 0012's cleanup-size build-warning fixture."""
+    product_text = (
+        'derivative_types = ["cut_svg"]\n'
+        'formats = ["svg"]\n'
+        'tier = "individual"\n'
+        "price = 1.00\n"
+        "reference_size_in = 8.0\n\n"
+        "[membership]\n"
+        'asset_ids = ["ochre_sea_star"]\n'
+    )
+    (root / "products" / f"{slug}.toml").write_text(product_text, encoding="utf-8")
+
+
+@pytest.mark.integration
+def test_cleanup_size_warning_names_the_asset_and_both_sizes_and_ships_the_file_unchanged(
+    monkeypatch: pytest.MonkeyPatch, temp_catalog_root: Path
+) -> None:
+    """ochre_sea_star's own cleanup size (6in, ADR 0012) is smaller than
+    this temp-only product's 8in reference size: the build still succeeds
+    and ships the cut file unchanged, warning naming the asset and both
+    sizes, and records the warning in the manifest -- a warning, not an
+    exclusion."""
+    _add_oversized_cut_svg_product(temp_catalog_root, OVERSIZED_CUT_SVG_SLUG)
+    monkeypatch.chdir(temp_catalog_root)
+    runner.invoke(app, ["generate", "ochre_sea_star"])
+    approve_result = runner.invoke(app, ["approve", "ochre_sea_star", "--all-types"])
+    assert approve_result.exit_code == 0, approve_result.output
+
+    result = runner.invoke(app, ["build", OVERSIZED_CUT_SVG_SLUG])
+
+    assert result.exit_code == 0, result.output
+    assert "Cleanup size warnings: 1" in result.output
+    assert "ochre_sea_star\tcleanup size 6in < product reference size 8in" in result.output
+
+    build_dir = _build_dir(temp_catalog_root, OVERSIZED_CUT_SVG_SLUG)
+    package_dir = build_dir / OVERSIZED_CUT_SVG_TOP_LEVEL
+    generated_cut_svg = (
+        temp_catalog_root / "assets" / "ochre_sea_star" / "derived" / "ochre-sea-star-cut.svg"
+    ).read_bytes()
+    assert (package_dir / "SVG" / "ochre-sea-star-cut.svg").read_bytes() == generated_cut_svg
+
+    manifest = json.loads((build_dir / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["cleanup_size_warnings"] == [
+        {"asset_id": "ochre_sea_star", "cleanup_size_in": 6.0}
+    ]
+
+
+@pytest.mark.integration
+def test_a_product_at_or_below_every_members_cleanup_size_has_no_cleanup_size_warning(
+    monkeypatch: pytest.MonkeyPatch, temp_catalog_root: Path
+) -> None:
+    """pacific_coast_tide_pool_standard_pack builds at the catalog default
+    (3in), below ochre_sea_star's own 6in cleanup size (ADR 0012): no
+    cleanup-size warning, in the build output or the manifest."""
+    _generate_and_approve_standard_pack_types(monkeypatch, temp_catalog_root)
+
+    result = runner.invoke(app, ["build", STANDARD_PACK_SLUG])
+
+    assert result.exit_code == 0, result.output
+    assert "Cleanup size warnings: 0" in result.output
+
+    build_dir = _build_dir(temp_catalog_root, STANDARD_PACK_SLUG)
+    manifest = json.loads((build_dir / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["cleanup_size_warnings"] == []
+
+
+@pytest.mark.integration
+def test_cleanup_size_warning_output_and_manifest_section_are_locked_by_snapshot(
+    monkeypatch: pytest.MonkeyPatch, temp_catalog_root: Path, snapshot: SnapshotAssertion
+) -> None:
+    _fix_license_year(monkeypatch)
+    _add_oversized_cut_svg_product(temp_catalog_root, OVERSIZED_CUT_SVG_SLUG)
+    monkeypatch.chdir(temp_catalog_root)
+    runner.invoke(app, ["generate", "ochre_sea_star"])
+    approve_result = runner.invoke(app, ["approve", "ochre_sea_star", "--all-types"])
+    assert approve_result.exit_code == 0, approve_result.output
+
+    result = runner.invoke(app, ["build", OVERSIZED_CUT_SVG_SLUG])
+    assert result.exit_code == 0, result.output
+
+    # only the warning's own lines -- the rest of the build output carries
+    # this test's own unpredictable tmp_path-based package/ZIP paths.
+    warning_lines = [
+        line
+        for line in result.output.splitlines()
+        if "Cleanup size warnings" in line or "ochre_sea_star\tcleanup size" in line
+    ]
+    assert warning_lines == snapshot(name="cleanup_size_warning_output")
+
+    build_dir = _build_dir(temp_catalog_root, OVERSIZED_CUT_SVG_SLUG)
+    manifest = json.loads((build_dir / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["cleanup_size_warnings"] == snapshot(name="cleanup_size_warnings_manifest")
+
+
+FLATCOLOR_DUPLICATE_ASSET_ID = "flatcolor_duplicate_test_asset"
+FLATCOLOR_DUPLICATE_PRODUCT_SLUG = "flatcolor_duplicate_product"
+FLATCOLOR_DUPLICATE_TOP_LEVEL = "Flatcolor-Duplicate-Product"
+FLATCOLOR_DUPLICATE_SILHOUETTE_FILE = "flatcolor-duplicate-test-asset-silhouette.svg"
+FLATCOLOR_DUPLICATE_FLATCOLOR_FILE = "flatcolor-duplicate-test-asset-color.svg"
+
+
+def _add_one_color_flatcolor_duplicate_asset_and_product(root: Path) -> None:
+    """A temp-only asset (not part of the committed fixture) whose
+    ``silhouette`` and ``flatcolor`` sources are the identical one-color
+    shape: ``silhouette_svg`` always fills solid black
+    (:mod:`vectorpress.pipeline.silhouette_svg`) and ``flatcolor_svg`` fills
+    with the source's own single ink color -- black here too -- so tracing
+    the identical source through matching alpha threshold, curve tolerance
+    and speckle size (both recipes' defaults, ``domain.recipe.RECIPES``)
+    produces byte-identical SVGs: ADR 0012's "one-color asset" example.
+    Paired with a temp-only product including both types."""
+    asset_dir = root / "assets" / FLATCOLOR_DUPLICATE_ASSET_ID
+    (asset_dir / "sources").mkdir(parents=True)
+    image = Image.new("RGBA", (48, 48), (0, 0, 0, 0))
+    ImageDraw.Draw(image).ellipse((8, 8, 39, 39), fill=(0, 0, 0, 255))
+    silhouette_path = asset_dir / "sources" / "silhouette.png"
+    image.save(silhouette_path, format="PNG")
+    shutil.copy(silhouette_path, asset_dir / "sources" / "flatcolor.png")
+
+    (asset_dir / "asset.toml").write_text(
+        "\n".join(
+            [
+                'common_name = "Flatcolor duplicate test asset"',
+                'display_name = "Flatcolor Duplicate Test Asset"',
+                'description = "A one-color asset whose flatcolor source duplicates its '
+                'silhouette source."',
+                'subject_category = "Test"',
+                'taxonomic_group = "Test"',
+                'rights_status = "original_artwork"',
+                'accuracy_status = "approved"',
+                "",
+                "[[sources]]",
+                'role = "silhouette"',
+                'file = "silhouette.png"',
+                "",
+                "[[sources]]",
+                'role = "flatcolor"',
+                'file = "flatcolor.png"',
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    product_text = (
+        'derivative_types = ["silhouette_svg", "flatcolor_svg"]\n'
+        'formats = ["svg"]\n'
+        'tier = "individual"\n'
+        "price = 1.00\n\n"
+        "[membership]\n"
+        f'asset_ids = ["{FLATCOLOR_DUPLICATE_ASSET_ID}"]\n'
+    )
+    (root / "products" / f"{FLATCOLOR_DUPLICATE_PRODUCT_SLUG}.toml").write_text(
+        product_text, encoding="utf-8"
+    )
+
+
+def _generate_and_approve_flatcolor_duplicate(monkeypatch: pytest.MonkeyPatch, root: Path) -> None:
+    _add_one_color_flatcolor_duplicate_asset_and_product(root)
+    monkeypatch.chdir(root)
+    runner.invoke(app, ["generate", FLATCOLOR_DUPLICATE_ASSET_ID])
+    approve_result = runner.invoke(app, ["approve", FLATCOLOR_DUPLICATE_ASSET_ID, "--all-types"])
+    assert approve_result.exit_code == 0, approve_result.output
+
+
+@pytest.mark.integration
+def test_byte_identical_included_derivatives_still_ship_both_and_warn_naming_the_asset_and_types(
+    monkeypatch: pytest.MonkeyPatch, temp_catalog_root: Path
+) -> None:
+    """A one-color asset whose flatcolor source duplicates its silhouette
+    source produces byte-identical ``silhouette_svg`` and ``flatcolor_svg``
+    (ADR 0012's "one-color asset" example): a product including both still
+    ships both files -- package contents follow the product definition, not
+    file contents -- and warns naming the asset and both types, recorded in
+    the manifest."""
+    _generate_and_approve_flatcolor_duplicate(monkeypatch, temp_catalog_root)
+
+    result = runner.invoke(app, ["build", FLATCOLOR_DUPLICATE_PRODUCT_SLUG])
+
+    assert result.exit_code == 0, result.output
+    assert "Byte-identical derivatives: 1" in result.output
+    assert (
+        f"{FLATCOLOR_DUPLICATE_ASSET_ID}\tflatcolor_svg, silhouette_svg are byte-identical"
+        in result.output
+    )
+
+    build_dir = _build_dir(temp_catalog_root, FLATCOLOR_DUPLICATE_PRODUCT_SLUG)
+    package_dir = build_dir / FLATCOLOR_DUPLICATE_TOP_LEVEL
+    silhouette_bytes = (package_dir / "SVG" / FLATCOLOR_DUPLICATE_SILHOUETTE_FILE).read_bytes()
+    flatcolor_bytes = (package_dir / "SVG" / FLATCOLOR_DUPLICATE_FLATCOLOR_FILE).read_bytes()
+    # both files actually ship, and are themselves byte-identical -- this
+    # test's own oracle for the warning's claim, independent of the
+    # manifest's own recorded content hash below.
+    assert silhouette_bytes == flatcolor_bytes
+
+    manifest = json.loads((build_dir / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["byte_identical_derivatives"] == [
+        {
+            "asset_id": FLATCOLOR_DUPLICATE_ASSET_ID,
+            "derivative_types": ["flatcolor_svg", "silhouette_svg"],
+            "content_hash": hashlib.sha256(silhouette_bytes).hexdigest(),
+        }
+    ]
+
+
+@pytest.mark.integration
+def test_byte_identical_derivatives_output_and_manifest_section_are_locked_by_snapshot(
+    monkeypatch: pytest.MonkeyPatch, temp_catalog_root: Path, snapshot: SnapshotAssertion
+) -> None:
+    _fix_license_year(monkeypatch)
+    _generate_and_approve_flatcolor_duplicate(monkeypatch, temp_catalog_root)
+
+    result = runner.invoke(app, ["build", FLATCOLOR_DUPLICATE_PRODUCT_SLUG])
+    assert result.exit_code == 0, result.output
+
+    warning_lines = [
+        line
+        for line in result.output.splitlines()
+        if "Byte-identical derivatives" in line or "are byte-identical" in line
+    ]
+    assert warning_lines == snapshot(name="byte_identical_derivatives_output")
+
+    build_dir = _build_dir(temp_catalog_root, FLATCOLOR_DUPLICATE_PRODUCT_SLUG)
+    manifest = json.loads((build_dir / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["byte_identical_derivatives"] == snapshot(
+        name="byte_identical_derivatives_manifest"
+    )
