@@ -21,7 +21,7 @@ from pathlib import Path
 from vectorpress.build.product_resolution import ProductMember, resolve_product
 from vectorpress.catalog.assets import asset_dir
 from vectorpress.catalog.brand import load_brand
-from vectorpress.catalog.manifests import read_manifest
+from vectorpress.catalog.manifests import ManifestFormatError, read_manifest
 from vectorpress.catalog.overrides import effective_derivative
 from vectorpress.catalog.provenance import sha256_bytes
 from vectorpress.domain.asset import Asset, AssetId
@@ -31,6 +31,7 @@ from vectorpress.domain.derivative_type import DerivativeType, derivative_filena
 from vectorpress.domain.manifest import Manifest
 from vectorpress.domain.package_text import readme_wording_fingerprint
 from vectorpress.domain.product import Product
+from vectorpress.domain.reference_size import resolve_reference_size_in
 
 
 class MemberDifferenceReason(StrEnum):
@@ -69,17 +70,38 @@ class NeedsRebuildOutcome(StrEnum):
 
 
 @dataclass(frozen=True)
+class ReferenceSizeChange:
+    """The product's resolved reference size (§9.1, ADR 0012) at its last
+    build, versus what it resolves to now -- both already resolved through
+    :func:`~vectorpress.domain.reference_size.resolve_reference_size_in`,
+    the same value the manifest itself records and README.txt's own "Files
+    checked at reference size" line renders. A product override changing,
+    or being added or removed, surfaces here the same as a catalog default
+    change."""
+
+    previous_in: float
+    current_in: float
+
+
+@dataclass(frozen=True)
 class NeedsRebuildResult:
     """The result of :func:`compute_needs_rebuild`. ``member_differences``,
-    ``license_template_changed`` and ``readme_wording_changed`` are each
-    empty/``False`` unless ``outcome`` is
-    :attr:`NeedsRebuildOutcome.NEEDS_REBUILD` -- together, every reason the
-    product needs rebuilding."""
+    ``license_template_changed``, ``readme_wording_changed`` and
+    ``reference_size_change`` are each empty/``False``/``None`` unless
+    ``outcome`` is :attr:`NeedsRebuildOutcome.NEEDS_REBUILD` -- together,
+    every reason the product needs rebuilding. ``manifest_format_outdated``
+    is the one exception: set on its own, with every other field at its
+    empty value, when the last manifest could not be read back at all (a
+    real catalog's own build history predating a field this version added,
+    CONTEXT.md "Needs rebuild") -- there is nothing to compare it against,
+    so this is reported instead of any comparison."""
 
     outcome: NeedsRebuildOutcome
     member_differences: list[MemberDifference]
     license_template_changed: bool
     readme_wording_changed: bool
+    reference_size_change: ReferenceSizeChange | None
+    manifest_format_outdated: bool
 
 
 def _current_member_hashes(
@@ -163,6 +185,23 @@ def _brand_wording_differences(root: Path, manifest: Manifest) -> tuple[bool, bo
     return license_template_changed, readme_wording_changed
 
 
+def _empty_result(
+    outcome: NeedsRebuildOutcome, *, manifest_format_outdated: bool = False
+) -> NeedsRebuildResult:
+    """A :class:`NeedsRebuildResult` with no comparison at all -- every
+    outcome that has nothing to compare against (never built, or the
+    manifest predating the current format) shares this empty shape, so each
+    caller states only the one field that actually differs from it."""
+    return NeedsRebuildResult(
+        outcome,
+        member_differences=[],
+        license_template_changed=False,
+        readme_wording_changed=False,
+        reference_size_change=None,
+        manifest_format_outdated=manifest_format_outdated,
+    )
+
+
 def compute_needs_rebuild(
     product: Product,
     root: Path,
@@ -180,10 +219,19 @@ def compute_needs_rebuild(
     itself recorded, not always ``False``: a build made with
     ``--allow-unapproved`` must not show its own admitted members as
     ``removed`` merely because this check forgot the flag that build used.
+
+    A last manifest that exists but no longer parses (§23, a real catalog's
+    own build history predating a field a newer tool version added) reports
+    :attr:`NeedsRebuildOutcome.NEEDS_REBUILD` with
+    ``manifest_format_outdated`` set instead of raising -- there is nothing
+    on record to compare against, so no other field is populated.
     """
-    manifest = read_manifest(root, product.slug)
+    try:
+        manifest = read_manifest(root, product.slug)
+    except ManifestFormatError:
+        return _empty_result(NeedsRebuildOutcome.NEEDS_REBUILD, manifest_format_outdated=True)
     if manifest is None:
-        return NeedsRebuildResult(NeedsRebuildOutcome.NEVER_BUILT, [], False, False)
+        return _empty_result(NeedsRebuildOutcome.NEVER_BUILT)
 
     resolved = resolve_product(
         product,
@@ -200,12 +248,26 @@ def compute_needs_rebuild(
     member_differences = _member_differences(manifest, current_hashes)
     license_template_changed, readme_wording_changed = _brand_wording_differences(root, manifest)
 
-    if not member_differences and not license_template_changed and not readme_wording_changed:
-        return NeedsRebuildResult(NeedsRebuildOutcome.CURRENT, [], False, False)
+    current_reference_size_in = resolve_reference_size_in(config, product)
+    reference_size_change = (
+        ReferenceSizeChange(manifest.reference_size_in, current_reference_size_in)
+        if current_reference_size_in != manifest.reference_size_in
+        else None
+    )
+
+    if (
+        not member_differences
+        and not license_template_changed
+        and not readme_wording_changed
+        and reference_size_change is None
+    ):
+        return _empty_result(NeedsRebuildOutcome.CURRENT)
 
     return NeedsRebuildResult(
         NeedsRebuildOutcome.NEEDS_REBUILD,
-        member_differences,
-        license_template_changed,
-        readme_wording_changed,
+        member_differences=member_differences,
+        license_template_changed=license_template_changed,
+        readme_wording_changed=readme_wording_changed,
+        reference_size_change=reference_size_change,
+        manifest_format_outdated=False,
     )

@@ -252,8 +252,10 @@ def _lookup_and_resolve_collection_or_exit(
 def status(ctx: typer.Context) -> None:
     """Show the catalog's inventory and every metadata problem.
 
-    Exits 1 when any metadata problem exists, so it works as a check in
-    scripts.
+    Also counts missing, impossible and stale derivatives, stale overrides,
+    review status, asset publication, and how many products need
+    rebuilding. Exits 1 when any metadata problem exists, so it works as a
+    check in scripts.
     \f
     Aggregates problems from catalog config, assets, collections, products
     and brand. Missing, impossible and stale derivative counts, the stale
@@ -272,9 +274,9 @@ def status(ctx: typer.Context) -> None:
     itself a load failure (§11).
 
     "Products needing rebuild" (§23, §34) counts every loaded product whose
-    vectorpress.build.needs_rebuild.compute_needs_rebuild outcome is
-    NEEDS_REBUILD -- 'vpress product' shows the same answer for one product
-    in full, including every difference.
+    build.needs_rebuild.compute_needs_rebuild outcome is needs-rebuild --
+    'vpress product' shows the same answer for one product in full,
+    including every difference.
     """
     root = _locate_root(ctx)
     catalog = load_catalog(root)
@@ -1587,8 +1589,11 @@ def products(ctx: typer.Context) -> None:
 def _echo_needs_rebuild(result: NeedsRebuildResult) -> None:
     """``vpress product``'s ``Build:`` section (§23, CONTEXT.md "Needs
     rebuild"): ``current``, ``never built``, or ``needs rebuild`` with every
-    reason -- a member difference per (asset, derivative type), and/or the
-    brand's license template or README wording having changed."""
+    reason -- a member difference per (asset, derivative type), the brand's
+    license template or README wording having changed, the resolved
+    reference size having changed, or the last manifest predating the
+    current format (in which case it is the only reason shown: there is
+    nothing on record to compare against)."""
     if result.outcome is NeedsRebuildOutcome.NEVER_BUILT:
         typer.echo("Build: never built")
         return
@@ -1597,6 +1602,9 @@ def _echo_needs_rebuild(result: NeedsRebuildResult) -> None:
         return
 
     typer.echo("Build: needs rebuild")
+    if result.manifest_format_outdated:
+        typer.echo("  manifest predates the current format")
+        return
     for difference in result.member_differences:
         typer.echo(
             f"  {difference.asset_id}\t{difference.derivative_type.value}\t{difference.reason.value}"
@@ -1605,6 +1613,10 @@ def _echo_needs_rebuild(result: NeedsRebuildResult) -> None:
         typer.echo("  license template: changed")
     if result.readme_wording_changed:
         typer.echo("  README wording: changed")
+    if result.reference_size_change is not None:
+        previous = format_number(result.reference_size_change.previous_in)
+        current = format_number(result.reference_size_change.current_in)
+        typer.echo(f"  reference size: changed ({previous}in → {current}in)")
 
 
 @app.command()

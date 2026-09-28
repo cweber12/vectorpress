@@ -14,6 +14,7 @@ collection: ``ochre_sea_star``, ``giant_green_anemone``, ``purple_sea_urchin``) 
 """
 
 import io
+import json
 import re
 import shutil
 from pathlib import Path
@@ -209,24 +210,37 @@ def test_adding_then_discarding_an_override_each_flag_the_containing_product(
     assert approve_result.exit_code == 0, approve_result.output
 
     with_override_output = _product_output(temp_catalog_root, PNG_ONLY_SLUG)
+    standard_pack_with_override_output = _product_output(temp_catalog_root, STANDARD_PACK_SLUG)
     assert "Build: needs rebuild" in with_override_output
     assert "ochre_sea_star\ttransparent_png\tchanged" in with_override_output
+    # ochre_sea_star's transparent_png is also included in the standard
+    # pack, so the identical override flags it too, while
+    # kelp_forest_mini_pack -- whose one member is purple_sea_urchin --
+    # stays current throughout.
+    assert "Build: needs rebuild" in standard_pack_with_override_output
+    assert "ochre_sea_star\ttransparent_png\tchanged" in standard_pack_with_override_output
+    assert "Build: current" in _product_output(temp_catalog_root, MINI_PACK_SLUG)
 
-    # Rebuild so the override becomes the last manifest's own recorded
+    # Rebuild both so the override becomes the last manifest's own recorded
     # content hash -- discarding it then must flag needs rebuild again,
     # relative to *this* build, not the pre-override one.
-    build_result = runner.invoke(app, ["build", PNG_ONLY_SLUG])
-    assert build_result.exit_code == 0, build_result.output
-    assert "Build: current" in _product_output(temp_catalog_root, PNG_ONLY_SLUG)
+    for slug in (PNG_ONLY_SLUG, STANDARD_PACK_SLUG):
+        build_result = runner.invoke(app, ["build", slug])
+        assert build_result.exit_code == 0, build_result.output
+        assert "Build: current" in _product_output(temp_catalog_root, slug)
 
     discard_result = runner.invoke(
         app, ["override", "discard", "ochre_sea_star", "transparent_png", "--yes"]
     )
     assert discard_result.exit_code == 0, discard_result.output
 
-    after_discard_output = _product_output(temp_catalog_root, PNG_ONLY_SLUG)
-    assert "Build: needs rebuild" in after_discard_output
-    assert "ochre_sea_star\ttransparent_png\tchanged" in after_discard_output
+    after_discard_png_only = _product_output(temp_catalog_root, PNG_ONLY_SLUG)
+    after_discard_standard_pack = _product_output(temp_catalog_root, STANDARD_PACK_SLUG)
+    assert "Build: needs rebuild" in after_discard_png_only
+    assert "ochre_sea_star\ttransparent_png\tchanged" in after_discard_png_only
+    assert "Build: needs rebuild" in after_discard_standard_pack
+    assert "ochre_sea_star\ttransparent_png\tchanged" in after_discard_standard_pack
+    assert "Build: current" in _product_output(temp_catalog_root, MINI_PACK_SLUG)
 
 
 # --- acceptance: vpress status's count is locked by snapshot -----------------
@@ -247,3 +261,204 @@ def test_status_products_needing_rebuild_count_is_locked_by_snapshot(
     # unpredictable text would break any other full-output snapshot.
     normalized = _normalized_output(result.stdout).replace(str(temp_catalog_root), "<catalog-root>")
     assert normalized == snapshot
+
+
+@pytest.mark.integration
+def test_status_products_needing_rebuild_count_is_locked_by_snapshot_when_nonzero(
+    monkeypatch: pytest.MonkeyPatch, temp_catalog_root: Path, snapshot: SnapshotAssertion
+) -> None:
+    """The same snapshot lock, once one product actually needs rebuilding
+    (an edited license template, the simplest deterministic trigger) --
+    the zero-count snapshot above only ever proves the count field exists,
+    never that it counts correctly."""
+    _fix_license_year(monkeypatch)
+    _build_every_fixture_product(monkeypatch, temp_catalog_root)
+    license_path = temp_catalog_root / "license_template.txt"
+    license_path.write_text(
+        license_path.read_text(encoding="utf-8") + "\nAn extra line.\n", encoding="utf-8"
+    )
+
+    result = runner.invoke(app, ["status"])
+
+    assert result.exit_code == 0, result.output
+    normalized = _normalized_output(result.stdout).replace(str(temp_catalog_root), "<catalog-root>")
+    assert normalized == snapshot
+
+
+# --- fix round 1: a manifest predating the current format never crashes -----
+
+
+@pytest.mark.integration
+def test_a_manifest_predating_the_current_format_reads_as_needs_rebuild_not_a_crash(
+    monkeypatch: pytest.MonkeyPatch, temp_catalog_root: Path
+) -> None:
+    """A real catalog's own build history can predate a field a newer tool
+    version added to the manifest -- reading it back must never crash
+    ``vpress product`` or ``vpress status`` (the controller's ruling):
+    report needs rebuild with an explicit reason instead."""
+    _build_every_fixture_product(monkeypatch, temp_catalog_root)
+
+    manifest_path = temp_catalog_root / "builds" / PNG_ONLY_SLUG / "manifest.json"
+    data = json.loads(manifest_path.read_text(encoding="utf-8"))
+    del data["license_template_hash"]
+    del data["readme_wording_hash"]
+    del data["allow_unapproved"]
+    manifest_path.write_text(json.dumps(data), encoding="utf-8")
+
+    product_result = _product_output(temp_catalog_root, PNG_ONLY_SLUG)
+    assert "Build: needs rebuild" in product_result
+    assert "manifest predates the current format" in product_result
+
+    status_result = runner.invoke(app, ["--catalog", str(temp_catalog_root), "status"])
+    assert status_result.exit_code == 0, status_result.output
+    assert "Products needing rebuild: 1" in status_result.stdout
+
+
+# --- fix round 1: added / removed, driven directly -----------------------------
+
+
+@pytest.mark.integration
+def test_a_newly_included_derivative_type_shows_added(
+    monkeypatch: pytest.MonkeyPatch, temp_catalog_root: Path
+) -> None:
+    """Widening a product's own ``derivative_types`` after it was built adds
+    (asset, type) entries no last manifest has -- ``silhouette_svg`` is
+    already approved for every ``pacific_coast_tide_pool`` member
+    (``_build_every_fixture_product`` approves it catalog-wide for the
+    standard pack), so each becomes eligible again immediately, with one new
+    entry apiece."""
+    _build_every_fixture_product(monkeypatch, temp_catalog_root)
+
+    product_path = temp_catalog_root / "products" / f"{PNG_ONLY_SLUG}.toml"
+    text = product_path.read_text(encoding="utf-8")
+    before = 'derivative_types = ["transparent_png"]\nformats = ["png"]'
+    assert before in text
+    product_path.write_text(
+        text.replace(
+            before,
+            'derivative_types = ["transparent_png", "silhouette_svg"]\nformats = ["png", "svg"]',
+        ),
+        encoding="utf-8",
+    )
+
+    output = _product_output(temp_catalog_root, PNG_ONLY_SLUG)
+
+    assert "Build: needs rebuild" in output
+    for asset_id in ("ochre_sea_star", "giant_green_anemone", "purple_sea_urchin"):
+        assert f"{asset_id}\tsilhouette_svg\tadded" in output
+
+
+@pytest.mark.integration
+def test_a_member_leaving_the_collection_shows_removed(
+    monkeypatch: pytest.MonkeyPatch, temp_catalog_root: Path
+) -> None:
+    """Dropping a member from an explicit collection membership after the
+    product was built removes every (asset, type) entry the last manifest
+    had for it -- ``kelp_forest_mini_pack``'s own rule membership is
+    unaffected (it never referenced ``pacific_coast_tide_pool``'s own
+    explicit list), so it stays current."""
+    _build_every_fixture_product(monkeypatch, temp_catalog_root)
+
+    collection_path = temp_catalog_root / "collections" / "pacific_coast_tide_pool.toml"
+    text = collection_path.read_text(encoding="utf-8")
+    before = 'asset_ids = ["ochre_sea_star", "giant_green_anemone", "purple_sea_urchin"]'
+    assert before in text
+    collection_path.write_text(
+        text.replace(before, 'asset_ids = ["ochre_sea_star", "giant_green_anemone"]'),
+        encoding="utf-8",
+    )
+
+    png_only_output = _product_output(temp_catalog_root, PNG_ONLY_SLUG)
+    standard_pack_output = _product_output(temp_catalog_root, STANDARD_PACK_SLUG)
+    mini_pack_output = _product_output(temp_catalog_root, MINI_PACK_SLUG)
+
+    assert "Build: needs rebuild" in png_only_output
+    assert "purple_sea_urchin\ttransparent_png\tremoved" in png_only_output
+    assert "Build: needs rebuild" in standard_pack_output
+    for derivative_type in ("cut_svg", "silhouette_svg", "transparent_png"):
+        assert f"purple_sea_urchin\t{derivative_type}\tremoved" in standard_pack_output
+    # purple_sea_urchin is kelp_forest_mini_pack's rule membership's only
+    # match, entirely independent of pacific_coast_tide_pool's own explicit
+    # list -- dropping it there leaves the mini pack untouched.
+    assert "Build: current" in mini_pack_output
+
+
+# --- fix round 1: brand wording changes, driven directly ------------------------
+
+
+@pytest.mark.integration
+def test_license_template_change_flags_needs_rebuild_naming_the_reason(
+    monkeypatch: pytest.MonkeyPatch, temp_catalog_root: Path
+) -> None:
+    _build_every_fixture_product(monkeypatch, temp_catalog_root)
+
+    license_path = temp_catalog_root / "license_template.txt"
+    license_path.write_text(
+        license_path.read_text(encoding="utf-8") + "\nAn extra line.\n", encoding="utf-8"
+    )
+
+    output = _product_output(temp_catalog_root, PNG_ONLY_SLUG)
+    assert "Build: needs rebuild" in output
+    assert "license template: changed" in output
+    assert "README wording: changed" not in output
+
+
+@pytest.mark.integration
+def test_readme_wording_change_flags_needs_rebuild_naming_the_reason(
+    monkeypatch: pytest.MonkeyPatch, temp_catalog_root: Path
+) -> None:
+    _build_every_fixture_product(monkeypatch, temp_catalog_root)
+
+    brand_path = temp_catalog_root / "brand.toml"
+    before = 'standard_wording = "Hand-illustrated, scientifically accurate cut files."'
+    text = brand_path.read_text(encoding="utf-8")
+    assert before in text
+    brand_path.write_text(
+        text.replace(before, 'standard_wording = "Hand-illustrated, small-batch cut files."'),
+        encoding="utf-8",
+    )
+
+    output = _product_output(temp_catalog_root, PNG_ONLY_SLUG)
+    assert "Build: needs rebuild" in output
+    assert "README wording: changed" in output
+    assert "license template: changed" not in output
+
+
+# --- fix round 1: reference size changes, driven directly -----------------------
+
+
+@pytest.mark.integration
+def test_reference_size_change_flags_needs_rebuild_naming_the_change(
+    monkeypatch: pytest.MonkeyPatch, temp_catalog_root: Path
+) -> None:
+    _build_every_fixture_product(monkeypatch, temp_catalog_root)
+
+    product_path = temp_catalog_root / "products" / f"{PNG_ONLY_SLUG}.toml"
+    text = product_path.read_text(encoding="utf-8")
+    assert "reference_size_in" not in text
+    product_path.write_text(text + "reference_size_in = 6.0\n", encoding="utf-8")
+
+    output = _product_output(temp_catalog_root, PNG_ONLY_SLUG)
+    assert "Build: needs rebuild" in output
+    assert "reference size: changed (3in → 6in)" in output
+
+
+# --- fix round 1: a build made with --allow-unapproved reads as current -----------
+
+
+@pytest.mark.integration
+def test_a_build_made_with_allow_unapproved_reads_as_current_with_no_further_change(
+    monkeypatch: pytest.MonkeyPatch, temp_catalog_root: Path
+) -> None:
+    """The controller's ruling: needs-rebuild re-resolves eligibility under
+    the *same* ``--allow-unapproved`` the last build recorded, so a build
+    made with it shows current -- never ``removed`` for its own admitted
+    members -- when nothing has actually changed since."""
+    monkeypatch.chdir(temp_catalog_root)
+    runner.invoke(app, ["generate", "--all"])
+
+    build_result = runner.invoke(app, ["build", PNG_ONLY_SLUG, "--allow-unapproved"])
+    assert build_result.exit_code == 0, build_result.output
+    assert "Admitted unapproved: 3" in build_result.output
+
+    assert "Build: current" in _product_output(temp_catalog_root, PNG_ONLY_SLUG)
