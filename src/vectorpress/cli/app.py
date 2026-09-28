@@ -1721,8 +1721,9 @@ def build(
     same as 'vpress product') refuses the build under this product's
     default ineligible_members = "refuse"; set to "exclude", it ships the
     eligible members instead, reporting and recording each excluded one --
-    and still refuses, the same way, when none are eligible. --allow-unapproved
-    widens eligibility for this one build only: a generated or needs-review
+    and still refuses, reporting that no member was eligible, when none are.
+    --allow-unapproved widens eligibility for this one build only: a
+    generated or needs-review
     derivative ships instead of blocking, listed in the output and recorded
     in the manifest with its status; a rejected or regenerate derivative, or
     a rights/accuracy block, still makes its member ineligible regardless.
@@ -1844,6 +1845,7 @@ def build(
         typer.echo(
             f"  {duplicate.asset_id}\t{types} are byte-identical; if unintended, declare no"
             " source for the redundant type in asset.toml to make it impossible"
+            " (e.g. no flatcolor source for one-color art)"
         )
 
 

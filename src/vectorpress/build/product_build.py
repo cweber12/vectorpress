@@ -21,7 +21,8 @@ also refuses the build depends on ``product.ineligible_members``: the
 default ``refuse`` fails the whole build naming every ineligible member and
 its §10.1 reasons; ``exclude`` instead builds only the eligible members,
 records each excluded one in the manifest with its reasons, and still
-refuses -- the same way, naming every member -- when none are eligible.
+refuses, reporting that no member was eligible, when none are -- naming
+every ineligible member below that, the same as ``refuse``.
 
 ``allow_unapproved`` (the per-build ``--allow-unapproved`` override, never
 persisted) widens eligibility itself, not this gate: a ``generated`` or
