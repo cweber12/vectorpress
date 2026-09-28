@@ -18577,10 +18577,12 @@
   dict({
     'admitted_unapproved_members': list([
     ]),
+    'allow_unapproved': False,
     'dxf_members': list([
     ]),
     'excluded_members': list([
     ]),
+    'license_template_hash': '5ebd27971491321fa49369d43df7f17cdc3d79dae210de60edb0b785a9f3d2e8',
     'license_year': 2026,
     'members': list([
       dict({
@@ -18606,6 +18608,7 @@
       }),
     ]),
     'product_slug': 'pacific_coast_tide_pool_png_only',
+    'readme_wording_hash': 'e02c5c6b690a8aa685805dfb7fdace6ddf0bc8520108d1fd5517770cbc2d1408',
     'reference_size_in': 3.0,
     'tool_version': '0.1.0',
   })
