@@ -1,6 +1,6 @@
 # 0005 — TOML for hand-authored files, JSON for tool-owned; the tool never rewrites hand-authored files
 
-Status: accepted
+Status: accepted (listing-draft exception amended by 0016)
 Date: 2026-09-22
 
 ## Context

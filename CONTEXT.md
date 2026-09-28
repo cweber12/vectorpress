@@ -103,6 +103,10 @@ verification (`rights_verified`, `rights_review_required`, `do_not_publish`).
 tool whose terms permit commercial use. Not blocking, but requires licensing notes
 naming the tool and terms. Permanent: hand edits (overrides) do not remove it.
 
+**AI disclosure** — The sentence, and any marketplace category choice, telling buyers
+how many of a build's included designs are AI-generated. Added by exporters only;
+never on previews, never in the package. Never names the AI tool.
+
 **Accuracy status** — Asset-level scientific-accuracy state (§25). Hand-authored.
 
 **Blocked** — An asset excluded from sellable packages by a publication blocking rule
@@ -135,16 +139,35 @@ effective derivatives. Writes a **manifest**.
 hashes a build contained, plus reference size and tool version.
 
 **Needs rebuild** — A product whose last manifest no longer matches current effective
-derivatives.
+derivatives, brand wording, or what its previews are drawn from (**previews out of
+date**).
 
 **Package** — The customer-facing directory structure (§14). **ZIP** is the package
 archived.
 
 **Preview** — A marketplace image rendered from an HTML template with brand config.
-Build output; no status.
+Build output beside the package, never inside it; no status. Avoid: "mockup" (a
+future physical-item render, §16), "contact sheet" (the catalog's own review page).
 
-**Listing** — The authoritative marketing metadata for a product (§18). Drafted once by
-the tool, then user-owned.
+**Preview type** — One of the fixed §16 previews: `main`, `included`, `formats`,
+`variants` (only with two or more derivative types), `contents` (only when members
+outnumber what `included` shows). Each has a fixed number that sets upload order.
+
+**Canvas** — A fixed preview image size every preview type is rendered at: `square`
+(2000×2000) or `landscape` (3:2, 2400×1600). Marketplaces differ in image shape, not
+content.
+
+**Featured member** — A member a product names, in `[previews] featured`, to lead its
+main and variants previews. Without the list, members lead in display-name order.
+
+**Listing** — The authoritative marketing metadata for a product (§18): the
+`[listing]` table of its `product.toml`. Drafted by the tool only on explicit request
+and only when none exists (create-only), then user-owned. A product without one
+cannot build.
+
+**Contents summary** — The "what's included" facts (member count, formats, file
+names, reference size) built from a build's manifest and placed after a listing's
+description by exporters. Never stored in the listing, so it cannot go stale.
 
 **Exporter** — A file-only projection of a listing into a marketplace's shape.
 

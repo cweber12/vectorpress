@@ -25,7 +25,8 @@ at a **catalog** directory that lives outside this repo.
   `uv run lint-imports` (ADR 0006). `cli` and `ui` are thin: they call the same
   functions.
 - **Hand-authored TOML is read-only to the tool; the tool writes only JSON state**
-  (ADR 0005). The one sanctioned write is drafting a product's `[listing]` on first build.
+  (ADR 0005). The one sanctioned write is appending a product's `[listing]` on explicit
+  request (`vpress listing draft`), create-only (ADR 0016).
 - **`sources/` is read-only.** Generation writes under `derived/`; a human's edit lives
   under `overrides/` and is the **effective derivative** (ADR 0003, 0007).
 - **Provenance is content-addressed** (ADR 0004): staleness and "current" are hash
