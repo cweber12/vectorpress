@@ -33,7 +33,7 @@
 # name: test_byte_identical_derivatives_output_and_manifest_section_are_locked_by_snapshot[byte_identical_derivatives_output]
   list([
     'Byte-identical derivatives: 1',
-    '  flatcolor_duplicate_test_asset\tflatcolor_svg, silhouette_svg are byte-identical; if unintended, declare no source for the redundant type in asset.toml to make it impossible',
+    '  flatcolor_duplicate_test_asset\tflatcolor_svg, silhouette_svg are byte-identical; if unintended, declare no source for the redundant type in asset.toml to make it impossible (e.g. no flatcolor source for one-color art)',
   ])
 # ---
 # name: test_cleanup_size_warning_output_and_manifest_section_are_locked_by_snapshot[cleanup_size_warning_output]

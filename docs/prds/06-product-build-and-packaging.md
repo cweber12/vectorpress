@@ -1,6 +1,6 @@
 # PRD 6 — Product Build and Packaging
 
-Status: not started
+Status: complete
 Depends on: see `docs/PLAN.md` Part 3 dependency graph
 
 **Goal.** A product resolves into a complete, repeatable, customer-ready package and
