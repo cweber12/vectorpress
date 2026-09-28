@@ -1,5 +1,6 @@
 """``vpress build`` end to end against a temporary copy of the fixture
-catalog (§14, §15, §20, §35, §36, ADR 0004, ADR 0005, ADR 0008, ADR 0013).
+catalog (§14, §15, §20, §27, §35, §36, ADR 0004, ADR 0005, ADR 0008,
+ADR 0013).
 
 Runs against a temporary copy, never the committed fixture directly: this
 command writes real files under ``builds/``, and the fixture catalog must
@@ -64,6 +65,16 @@ def _build_dir(root: Path, slug: str) -> Path:
     return root / "builds" / slug
 
 
+#: A fixed LICENSE.txt build year (§27), so a test asserting on rendered
+#: text -- or locking it in a snapshot -- never depends on which real
+#: calendar year the test suite happens to run in.
+FIXED_LICENSE_YEAR = 2026
+
+
+def _fix_license_year(monkeypatch: pytest.MonkeyPatch, year: int = FIXED_LICENSE_YEAR) -> None:
+    monkeypatch.setattr("vectorpress.build.product_build._current_year", lambda: year)
+
+
 @pytest.mark.integration
 def test_build_writes_a_png_only_package_and_zip(
     monkeypatch: pytest.MonkeyPatch, temp_catalog_root: Path
@@ -81,10 +92,13 @@ def test_build_writes_a_png_only_package_and_zip(
     assert zip_path.is_file()
     assert manifest_path.is_file()
 
-    expected_files = sorted(f"PNG/{filename}" for filename in PNG_ONLY_FILES.values())
+    expected_files = sorted(
+        [f"PNG/{filename}" for filename in PNG_ONLY_FILES.values()] + ["README.txt", "LICENSE.txt"]
+    )
 
-    # the package directory holds only those PNG/ files -- no SVG/, no
-    # state, provenance, findings or source files (§14).
+    # the package directory holds only those PNG/ files plus README.txt and
+    # LICENSE.txt at its top level -- no SVG/, no state, provenance,
+    # findings or source files (§14, §27).
     package_files = sorted(
         p.relative_to(package_dir).as_posix() for p in package_dir.rglob("*") if p.is_file()
     )
@@ -94,6 +108,109 @@ def test_build_writes_a_png_only_package_and_zip(
     with zipfile.ZipFile(zip_path) as zip_file:
         names = sorted(zip_file.namelist())
     assert names == [f"{PNG_ONLY_TOP_LEVEL}/{f}" for f in expected_files]
+
+
+@pytest.mark.integration
+def test_build_writes_readme_and_license_with_every_placeholder_substituted(
+    monkeypatch: pytest.MonkeyPatch, temp_catalog_root: Path
+) -> None:
+    _fix_license_year(monkeypatch)
+    _generate_and_approve_transparent_png(monkeypatch, temp_catalog_root)
+
+    result = runner.invoke(app, ["build", PNG_ONLY_SLUG])
+    assert result.exit_code == 0, result.output
+
+    package_dir = _build_dir(temp_catalog_root, PNG_ONLY_SLUG) / PNG_ONLY_TOP_LEVEL
+    license_text = (package_dir / "LICENSE.txt").read_text(encoding="utf-8")
+    readme_text = (package_dir / "README.txt").read_text(encoding="utf-8")
+
+    # every {brand}/{product}/{copyright}/{year} placeholder is gone --
+    # PNG_ONLY_SLUG has no [listing] yet, so {product} falls back to its
+    # slug (§27).
+    assert "{" not in license_text
+    assert "Tide Pool Studio" in license_text
+    assert PNG_ONLY_SLUG in license_text
+    assert "© Tide Pool Studio. All rights reserved." in license_text
+    assert str(FIXED_LICENSE_YEAR) in license_text
+
+    for filename in PNG_ONLY_FILES.values():
+        assert filename in readme_text
+    assert "Included formats: PNG" in readme_text
+    assert "Files checked at reference size: 3in" in readme_text
+    assert "© Tide Pool Studio. All rights reserved." in readme_text
+
+
+@pytest.mark.integration
+def test_build_refuses_without_brand_toml_and_writes_nothing(
+    monkeypatch: pytest.MonkeyPatch, temp_catalog_root: Path
+) -> None:
+    _generate_and_approve_transparent_png(monkeypatch, temp_catalog_root)
+    (temp_catalog_root / "brand.toml").unlink()
+
+    result = runner.invoke(app, ["build", PNG_ONLY_SLUG])
+
+    assert result.exit_code == 1
+    assert "brand.toml" in result.output
+    assert "not found" in result.output
+    assert not (temp_catalog_root / "builds").exists()
+
+
+@pytest.mark.integration
+def test_build_refuses_when_license_file_is_removed_from_brand_and_writes_nothing(
+    monkeypatch: pytest.MonkeyPatch, temp_catalog_root: Path
+) -> None:
+    _generate_and_approve_transparent_png(monkeypatch, temp_catalog_root)
+    brand_path = temp_catalog_root / "brand.toml"
+    before = 'license_file = "license_template.txt"\n'
+    text = brand_path.read_text(encoding="utf-8")
+    assert before in text
+    brand_path.write_text(text.replace(before, ""), encoding="utf-8")
+
+    result = runner.invoke(app, ["build", PNG_ONLY_SLUG])
+
+    assert result.exit_code == 1
+    assert "brand.toml" in result.output
+    assert "license_file" in result.output
+    assert not (temp_catalog_root / "builds").exists()
+
+
+@pytest.mark.integration
+def test_build_refuses_when_license_file_names_a_path_that_does_not_exist(
+    monkeypatch: pytest.MonkeyPatch, temp_catalog_root: Path
+) -> None:
+    _generate_and_approve_transparent_png(monkeypatch, temp_catalog_root)
+    brand_path = temp_catalog_root / "brand.toml"
+    before = 'license_file = "license_template.txt"'
+    text = brand_path.read_text(encoding="utf-8")
+    assert before in text
+    brand_path.write_text(
+        text.replace(before, 'license_file = "does_not_exist.txt"'), encoding="utf-8"
+    )
+
+    result = runner.invoke(app, ["build", PNG_ONLY_SLUG])
+
+    assert result.exit_code == 1
+    assert "license_file" in result.output
+    assert "does_not_exist.txt" in result.output
+    assert not (temp_catalog_root / "builds").exists()
+
+
+@pytest.mark.integration
+def test_build_refuses_on_an_unknown_license_placeholder_and_writes_nothing(
+    monkeypatch: pytest.MonkeyPatch, temp_catalog_root: Path
+) -> None:
+    _generate_and_approve_transparent_png(monkeypatch, temp_catalog_root)
+    license_path = temp_catalog_root / "license_template.txt"
+    license_path.write_text(
+        license_path.read_text(encoding="utf-8") + "\n{not_a_real_placeholder}\n",
+        encoding="utf-8",
+    )
+
+    result = runner.invoke(app, ["build", PNG_ONLY_SLUG])
+
+    assert result.exit_code == 1
+    assert "not_a_real_placeholder" in result.output
+    assert not (temp_catalog_root / "builds").exists()
 
 
 @pytest.mark.integration
@@ -264,6 +381,7 @@ def test_rebuilding_with_no_changes_is_byte_identical(
 def test_manifest_and_zip_listing_are_locked_by_snapshot(
     monkeypatch: pytest.MonkeyPatch, temp_catalog_root: Path, snapshot: SnapshotAssertion
 ) -> None:
+    _fix_license_year(monkeypatch)
     _generate_and_approve_transparent_png(monkeypatch, temp_catalog_root)
 
     result = runner.invoke(app, ["build", PNG_ONLY_SLUG])
@@ -276,6 +394,28 @@ def test_manifest_and_zip_listing_are_locked_by_snapshot(
     with zipfile.ZipFile(build_dir / f"{PNG_ONLY_TOP_LEVEL}.zip") as zip_file:
         names = sorted(zip_file.namelist())
     assert names == snapshot(name="zip_listing")
+
+
+@pytest.mark.integration
+def test_readme_and_license_text_are_locked_by_snapshot(
+    monkeypatch: pytest.MonkeyPatch, temp_catalog_root: Path, snapshot: SnapshotAssertion
+) -> None:
+    """README.txt and LICENSE.txt's exact rendered text (§27), pinned so a
+    wording or ordering change is a deliberate, reviewed snapshot update --
+    the year is fixed (:func:`_fix_license_year`) so this never depends on
+    which real calendar year the suite happens to run in."""
+    _fix_license_year(monkeypatch)
+    _generate_and_approve_transparent_png(monkeypatch, temp_catalog_root)
+
+    result = runner.invoke(app, ["build", PNG_ONLY_SLUG])
+    assert result.exit_code == 0, result.output
+
+    package_dir = _build_dir(temp_catalog_root, PNG_ONLY_SLUG) / PNG_ONLY_TOP_LEVEL
+    readme_text = (package_dir / "README.txt").read_text(encoding="utf-8")
+    license_text = (package_dir / "LICENSE.txt").read_text(encoding="utf-8")
+
+    assert readme_text == snapshot(name="readme")
+    assert license_text == snapshot(name="license")
 
 
 @pytest.mark.integration

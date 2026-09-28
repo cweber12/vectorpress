@@ -1,10 +1,18 @@
 """Build one product into a customer package, its ZIP, and a manifest (§14,
-§15, §20, §35, §36, ADR 0004, ADR 0005, ADR 0008, ADR 0013).
+§15, §20, §27, §35, §36, ADR 0004, ADR 0005, ADR 0008, ADR 0013).
 
 Only ``SVG/`` and ``PNG/`` are built here (ADR 0013's fixed table); DXF
-conversion, brand README/LICENSE, and the ``exclude`` ineligibility mode
-are not. One function, :func:`build_product`, does the whole thing --
+conversion and the ``exclude`` ineligibility mode are not. Every package
+also carries a brand-supplied ``README.txt`` and ``LICENSE.txt`` at its top
+level (§27). One function, :func:`build_product`, does the whole thing --
 ``cli`` (and later ``ui``) only render its :class:`BuildResult`.
+
+**Brand gate.** A build refuses -- writes nothing -- without a valid
+``brand.toml`` naming an existing ``license_file`` (there is no default
+brand, since a default would ship as the customer's license terms), and
+refuses again if that license template names a placeholder besides
+``{brand}``, ``{product}``, ``{copyright}`` or ``{year}``. Checked before
+membership resolves, since neither depends on it.
 
 **Eligibility gate (default refuse).** A build refuses -- writes nothing --
 if the product's membership does not fully resolve, or if any member is not
@@ -29,6 +37,7 @@ import json
 import shutil
 import zipfile
 from dataclasses import dataclass
+from datetime import date
 from enum import StrEnum
 from pathlib import Path
 from uuid import uuid4
@@ -36,6 +45,7 @@ from uuid import uuid4
 from vectorpress import __version__
 from vectorpress.build.product_resolution import ProductMember, resolve_product
 from vectorpress.catalog.assets import asset_dir
+from vectorpress.catalog.brand import load_brand
 from vectorpress.catalog.metadata_problem import MetadataProblem
 from vectorpress.catalog.overrides import effective_derivative
 from vectorpress.catalog.provenance import sha256_bytes
@@ -46,9 +56,19 @@ from vectorpress.domain.derivative_type import DerivativeType, derivative_filena
 from vectorpress.domain.format_folder import copied_folder
 from vectorpress.domain.manifest import Manifest, ManifestMember, ManifestMemberSource
 from vectorpress.domain.package_naming import package_name
+from vectorpress.domain.package_text import (
+    UnknownLicensePlaceholderError,
+    render_license_text,
+    render_readme_text,
+)
 from vectorpress.domain.product import Product
 from vectorpress.domain.reference_size import resolve_reference_size_in
 from vectorpress.pipeline.eligibility import included_derivatives
+
+#: The two brand-supplied plain-text files every package carries at its top
+#: level, beside its format folders (§14, §27).
+README_FILENAME = "README.txt"
+LICENSE_FILENAME = "LICENSE.txt"
 
 #: Every build's output lives under this catalog-root-relative directory,
 #: never under ``sources/``, ``derived/``, ``overrides/`` or any
@@ -163,10 +183,12 @@ def _find_name_collisions(planned: list[_PlannedFile]) -> list[NameCollision]:
 
 class BuildOutcome(StrEnum):
     """One ``vpress build`` outcome (§14, §35): built, or refused for one of
-    three reasons, each leaving the previous build (if any) untouched and
+    five reasons, each leaving the previous build (if any) untouched and
     writing nothing new."""
 
     BUILT = "built"
+    REFUSED_BRAND_PROBLEMS = "refused_brand_problems"
+    REFUSED_LICENSE_TEMPLATE_PROBLEM = "refused_license_template_problem"
     REFUSED_REFERENCE_PROBLEMS = "refused_reference_problems"
     REFUSED_INELIGIBLE_MEMBERS = "refused_ineligible_members"
     REFUSED_NAME_COLLISION = "refused_name_collision"
@@ -175,18 +197,37 @@ class BuildOutcome(StrEnum):
 @dataclass(frozen=True)
 class BuildResult:
     """The outcome of one :func:`build_product` call. Exactly one of
+    ``brand_problems``, ``unknown_license_placeholders``,
     ``reference_problems``, ``ineligible_members`` or ``name_collisions`` is
     set for its matching refusal outcome; ``manifest``/``package_dir``/
     ``zip_path`` are set exactly when ``outcome`` is
     :attr:`BuildOutcome.BUILT`."""
 
     outcome: BuildOutcome
+    brand_problems: list[MetadataProblem] | None = None
+    unknown_license_placeholders: list[str] | None = None
     reference_problems: list[MetadataProblem] | None = None
     ineligible_members: list[ProductMember] | None = None
     name_collisions: list[NameCollision] | None = None
     manifest: Manifest | None = None
     package_dir: Path | None = None
     zip_path: Path | None = None
+
+
+def _current_year() -> int:
+    """The calendar year LICENSE.txt's ``{year}`` placeholder substitutes
+    (§27): a thin wrapper around ``date.today()`` so tests can fix the year
+    (monkeypatching this function) without waiting for a real year
+    boundary to prove the "unchanged rebuild" repeatability rule holds
+    within one."""
+    return date.today().year
+
+
+def _product_title(product: Product) -> str:
+    """LICENSE.txt's ``{product}`` placeholder (§27): the product's listing
+    title, else its slug -- the same fallback ``vpress product`` already
+    uses for a product with no ``[listing]`` drafted yet."""
+    return product.listing.title if product.listing is not None else product.slug
 
 
 def _manifest_json_bytes(manifest: Manifest) -> bytes:
@@ -196,6 +237,7 @@ def _manifest_json_bytes(manifest: Manifest) -> bytes:
     payload = {
         "product_slug": manifest.product_slug,
         "reference_size_in": manifest.reference_size_in,
+        "license_year": manifest.license_year,
         "tool_version": manifest.tool_version,
         "members": [
             {
@@ -267,6 +309,29 @@ def build_product(
     (:func:`~vectorpress.build.product_resolution.resolve_product`, ADR
     0011): no second resolution path.
     """
+    brand_result = load_brand(root)
+    if brand_result.brand is None:
+        return BuildResult(
+            BuildOutcome.REFUSED_BRAND_PROBLEMS, brand_problems=brand_result.problems
+        )
+    brand = brand_result.brand
+
+    license_year = _current_year()
+    license_template = (root / brand.license_file).read_text(encoding="utf-8")
+    try:
+        license_text = render_license_text(
+            license_template,
+            brand_name=brand.name,
+            product_title=_product_title(product),
+            copyright_wording=brand.copyright_wording,
+            year=license_year,
+        )
+    except UnknownLicensePlaceholderError as exc:
+        return BuildResult(
+            BuildOutcome.REFUSED_LICENSE_TEMPLATE_PROBLEM,
+            unknown_license_placeholders=exc.placeholders,
+        )
+
     resolved = resolve_product(product, root, config, known_assets, known_collections)
 
     if resolved.reference_problems:
@@ -317,10 +382,27 @@ def build_product(
             )
         )
 
+    files_by_folder: dict[str, list[str]] = {}
+    for rel_path, _ in package_files:
+        folder, _, filename = rel_path.partition("/")
+        files_by_folder.setdefault(folder, []).append(filename)
+
+    readme_text = render_readme_text(
+        intro=brand.readme_text,
+        standard_wording=brand.standard_wording,
+        copyright_wording=brand.copyright_wording,
+        included_formats=list(files_by_folder),
+        files_by_folder=files_by_folder,
+        reference_size_in=reference_size_in,
+    )
+    package_files.append((README_FILENAME, readme_text.encode("utf-8")))
+    package_files.append((LICENSE_FILENAME, license_text.encode("utf-8")))
+
     manifest_members.sort(key=lambda member: (member.asset_id, member.derivative_type.value))
     manifest = Manifest(
         product_slug=product.slug,
         reference_size_in=reference_size_in,
+        license_year=license_year,
         tool_version=__version__,
         members=manifest_members,
     )
