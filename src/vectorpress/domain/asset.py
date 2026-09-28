@@ -20,6 +20,7 @@ class RightsStatus(StrEnum):
     ORIGINAL_ARTWORK = "original_artwork"
     LICENSED_SOURCE = "licensed_source"
     PUBLIC_DOMAIN_SOURCE = "public_domain_source"
+    AI_GENERATED = "ai_generated"
     RIGHTS_VERIFIED = "rights_verified"
     RIGHTS_REVIEW_REQUIRED = "rights_review_required"
     DO_NOT_PUBLISH = "do_not_publish"

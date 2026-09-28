@@ -135,3 +135,73 @@ def test_gumboot_chiton_stays_blocked_by_rights_status_even_fully_approved(
     section = _eligibility_section(result.stdout)
     assert "needs review" not in section
     assert "missing" not in section
+
+
+# --- acceptance criterion 5 (§26): ai_generated, blocking only on empty notes -------
+
+
+def _blank_owl_limpets_licensing_notes(root: Path) -> None:
+    """Blank ``owl_limpet``'s ``licensing_notes`` in a temp catalog copy
+    alone: the committed fixture keeps them non-empty (this module's own
+    docstring says never to mutate the committed catalog), so the empty-
+    notes case is test-only, mirroring the CLAUDE.md convention every other
+    §10.1 block fixture in this file already uses."""
+    path = root / "assets" / "owl_limpet" / "asset.toml"
+    text = path.read_text(encoding="utf-8")
+    assert 'rights_status = "ai_generated"\n' in text
+    before = (
+        'licensing_notes = "Generated with Midjourney (v6) under its commercial-use terms '
+        'for paid subscribers; the ai_generated rights-status fixture (§26)."\n'
+    )
+    assert before in text
+    path.write_text(text.replace(before, 'licensing_notes = ""\n'), encoding="utf-8")
+
+
+@pytest.mark.integration
+def test_owl_limpet_is_eligible_after_approving_every_derivative_with_ai_generated_notes(
+    monkeypatch: pytest.MonkeyPatch, temp_catalog_root: Path
+) -> None:
+    """§26: the committed ``ai_generated`` fixture, ``licensing_notes``
+    already naming the tool and its terms, is eligible once every existing
+    derivative is approved -- ``ai_generated`` alone never blocks."""
+    monkeypatch.chdir(temp_catalog_root)
+    runner.invoke(app, ["generate", "owl_limpet"])
+
+    approve_result = runner.invoke(app, ["approve", "owl_limpet", "--all-types"])
+    assert approve_result.exit_code == 0, approve_result.output
+
+    result = runner.invoke(app, ["asset", "owl_limpet"])
+
+    assert result.exit_code == 0, result.output
+    assert _eligibility_line(result.stdout).endswith("eligible")
+    assert "licensing notes" not in _eligibility_section(result.stdout)
+
+
+@pytest.mark.integration
+def test_owl_limpet_is_blocked_with_empty_licensing_notes_even_fully_approved(
+    monkeypatch: pytest.MonkeyPatch, temp_catalog_root: Path
+) -> None:
+    """§26: the same asset, ``licensing_notes`` blanked, stays blocked with
+    its own reason kind even once every derivative is approved -- the
+    permanent-block shape ``test_gumboot_chiton_stays_blocked_by_rights_
+    status_even_fully_approved`` above already proves for a straight rights
+    block."""
+    _blank_owl_limpets_licensing_notes(temp_catalog_root)
+    monkeypatch.chdir(temp_catalog_root)
+    runner.invoke(app, ["generate", "owl_limpet"])
+
+    approve_result = runner.invoke(app, ["approve", "owl_limpet", "--all-types"])
+    assert approve_result.exit_code == 0, approve_result.output
+
+    result = runner.invoke(app, ["asset", "owl_limpet"])
+
+    assert result.exit_code == 0, result.output
+    assert _eligibility_line(result.stdout).endswith("blocked")
+    assert (
+        "  licensing notes: must name the AI tool and its terms (rights status: ai generated)"
+        in result.stdout
+    )
+    # No unapproved-derivative reason: every existing derivative is approved.
+    section = _eligibility_section(result.stdout)
+    assert "needs review" not in section
+    assert "missing" not in section

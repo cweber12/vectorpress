@@ -100,6 +100,66 @@ def test_rights_review_required_blocks() -> None:
     assert result.warnings == []
 
 
+def test_ai_generated_with_notes_does_not_block_on_its_own() -> None:
+    """§26: ``ai_generated`` alone never blocks -- non-empty
+    ``licensing_notes`` leaves the asset eligible."""
+    result = asset_eligibility(
+        RightsStatus.AI_GENERATED,
+        AccuracyStatus.APPROVED,
+        [],
+        [_APPROVED_PNG],
+        licensing_notes="Generated with Midjourney under its commercial-use terms.",
+    )
+
+    assert result.eligibility is Eligibility.ELIGIBLE
+    assert result.blocking_reasons == []
+
+
+def test_ai_generated_with_empty_licensing_notes_blocks_with_its_own_reason_kind() -> None:
+    result = asset_eligibility(
+        RightsStatus.AI_GENERATED,
+        AccuracyStatus.APPROVED,
+        [],
+        [_APPROVED_PNG],
+        licensing_notes="",
+    )
+
+    assert result.eligibility is Eligibility.BLOCKED
+    assert result.blocking_reasons == [
+        BlockingReason(BlockingReasonKind.AI_GENERATED_LICENSING_NOTES, None, "ai_generated")
+    ]
+
+
+def test_ai_generated_with_whitespace_only_licensing_notes_blocks() -> None:
+    result = asset_eligibility(
+        RightsStatus.AI_GENERATED,
+        AccuracyStatus.APPROVED,
+        [],
+        [_APPROVED_PNG],
+        licensing_notes="   \n",
+    )
+
+    assert result.eligibility is Eligibility.BLOCKED
+    assert result.blocking_reasons == [
+        BlockingReason(BlockingReasonKind.AI_GENERATED_LICENSING_NOTES, None, "ai_generated")
+    ]
+
+
+def test_licensing_notes_are_irrelevant_for_a_non_ai_generated_rights_status() -> None:
+    """Empty ``licensing_notes`` is only a problem for ``ai_generated``: any
+    other rights status stays eligible regardless."""
+    result = asset_eligibility(
+        RightsStatus.ORIGINAL_ARTWORK,
+        AccuracyStatus.APPROVED,
+        [],
+        [_APPROVED_PNG],
+        licensing_notes="",
+    )
+
+    assert result.eligibility is Eligibility.ELIGIBLE
+    assert result.blocking_reasons == []
+
+
 def test_accuracy_issue_found_blocks() -> None:
     result = asset_eligibility(
         RightsStatus.ORIGINAL_ARTWORK, AccuracyStatus.ISSUE_FOUND, [], [_APPROVED_PNG]
@@ -426,4 +486,26 @@ def test_allow_unapproved_does_not_override_an_accuracy_block() -> None:
     assert result.eligibility is Eligibility.BLOCKED
     assert result.blocking_reasons == [
         BlockingReason(BlockingReasonKind.ACCURACY_STATUS, None, "issue_found")
+    ]
+
+
+def test_allow_unapproved_does_not_override_an_ai_generated_licensing_notes_block() -> None:
+    """§26's licensing-notes block is permanent, the same as a rights or
+    accuracy block: ``allow_unapproved`` widens derivative admission only."""
+    needs_review = IncludedDerivative(
+        DerivativeType.CUT_SVG, DerivativeState.CURRENT, Status.NEEDS_REVIEW
+    )
+
+    result = asset_eligibility(
+        RightsStatus.AI_GENERATED,
+        AccuracyStatus.APPROVED,
+        [],
+        [needs_review],
+        licensing_notes="",
+        allow_unapproved=True,
+    )
+
+    assert result.eligibility is Eligibility.BLOCKED
+    assert result.blocking_reasons == [
+        BlockingReason(BlockingReasonKind.AI_GENERATED_LICENSING_NOTES, None, "ai_generated")
     ]

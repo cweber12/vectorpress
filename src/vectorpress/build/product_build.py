@@ -28,9 +28,12 @@ persisted) widens eligibility itself, not this gate: a ``generated`` or
 ``needs_review`` included derivative admits instead of blocking (§10.1's
 "unless explicitly overridden"), recorded in the manifest's
 ``admitted_unapproved_members`` with its status at build time. It never
-admits ``rejected`` or ``regenerate``, and never overrides a rights or
-accuracy block -- those members stay ineligible and this gate still applies
-to them exactly as without the flag.
+admits ``rejected`` or ``regenerate``, and never overrides a rights,
+accuracy or licensing-notes block -- those members stay ineligible and this
+gate still applies to them exactly as without the flag. Every eligible
+member's rights status (§26) is recorded in the manifest's
+``asset_rights_statuses`` regardless -- not only ``ai_generated`` ones --
+for a later marketplace-disclosure step.
 
 **Customer file name collisions.** Two members whose customer file names
 collide within one format folder also refuse the build, before anything is
@@ -80,6 +83,7 @@ from vectorpress.domain.format_folder import copied_folder, dxf_filename, dxf_so
 from vectorpress.domain.manifest import (
     Manifest,
     ManifestAdmittedUnapproved,
+    ManifestAssetRightsStatus,
     ManifestDxfMember,
     ManifestExcludedMember,
     ManifestMember,
@@ -366,6 +370,13 @@ def _manifest_json_bytes(manifest: Manifest) -> bytes:
             }
             for member in manifest.admitted_unapproved_members
         ],
+        "asset_rights_statuses": [
+            {
+                "asset_id": entry.asset_id,
+                "rights_status": entry.rights_status.value,
+            }
+            for entry in manifest.asset_rights_statuses
+        ],
     }
     return json.dumps(payload, indent=2, sort_keys=True).encode("utf-8") + b"\n"
 
@@ -589,6 +600,13 @@ def build_product(
     admitted_unapproved_members.sort(
         key=lambda member: (member.asset_id, member.derivative_type.value)
     )
+    asset_rights_statuses = [
+        ManifestAssetRightsStatus(
+            asset_id=member.asset_id, rights_status=assets_by_id[member.asset_id].rights_status
+        )
+        for member in resolved.eligible_members
+    ]
+    asset_rights_statuses.sort(key=lambda entry: entry.asset_id)
     manifest = Manifest(
         product_slug=product.slug,
         reference_size_in=reference_size_in,
@@ -601,6 +619,7 @@ def build_product(
         dxf_members=dxf_manifest_members,
         excluded_members=excluded_manifest_members,
         admitted_unapproved_members=admitted_unapproved_members,
+        asset_rights_statuses=asset_rights_statuses,
     )
 
     builds_dir = root / BUILDS_DIRNAME

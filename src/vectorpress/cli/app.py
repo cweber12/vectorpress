@@ -500,7 +500,12 @@ def _render_blocking_reason(reason: BlockingReason) -> str:
     ``<type>: <value>``; an asset-level one (``rights_status``/
     ``accuracy_status``) reads ``rights status: <value>`` or ``accuracy
     status: <value>`` -- underscores in the value itself always become
-    spaces, whichever enum it came from."""
+    spaces, whichever enum it came from. ``ai_generated_licensing_notes``
+    (§26) reads as its own fixed sentence rather than ``<label>: <value>``,
+    since the fact worth telling a human is what to fix, not the rights
+    status value itself (always ``ai_generated``)."""
+    if reason.kind is BlockingReasonKind.AI_GENERATED_LICENSING_NOTES:
+        return "licensing notes: must name the AI tool and its terms (rights status: ai generated)"
     text = reason.value.replace("_", " ")
     if reason.derivative_type is not None:
         return f"{reason.derivative_type.value}: {text}"
@@ -1855,7 +1860,8 @@ def _echo_blocked_assets(items: list[BlockedAssetItem]) -> None:
         reasons = "; ".join(_render_blocking_reason(reason) for reason in item.reasons)
         typer.echo(f"  {item.asset_id}\t{reasons}")
         typer.echo(
-            f"    resolve: edit assets/{item.asset_id}/asset.toml's rights_status/accuracy_status"
+            f"    resolve: edit assets/{item.asset_id}/asset.toml's"
+            " rights_status/accuracy_status/licensing_notes"
         )
 
 

@@ -83,7 +83,11 @@ images tagged with a role (§4.1, ADR 0003):
   Its `ecosystems` deliberately match neither fixture collection, the same as
   `acorn_barnacle` below. See `generate_source_pngs.py`'s
   `_owl_limpet_silhouette_with_cleanup_noise` for the exact geometry and the
-  pixels-per-inch arithmetic behind it.
+  pixels-per-inch arithmetic behind it. Also the fixture's `ai_generated`
+  rights-status asset (§26): `rights_status = "ai_generated"` with
+  non-empty `licensing_notes` naming the tool and its terms, so it is
+  eligible once its derivatives are approved like any other rights status --
+  distinct from `gumboot_chiton` below, whose rights status blocks outright.
 - `gumboot_chiton` — a `silhouette` source only, on its own larger (300x300) canvas:
   the `accidental_dot` fixture (issue #39). A main body plus one small, detached
   circular eye-spot -- 14px across, comfortably clear of `cut_svg`'s island-area

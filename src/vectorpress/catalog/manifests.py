@@ -19,11 +19,13 @@ into its own needs-rebuild reason.
 import json
 from pathlib import Path
 
+from vectorpress.domain.asset import RightsStatus
 from vectorpress.domain.derivative_type import DerivativeType
 from vectorpress.domain.eligibility import BlockingReason, BlockingReasonKind
 from vectorpress.domain.manifest import (
     Manifest,
     ManifestAdmittedUnapproved,
+    ManifestAssetRightsStatus,
     ManifestDxfMember,
     ManifestExcludedMember,
     ManifestMember,
@@ -128,6 +130,13 @@ def read_manifest(root: Path, slug: ProductSlug) -> Manifest | None:
                     status=Status(member["status"]),
                 )
                 for member in data["admitted_unapproved_members"]
+            ],
+            asset_rights_statuses=[
+                ManifestAssetRightsStatus(
+                    asset_id=entry["asset_id"],
+                    rights_status=RightsStatus(entry["rights_status"]),
+                )
+                for entry in data["asset_rights_statuses"]
             ],
         )
     except (json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:

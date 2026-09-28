@@ -194,6 +194,7 @@ def resolve_product(
             asset.accuracy_status,
             missing_optional_metadata_fields(asset),
             included,
+            asset.licensing_notes,
             allow_unapproved=allow_unapproved,
         )
         eligibility = (
