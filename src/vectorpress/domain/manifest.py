@@ -106,6 +106,32 @@ class ManifestAssetRightsStatus:
 
 
 @dataclass(frozen=True)
+class ManifestCleanupSizeWarning:
+    """One eligible member whose included ``cut_svg`` was cleaned at a
+    smaller **cleanup size** than the product's own resolved reference size
+    (ADR 0012, CONTEXT.md "Cleanup size"): a non-blocking build warning,
+    since cleanup may have removed detail that would cut cleanly at the
+    larger size and findings cannot show what was taken out."""
+
+    asset_id: AssetId
+    cleanup_size_in: float
+
+
+@dataclass(frozen=True)
+class ManifestByteIdenticalDerivatives:
+    """One member whose included derivatives are byte-identical for two or
+    more derivative types (e.g. a one-color asset's ``silhouette_svg`` and
+    ``flatcolor_svg``): a non-blocking build warning -- both still ship,
+    since package contents follow the product definition, not file
+    contents. ``derivative_types`` is sorted and holds every type sharing
+    ``content_hash``, not only the first pair found."""
+
+    asset_id: AssetId
+    derivative_types: list[DerivativeType]
+    content_hash: str
+
+
+@dataclass(frozen=True)
 class Manifest:
     """One build's complete record (§14, §23, ADR 0004): the product it
     built, the reference size it was built at, the LICENSE.txt build year,
@@ -135,6 +161,12 @@ class Manifest:
     several included derivative types still gets one entry), sorted by
     asset ID -- the input a later marketplace-disclosure step reads rather
     than re-loading every member's own ``asset.toml``.
+
+    ``cleanup_size_warnings`` and ``byte_identical_derivatives`` are two
+    non-blocking build warnings (§9, §20, ADR 0012): a member sold larger
+    than its cut file's own cleanup size, and a member whose included
+    derivatives duplicate each other's bytes. Neither excludes or drops a
+    file -- both are reported for a human to act on, or not.
     """
 
     product_slug: ProductSlug
@@ -149,3 +181,5 @@ class Manifest:
     excluded_members: list[ManifestExcludedMember]
     admitted_unapproved_members: list[ManifestAdmittedUnapproved]
     asset_rights_statuses: list[ManifestAssetRightsStatus]
+    cleanup_size_warnings: list[ManifestCleanupSizeWarning]
+    byte_identical_derivatives: list[ManifestByteIdenticalDerivatives]

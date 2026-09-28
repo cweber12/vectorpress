@@ -26,6 +26,8 @@ from vectorpress.domain.manifest import (
     Manifest,
     ManifestAdmittedUnapproved,
     ManifestAssetRightsStatus,
+    ManifestByteIdenticalDerivatives,
+    ManifestCleanupSizeWarning,
     ManifestDxfMember,
     ManifestExcludedMember,
     ManifestMember,
@@ -137,6 +139,21 @@ def read_manifest(root: Path, slug: ProductSlug) -> Manifest | None:
                     rights_status=RightsStatus(entry["rights_status"]),
                 )
                 for entry in data["asset_rights_statuses"]
+            ],
+            cleanup_size_warnings=[
+                ManifestCleanupSizeWarning(
+                    asset_id=entry["asset_id"],
+                    cleanup_size_in=entry["cleanup_size_in"],
+                )
+                for entry in data["cleanup_size_warnings"]
+            ],
+            byte_identical_derivatives=[
+                ManifestByteIdenticalDerivatives(
+                    asset_id=entry["asset_id"],
+                    derivative_types=[DerivativeType(t) for t in entry["derivative_types"]],
+                    content_hash=entry["content_hash"],
+                )
+                for entry in data["byte_identical_derivatives"]
             ],
         )
     except (json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:

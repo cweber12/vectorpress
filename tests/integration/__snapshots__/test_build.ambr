@@ -18,6 +18,38 @@
     }),
   ])
 # ---
+# name: test_byte_identical_derivatives_output_and_manifest_section_are_locked_by_snapshot[byte_identical_derivatives_manifest]
+  list([
+    dict({
+      'asset_id': 'flatcolor_duplicate_test_asset',
+      'content_hash': '8f5356c6ff46b439c3df8c06e6461c3574010c0d38e380ce7d88d8aaed03a79b',
+      'derivative_types': list([
+        'flatcolor_svg',
+        'silhouette_svg',
+      ]),
+    }),
+  ])
+# ---
+# name: test_byte_identical_derivatives_output_and_manifest_section_are_locked_by_snapshot[byte_identical_derivatives_output]
+  list([
+    'Byte-identical derivatives: 1',
+    '  flatcolor_duplicate_test_asset\tflatcolor_svg, silhouette_svg are byte-identical; if unintended, declare no source for the redundant type in asset.toml to make it impossible',
+  ])
+# ---
+# name: test_cleanup_size_warning_output_and_manifest_section_are_locked_by_snapshot[cleanup_size_warning_output]
+  list([
+    'Cleanup size warnings: 1',
+    '  ochre_sea_star\tcleanup size 6in < product reference size 8in',
+  ])
+# ---
+# name: test_cleanup_size_warning_output_and_manifest_section_are_locked_by_snapshot[cleanup_size_warnings_manifest]
+  list([
+    dict({
+      'asset_id': 'ochre_sea_star',
+      'cleanup_size_in': 6.0,
+    }),
+  ])
+# ---
 # name: test_dxf_is_locked_by_snapshot_and_its_entity_count_matches_the_svgs_closed_paths[ochre_sea_star_cut_dxf]
   '''
     0

@@ -39,6 +39,16 @@ for a later marketplace-disclosure step.
 collide within one format folder also refuse the build, before anything is
 written, naming every asset ID sharing that name (§20).
 
+**Cleanup-size and duplicate warnings (§9, §20, ADR 0012).** Two
+non-blocking warnings, recorded in the manifest, never excluding or
+dropping a file: a member whose included ``cut_svg`` was cleaned at a
+smaller cleanup size than the product's own resolved reference size
+(cleanup may have removed detail findings can't show was taken out), and a
+member whose included derivatives duplicate each other's bytes (e.g. a
+one-color asset's ``silhouette_svg`` and ``flatcolor_svg`` -- both still
+ship, since package contents follow the product definition, not file
+contents).
+
 **DXF conversion failure.** Every ``DXF/`` file is converted while
 :func:`build_product` is still only assembling its in-memory file list, so a
 conversion failure (malformed path data, or the DXF writer itself failing)
@@ -84,6 +94,8 @@ from vectorpress.domain.manifest import (
     Manifest,
     ManifestAdmittedUnapproved,
     ManifestAssetRightsStatus,
+    ManifestByteIdenticalDerivatives,
+    ManifestCleanupSizeWarning,
     ManifestDxfMember,
     ManifestExcludedMember,
     ManifestMember,
@@ -97,7 +109,7 @@ from vectorpress.domain.package_text import (
     render_readme_text,
 )
 from vectorpress.domain.product import IneligibleMembersMode, Product
-from vectorpress.domain.reference_size import resolve_reference_size_in
+from vectorpress.domain.reference_size import resolve_cleanup_size_in, resolve_reference_size_in
 from vectorpress.pipeline.eligibility import included_derivatives
 
 #: The one converted (never copied) format folder (ADR 0013): every other
@@ -226,6 +238,63 @@ def _find_name_collisions(planned: list[_PlannedFile]) -> list[NameCollision]:
     ]
     collisions.sort(key=lambda collision: (collision.folder, collision.filename))
     return collisions
+
+
+def _cleanup_size_warnings(
+    eligible_members: list[ProductMember],
+    included_types_by_asset: dict[AssetId, list[DerivativeType]],
+    assets_by_id: dict[AssetId, Asset],
+    config: CatalogConfig,
+    reference_size_in: float,
+) -> list[ManifestCleanupSizeWarning]:
+    """One :class:`~vectorpress.domain.manifest.ManifestCleanupSizeWarning`
+    per eligible member whose included ``cut_svg`` was cleaned at a smaller
+    cleanup size than ``reference_size_in`` (ADR 0012): cleanup may have
+    removed detail that would cut cleanly at the larger size, and findings
+    can't show what was taken out. Sorted by asset ID (§36)."""
+    warnings: list[ManifestCleanupSizeWarning] = []
+    for member in eligible_members:
+        if DerivativeType.CUT_SVG not in included_types_by_asset[member.asset_id]:
+            continue
+        cleanup_size_in = resolve_cleanup_size_in(config, assets_by_id[member.asset_id])
+        if cleanup_size_in < reference_size_in:
+            warnings.append(
+                ManifestCleanupSizeWarning(
+                    asset_id=member.asset_id, cleanup_size_in=cleanup_size_in
+                )
+            )
+    warnings.sort(key=lambda warning: warning.asset_id)
+    return warnings
+
+
+def _byte_identical_derivative_warnings(
+    content_by_member: dict[AssetId, dict[DerivativeType, bytes]],
+) -> list[ManifestByteIdenticalDerivatives]:
+    """One :class:`~vectorpress.domain.manifest.ManifestByteIdenticalDerivatives`
+    per group of two or more of one member's included derivatives that
+    hash identically (e.g. a one-color asset's ``silhouette_svg`` and
+    ``flatcolor_svg``): both still ship -- package contents follow the
+    product definition, not file contents -- but the duplicate is worth a
+    human's attention; the catalog-side fix is declaring no source for the
+    redundant type, making it impossible instead of a duplicate. Sorted by
+    (asset ID, first duplicated type) (§36)."""
+    warnings: list[ManifestByteIdenticalDerivatives] = []
+    for asset_id, content_by_type in content_by_member.items():
+        by_hash: dict[str, list[DerivativeType]] = {}
+        for derivative_type, content in content_by_type.items():
+            by_hash.setdefault(sha256_bytes(content), []).append(derivative_type)
+        for content_hash, derivative_types in by_hash.items():
+            if len(derivative_types) < 2:
+                continue
+            warnings.append(
+                ManifestByteIdenticalDerivatives(
+                    asset_id=asset_id,
+                    derivative_types=sorted(derivative_types, key=lambda t: t.value),
+                    content_hash=content_hash,
+                )
+            )
+    warnings.sort(key=lambda warning: (warning.asset_id, warning.derivative_types[0].value))
+    return warnings
 
 
 class BuildOutcome(StrEnum):
@@ -377,6 +446,21 @@ def _manifest_json_bytes(manifest: Manifest) -> bytes:
             }
             for entry in manifest.asset_rights_statuses
         ],
+        "cleanup_size_warnings": [
+            {
+                "asset_id": warning.asset_id,
+                "cleanup_size_in": warning.cleanup_size_in,
+            }
+            for warning in manifest.cleanup_size_warnings
+        ],
+        "byte_identical_derivatives": [
+            {
+                "asset_id": warning.asset_id,
+                "derivative_types": [t.value for t in warning.derivative_types],
+                "content_hash": warning.content_hash,
+            }
+            for warning in manifest.byte_identical_derivatives
+        ],
     }
     return json.dumps(payload, indent=2, sort_keys=True).encode("utf-8") + b"\n"
 
@@ -505,6 +589,11 @@ def build_product(
     package_files: list[tuple[str, bytes]] = []
     manifest_members: list[ManifestMember] = []
     dxf_manifest_members: list[ManifestDxfMember] = []
+    # Every eligible member's own copied (never converted) derivative bytes,
+    # keyed by its derivative type -- the input _byte_identical_derivative_
+    # warnings compares, gathered here since every one is already read once
+    # for its own package_files/manifest_members entry below.
+    content_by_member: dict[AssetId, dict[DerivativeType, bytes]] = {}
     for file in planned:
         asset_dir_path = asset_dir(root, config, file.asset_id)
         rel_path = f"{file.folder}/{file.filename}"
@@ -557,6 +646,7 @@ def build_product(
                 package_path=rel_path,
             )
         )
+        content_by_member.setdefault(file.asset_id, {})[file.derivative_type] = effective.bytes
 
     files_by_folder: dict[str, list[str]] = {}
     for rel_path, _ in package_files:
@@ -607,6 +697,10 @@ def build_product(
         for member in resolved.eligible_members
     ]
     asset_rights_statuses.sort(key=lambda entry: entry.asset_id)
+    cleanup_size_warnings = _cleanup_size_warnings(
+        resolved.eligible_members, included_types_by_asset, assets_by_id, config, reference_size_in
+    )
+    byte_identical_derivatives = _byte_identical_derivative_warnings(content_by_member)
     manifest = Manifest(
         product_slug=product.slug,
         reference_size_in=reference_size_in,
@@ -620,6 +714,8 @@ def build_product(
         excluded_members=excluded_manifest_members,
         admitted_unapproved_members=admitted_unapproved_members,
         asset_rights_statuses=asset_rights_statuses,
+        cleanup_size_warnings=cleanup_size_warnings,
+        byte_identical_derivatives=byte_identical_derivatives,
     )
 
     builds_dir = root / BUILDS_DIRNAME
