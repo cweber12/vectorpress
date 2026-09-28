@@ -1,6 +1,7 @@
 # serializer version: 1
 # name: test_manifest_and_zip_listing_are_locked_by_snapshot[manifest]
   dict({
+    'license_year': 2026,
     'members': list([
       dict({
         'asset_id': 'giant_green_anemone',
@@ -31,8 +32,45 @@
 # ---
 # name: test_manifest_and_zip_listing_are_locked_by_snapshot[zip_listing]
   list([
+    'Pacific-Coast-Tide-Pool-Png-Only/LICENSE.txt',
     'Pacific-Coast-Tide-Pool-Png-Only/PNG/giant-green-anemone-color.png',
     'Pacific-Coast-Tide-Pool-Png-Only/PNG/ochre-sea-star-color.png',
     'Pacific-Coast-Tide-Pool-Png-Only/PNG/purple-sea-urchin-color.png',
+    'Pacific-Coast-Tide-Pool-Png-Only/README.txt',
   ])
+# ---
+# name: test_readme_and_license_text_are_locked_by_snapshot[license]
+  '''
+  Tide Pool Studio Personal & Small Business Use License
+  
+  This license covers pacific_coast_tide_pool_png_only.
+  
+  You may use these cut files for personal projects and for small-batch
+  products you make and sell yourself. You may not resell, redistribute or
+  share the files themselves, in original or modified form.
+  
+  © Tide Pool Studio. All rights reserved. 2026
+  
+  '''
+# ---
+# name: test_readme_and_license_text_are_locked_by_snapshot[readme]
+  '''
+  Thank you for your purchase! These files are hand-illustrated and checked
+  for cut-file quality before release. See LICENSE.txt for usage terms.
+  
+  Hand-illustrated, scientifically accurate cut files.
+  
+  Included formats: PNG
+  
+  Included files:
+  PNG/
+    giant-green-anemone-color.png
+    ochre-sea-star-color.png
+    purple-sea-urchin-color.png
+  
+  Files checked at reference size: 3in
+  
+  © Tide Pool Studio. All rights reserved.
+  
+  '''
 # ---

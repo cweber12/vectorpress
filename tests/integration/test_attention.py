@@ -156,6 +156,9 @@ def _write_minimal_catalog(root: Path) -> None:
     image.save(asset_dir / "sources" / "silhouette.png", format="PNG")
 
     Image.new("RGBA", (4, 4), (10, 10, 10, 255)).save(root / "mark.png", format="PNG")
+    (root / "license_template.txt").write_text(
+        "{brand} license for {product}. {copyright} {year}\n", encoding="utf-8"
+    )
     (root / "brand.toml").write_text(
         "\n".join(
             [
@@ -163,6 +166,7 @@ def _write_minimal_catalog(root: Path) -> None:
                 'mark_file = "mark.png"',
                 'standard_wording = "Test wording."',
                 'license_name = "Test License"',
+                'license_file = "license_template.txt"',
                 'copyright_wording = "(c) Test."',
                 'readme_text = "Test readme."',
                 "",

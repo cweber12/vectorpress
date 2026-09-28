@@ -42,13 +42,17 @@ class Brand(BaseModel):
     Defines the product-level presentation requirements a catalog can carry
     once instead of recreating per product (§27): the brand name, its mark
     (logo) file, preview typography, product-card styling, standard wording,
-    license naming, copyright wording, and standard README text. Field
-    shapes are chosen so PRD 7 can map them to preview template variables
-    without change (ADR 0008); this module renders nothing.
+    license naming and template, copyright wording, and standard README
+    text. Field shapes are chosen so PRD 7 can map them to preview template
+    variables without change (ADR 0008); this module renders nothing.
 
-    ``mark_file`` names a file relative to the catalog root; checking that it
-    exists is the ``catalog`` layer's job (this module has no filesystem
-    awareness, per ADR 0006).
+    ``mark_file`` and ``license_file`` each name a file relative to the
+    catalog root; checking that it exists is the ``catalog`` layer's job
+    (this module has no filesystem awareness, per ADR 0006). ``license_file``
+    is a hand-written license template a build copies to ``LICENSE.txt``,
+    substituting ``{brand}``, ``{product}``, ``{copyright}`` and ``{year}``
+    (§27) -- the same template regardless of an included asset's rights
+    status.
     """
 
     model_config = ConfigDict(strict=True, extra="forbid", frozen=True)
@@ -59,5 +63,6 @@ class Brand(BaseModel):
     card_style: BrandCardStyle
     standard_wording: str
     license_name: str
+    license_file: str
     copyright_wording: str
     readme_text: str

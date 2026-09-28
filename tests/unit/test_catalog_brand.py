@@ -25,6 +25,7 @@ def test_fixture_catalog_loads_a_valid_brand() -> None:
     assert result.brand is not None
     assert result.brand.name == "Tide Pool Studio"
     assert result.brand.mark_file == "mark.png"
+    assert result.brand.license_file == "license_template.txt"
 
 
 def test_missing_brand_toml_is_a_problem_not_a_raise(tmp_path: Path) -> None:
@@ -100,3 +101,35 @@ def test_mark_path_that_does_not_exist_names_file_and_field(catalog_copy: Path) 
     assert problem.path == Path("brand.toml")
     assert problem.field == "mark_file"
     assert "does_not_exist.png" in problem.message
+
+
+def test_missing_license_file_field_names_file_and_field(catalog_copy: Path) -> None:
+    path = catalog_copy / "brand.toml"
+    text = path.read_text(encoding="utf-8").replace('license_file = "license_template.txt"\n', "")
+    path.write_text(text, encoding="utf-8")
+
+    result = load_brand(catalog_copy)
+
+    assert result.brand is None
+    assert len(result.problems) == 1
+    problem = result.problems[0]
+    assert problem.path == Path("brand.toml")
+    assert problem.field == "license_file"
+
+
+def test_license_path_that_does_not_exist_names_file_and_field(catalog_copy: Path) -> None:
+    path = catalog_copy / "brand.toml"
+    text = path.read_text(encoding="utf-8").replace(
+        'license_file = "license_template.txt"',
+        'license_file = "does_not_exist.txt"',
+    )
+    path.write_text(text, encoding="utf-8")
+
+    result = load_brand(catalog_copy)
+
+    assert result.brand is None
+    assert len(result.problems) == 1
+    problem = result.problems[0]
+    assert problem.path == Path("brand.toml")
+    assert problem.field == "license_file"
+    assert "does_not_exist.txt" in problem.message

@@ -28,6 +28,7 @@ catalog/
 ├── catalog.toml          # hand-authored, read-only to the tool (ADR 0005)
 ├── brand.toml             # hand-authored brand config (§27)
 ├── mark.png                # brand.toml's mark_file: the wave logo
+├── license_template.txt    # brand.toml's license_file: the LICENSE.txt template
 ├── assets/                # name configurable via catalog.toml's assets_dir
 │   └── <asset_id>/        # one folder per asset, named by asset ID
 │       ├── asset.toml      # hand-authored asset metadata
@@ -200,6 +201,9 @@ this file instead of `silhouette.png`.
 
 `brand.toml` holds a valid brand config (§27) naming `mark.png`: a real two-tone
 wave logo, downscaled to 300x300 and committed as-is. Populated by issue #3.
+`license_file` names `license_template.txt`, a hand-written license template using
+every placeholder `vpress build` substitutes (`{brand}`, `{product}`, `{copyright}`,
+`{year}`): the source `LICENSE.txt` in every built package (issue #93).
 
 ## Collections
 

@@ -7,6 +7,7 @@ name = "Tide Pool Studio"
 mark_file = "mark.png"
 standard_wording = "Hand-illustrated, scientifically accurate cut files."
 license_name = "Tide Pool Studio Personal & Small Business Use License"
+license_file = "license_template.txt"
 copyright_wording = "© Tide Pool Studio. All rights reserved."
 readme_text = """
 Thank you for your purchase! These files are hand-illustrated and checked

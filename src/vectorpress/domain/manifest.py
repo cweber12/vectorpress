@@ -4,10 +4,11 @@
 A manifest is a tool-owned record of exactly what one build contained:
 every included (asset, derivative type) with its effective-derivative
 source and content hash, plus the product slug, the resolved reference
-size, and the tool version (ADR 0004's "a build is a pure function of its
-manifest inputs"). This module only defines that shape; ``build`` resolves
-it from disk, serializes it to JSON, and writes it (ADR 0006 -- domain has
-no I/O).
+size, the calendar year substituted into LICENSE.txt's ``{year}``
+placeholder (§27), and the tool version (ADR 0004's "a build is a pure
+function of its manifest inputs"). This module only defines that shape;
+``build`` resolves it from disk, serializes it to JSON, and writes it
+(ADR 0006 -- domain has no I/O).
 
 Deliberately minimal: excluded members and their reasons, admitted-
 unapproved derivatives, rights status and warnings extend this shape as
@@ -50,12 +51,17 @@ class ManifestMember:
 @dataclass(frozen=True)
 class Manifest:
     """One build's complete record (§14, ADR 0004): the product it built,
-    the reference size it was built at, the tool version that built it, and
-    every included member. ``members`` is sorted by (asset ID, derivative
-    type) so two builds of unchanged inputs produce an identical manifest
-    (§36)."""
+    the reference size it was built at, the LICENSE.txt build year,
+    the tool version that built it, and every included member. ``members``
+    is sorted by (asset ID, derivative type) so two builds of unchanged
+    inputs produce an identical manifest (§36). ``license_year`` is the one
+    field expected to change on its own with no other input changing --
+    once a calendar year turns over -- which is why it is recorded rather
+    than left implicit (§27's "must not break the rebuild-is-identical rule
+    within a year")."""
 
     product_slug: ProductSlug
     reference_size_in: float
+    license_year: int
     tool_version: str
     members: list[ManifestMember]

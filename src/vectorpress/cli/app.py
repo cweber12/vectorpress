@@ -1635,20 +1635,22 @@ def build(
     ),
 ) -> None:
     """Build one product into builds/<slug>/: a customer package (SVG/ and
-    PNG/ folders), its ZIP, and a manifest.
+    PNG/ folders, plus README.txt and LICENSE.txt), its ZIP, and a manifest.
 
     Refuses and writes nothing -- leaving any previous build of this
-    product untouched -- if the product's membership does not fully
-    resolve, if any member is not eligible for this product's derivative
-    types (listing each with its reasons, the same as 'vpress product'), or
-    if two members' customer file names collide (naming every asset ID
-    sharing that name). Rebuilding with no changes reproduces the same
-    package and ZIP byte for byte.
+    product untouched -- without a valid catalog brand.toml naming an
+    existing license template (there is no default brand), if that license
+    template names an unknown placeholder, if the product's membership does
+    not fully resolve, if any member is not eligible for this product's
+    derivative types (listing each with its reasons, the same as 'vpress
+    product'), or if two members' customer file names collide (naming every
+    asset ID sharing that name). Rebuilding with no changes reproduces the
+    same package and ZIP byte for byte.
     \f
     vectorpress.build.product_build.build_product does the whole build;
     this only renders its BuildResult. Only SVG/ and PNG/ are built here --
-    DXF conversion, brand README/LICENSE, --allow-unapproved and the
-    'exclude' ineligibility mode are not.
+    DXF conversion, --allow-unapproved and the 'exclude' ineligibility mode
+    are not.
     """
     root, config = _locate_and_load_config(ctx)
     loaded = _lookup_product_or_exit(root, config, slug)
@@ -1656,6 +1658,21 @@ def build(
     known_collections = load_collections(root, config).collections
 
     result = build_product(loaded, root, config, known_assets, known_collections)
+
+    if result.outcome is BuildOutcome.REFUSED_BRAND_PROBLEMS:
+        assert result.brand_problems is not None
+        typer.echo(f"build: {slug} refused: invalid or missing brand.toml", err=True)
+        _echo_problems(result.brand_problems)
+        raise typer.Exit(code=1)
+
+    if result.outcome is BuildOutcome.REFUSED_LICENSE_TEMPLATE_PROBLEM:
+        assert result.unknown_license_placeholders is not None
+        placeholders = ", ".join(result.unknown_license_placeholders)
+        typer.echo(
+            f"build: {slug} refused: license template names unknown placeholder(s): {placeholders}",
+            err=True,
+        )
+        raise typer.Exit(code=1)
 
     if result.outcome is BuildOutcome.REFUSED_REFERENCE_PROBLEMS:
         assert result.reference_problems is not None
