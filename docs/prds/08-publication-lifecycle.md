@@ -15,6 +15,10 @@ change.
   prior snapshot (§23.1); removal requires a new product.
 - The attention report (PRD 4) gains proposed updates and published-but-stale
   products.
+- Handed over by PRD 7: §18's product version and creation/update date, derived
+  from publication snapshots and added to exports; needs-rebuild products (with
+  PRD 7's "previews out of date" and "listing changed" reasons) in the attention
+  report; and whether export limit warnings (ADR 0017) block publishing.
 
 **Out of scope.** Any marketplace API interaction.
 

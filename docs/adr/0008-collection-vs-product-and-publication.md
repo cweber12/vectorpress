@@ -1,6 +1,6 @@
 # 0008 — Collection = membership, Product = presentation; publication is a declared snapshot; previews are HTML
 
-Status: accepted
+Status: accepted (previews amended by 0014, 0015; exporters by 0017)
 Date: 2026-09-22
 
 ## Decision
