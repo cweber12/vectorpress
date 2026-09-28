@@ -1040,6 +1040,30 @@ def test_validate_product_reports_a_newly_matching_asset_without_editing_the_pro
 
 
 @pytest.mark.integration
+def test_validate_product_still_lists_an_excluded_member(
+    monkeypatch: pytest.MonkeyPatch, temp_catalog_root: Path
+) -> None:
+    """Findings are independent of eligibility (CONTEXT.md "Findings"): a
+    rejected cut_svg excludes ``purple_sea_urchin`` from
+    ``kelp_forest_mini_pack`` (§10.1's status-based blocking reason), but it
+    is still one of the product's resolved members, and ``--product`` still
+    validates and lists its cut file."""
+    monkeypatch.chdir(temp_catalog_root)
+    runner.invoke(app, ["generate", "--all"])
+    reject_result = runner.invoke(app, ["reject", "purple_sea_urchin", "cut_svg"])
+    assert reject_result.exit_code == 0, reject_result.output
+
+    product_result = runner.invoke(app, ["product", "kelp_forest_mini_pack"])
+    assert product_result.exit_code == 0, product_result.output
+    assert "purple_sea_urchin\trule\texcluded" in product_result.stdout  # sanity: excluded
+
+    result = runner.invoke(app, ["validate", "--product", "kelp_forest_mini_pack"])
+
+    assert result.exit_code == 0, result.output
+    assert "purple_sea_urchin\tcut_svg\tpurple-sea-urchin-cut.svg" in result.stdout
+
+
+@pytest.mark.integration
 def test_validate_product_with_no_cut_svg_reports_nothing_to_validate(
     monkeypatch: pytest.MonkeyPatch, temp_catalog_root: Path
 ) -> None:

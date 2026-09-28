@@ -18,7 +18,11 @@ from vectorpress.build.asset_resolution import (
     resolve_asset_reuse,
 )
 from vectorpress.build.product_build import BuildOutcome, build_product
-from vectorpress.build.product_resolution import resolve_product
+from vectorpress.build.product_resolution import (
+    ValidationScopeOutcome,
+    resolve_product,
+    resolve_validation_scope,
+)
 from vectorpress.catalog.assets import (
     AssetInventory,
     asset_dir,
@@ -1348,14 +1352,15 @@ def validate(
     members.
     \f
     Validation runs in the ``validate`` layer; this command only picks the
-    assets and reference size and formats the result. ``--product`` scopes
-    through ``build.product_resolution.resolve_product`` (the same
-    resolution ``vpress product`` and ``vpress build`` use, no second
-    path) and refuses like ``vpress build`` when membership has reference
-    problems. Its findings report is saved at its own size-keyed path and
-    never replaces the catalog-default report, which is the one ``vpress
-    asset`` shows. ``vpress generate`` never validates: a findings report
-    exists only because this command ran.
+    assets and reference size and renders the result. ``--product`` scopes
+    through ``build.product_resolution.resolve_validation_scope`` (built on
+    ``resolve_product``, the same resolution ``vpress product`` and
+    ``vpress build`` use -- no second path), which decides refuse / nothing
+    to validate / refuse a non-member / the member list; this command only
+    renders that decision. Its findings report is saved at its own
+    size-keyed path and never replaces the catalog-default report, which is
+    the one ``vpress asset`` shows. ``vpress generate`` never validates: a
+    findings report exists only because this command ran.
     """
     selectors = [asset_id is not None, all_assets, file is not None]
     selector_count = sum(selectors)
@@ -1400,32 +1405,31 @@ def validate(
 
     if resolved_product is not None:
         known_collections = load_collections(root, config).collections
-        product_resolution = resolve_product(
-            resolved_product, root, config, inventory.assets, known_collections
+        scope = resolve_validation_scope(
+            resolved_product, root, config, inventory.assets, known_collections, asset_id
         )
-        if product_resolution.reference_problems:
+        if scope.outcome is ValidationScopeOutcome.REFUSED_REFERENCE_PROBLEMS:
+            assert scope.reference_problems is not None  # set exactly for this outcome
             typer.echo(
                 f"validate: {resolved_product.slug} refused: product membership did not resolve",
                 err=True,
             )
-            _echo_reference_problems(product_resolution.reference_problems)
+            _echo_reference_problems(scope.reference_problems)
             raise typer.Exit(code=1)
-        if DerivativeType.CUT_SVG not in resolved_product.derivative_types:
+        if scope.outcome is ValidationScopeOutcome.NOTHING_TO_VALIDATE:
             typer.echo(f"{resolved_product.slug}\tnothing to validate (no cut_svg)")
             return
-        if asset_id is not None:
-            member = next((m for m in product_resolution.members if m.asset_id == asset_id), None)
-            if member is None:
-                typer.echo(
-                    f"validate: {asset_id} is not a member of product {resolved_product.slug}",
-                    err=True,
-                )
-                raise typer.Exit(code=1)
-            member_ids = [member.asset_id]
-        else:
-            member_ids = [member.asset_id for member in product_resolution.members]
+        if scope.outcome is ValidationScopeOutcome.REFUSED_NOT_A_MEMBER:
+            assert scope.asset_id is not None  # set exactly for this outcome
+            typer.echo(
+                f"validate: {scope.asset_id} is not a member of product {resolved_product.slug}",
+                err=True,
+            )
+            raise typer.Exit(code=1)
+        assert scope.outcome is ValidationScopeOutcome.SCOPED
+        assert scope.member_asset_ids is not None  # set exactly for this outcome
         assets_by_id = {asset.id: asset for asset in inventory.assets}
-        targets = [assets_by_id[member_id] for member_id in member_ids]
+        targets = [assets_by_id[member_id] for member_id in scope.member_asset_ids]
     else:
         targets = _select_targets(inventory, config, asset_id)
 
