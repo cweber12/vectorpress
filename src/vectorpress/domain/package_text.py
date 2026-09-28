@@ -9,6 +9,7 @@ gathering which files and formats a build contains, is the build layer's
 job.
 """
 
+import json
 import re
 from collections.abc import Mapping
 
@@ -99,3 +100,20 @@ def render_readme_text(
     lines.append("")
     lines.append(copyright_wording)
     return "\n".join(lines) + "\n"
+
+
+def readme_wording_fingerprint(intro: str, standard_wording: str, copyright_wording: str) -> str:
+    """A stable string over README.txt's brand-authored wording alone --
+    ``intro``, ``standard_wording`` and ``copyright_wording`` -- distinct
+    from the file list and reference size :func:`render_readme_text` also
+    weaves in, which come from what a build actually contains rather than
+    from the brand (§23, §27, ADR 0004). A build's manifest hashes this, so
+    a wording edit is a needs-rebuild reason on its own, never conflated
+    with a membership change. ``json.dumps(..., sort_keys=True)`` makes it
+    independent of argument order."""
+    payload = {
+        "intro": intro,
+        "standard_wording": standard_wording,
+        "copyright_wording": copyright_wording,
+    }
+    return json.dumps(payload, sort_keys=True, separators=(",", ":"))

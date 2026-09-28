@@ -66,10 +66,12 @@ from vectorpress.build._dxf_conversion import DxfConversionError, svg_to_dxf_byt
 from vectorpress.build.product_resolution import ProductMember, resolve_product
 from vectorpress.catalog.assets import asset_dir
 from vectorpress.catalog.brand import load_brand
+from vectorpress.catalog.manifests import BUILDS_DIRNAME, MANIFEST_FILENAME
 from vectorpress.catalog.metadata_problem import MetadataProblem
 from vectorpress.catalog.overrides import effective_derivative
 from vectorpress.catalog.provenance import sha256_bytes
 from vectorpress.domain.asset import Asset, AssetId
+from vectorpress.domain.brand import Brand
 from vectorpress.domain.catalog_config import CatalogConfig
 from vectorpress.domain.collection import Collection
 from vectorpress.domain.derivative_type import DerivativeType, derivative_filename
@@ -86,6 +88,7 @@ from vectorpress.domain.manifest import (
 from vectorpress.domain.package_naming import package_name
 from vectorpress.domain.package_text import (
     UnknownLicensePlaceholderError,
+    readme_wording_fingerprint,
     render_license_text,
     render_readme_text,
 )
@@ -104,16 +107,6 @@ _DXF_FOLDER = Format.DXF.value.upper()
 #: level, beside its format folders (§14, §27).
 README_FILENAME = "README.txt"
 LICENSE_FILENAME = "LICENSE.txt"
-
-#: Every build's output lives under this catalog-root-relative directory,
-#: never under ``sources/``, ``derived/``, ``overrides/`` or any
-#: hand-authored file (ADR 0005): the package, its ZIP, and the manifest,
-#: one subdirectory per product slug.
-BUILDS_DIRNAME = "builds"
-
-#: The build's own JSON manifest file, sibling to the package directory and
-#: the ZIP inside ``builds/<product-slug>/``.
-MANIFEST_FILENAME = "manifest.json"
 
 #: The fixed ZIP entry timestamp (§36): the DOS epoch, the same floor
 #: ``zipfile`` itself accepts, so two builds of unchanged inputs are
@@ -293,6 +286,27 @@ def _product_title(product: Product) -> str:
     return product.listing.title if product.listing is not None else product.slug
 
 
+def _license_template_hash(license_template: str) -> str:
+    """The license template's own content hash (§23, §27, ADR 0004): the
+    raw, unsubstituted template text, not the per-build rendered
+    LICENSE.txt -- so a real calendar year turning over ``{year}`` never
+    reads as a template edit (needs-rebuild compares this separately from
+    ``license_year``)."""
+    return sha256_bytes(license_template.encode("utf-8"))
+
+
+def _readme_wording_hash(brand: Brand) -> str:
+    """The brand's own README wording's content hash (§23, §27, ADR 0004):
+    :func:`~vectorpress.domain.package_text.readme_wording_fingerprint` of
+    the brand fields README.txt renders verbatim, hashed the same way every
+    other manifest content hash is."""
+    return sha256_bytes(
+        readme_wording_fingerprint(
+            brand.readme_text, brand.standard_wording, brand.copyright_wording
+        ).encode("utf-8")
+    )
+
+
 def _manifest_json_bytes(manifest: Manifest) -> bytes:
     """``manifest`` as deterministic JSON bytes (§36): sorted keys, a fixed
     2-space indent, and ``members``/``excluded_members`` already sorted by
@@ -303,6 +317,9 @@ def _manifest_json_bytes(manifest: Manifest) -> bytes:
         "reference_size_in": manifest.reference_size_in,
         "license_year": manifest.license_year,
         "tool_version": manifest.tool_version,
+        "license_template_hash": manifest.license_template_hash,
+        "readme_wording_hash": manifest.readme_wording_hash,
+        "allow_unapproved": manifest.allow_unapproved,
         "members": [
             {
                 "asset_id": member.asset_id,
@@ -577,6 +594,9 @@ def build_product(
         reference_size_in=reference_size_in,
         license_year=license_year,
         tool_version=__version__,
+        license_template_hash=_license_template_hash(license_template),
+        readme_wording_hash=_readme_wording_hash(brand),
+        allow_unapproved=allow_unapproved,
         members=manifest_members,
         dxf_members=dxf_manifest_members,
         excluded_members=excluded_manifest_members,

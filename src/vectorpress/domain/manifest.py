@@ -96,8 +96,8 @@ class ManifestExcludedMember:
 
 @dataclass(frozen=True)
 class Manifest:
-    """One build's complete record (§14, ADR 0004): the product it built,
-    the reference size it was built at, the LICENSE.txt build year,
+    """One build's complete record (§14, §23, ADR 0004): the product it
+    built, the reference size it was built at, the LICENSE.txt build year,
     the tool version that built it, every included member, every excluded
     one (empty unless the product is set to ``exclude``, §10), every
     converted ``DXF/`` file, and every derivative admitted despite not
@@ -109,12 +109,24 @@ class Manifest:
     ``license_year`` is the one field expected to change on its own with no
     other input changing -- once a calendar year turns over -- which is why
     it is recorded rather than left implicit (§27's "must not break the
-    rebuild-is-identical rule within a year")."""
+    rebuild-is-identical rule within a year").
+
+    ``license_template_hash`` and ``readme_wording_hash`` are content
+    hashes of the brand's own license template and README wording (§27) --
+    recorded so needs-rebuild (§23, CONTEXT.md "Needs rebuild") can detect a
+    brand edit that touches no member at all. ``allow_unapproved`` records
+    whether this build ran with ``--allow-unapproved``, so needs-rebuild can
+    re-resolve eligibility under the identical setting rather than showing
+    this build's own admitted members as spuriously ``removed``.
+    """
 
     product_slug: ProductSlug
     reference_size_in: float
     license_year: int
     tool_version: str
+    license_template_hash: str
+    readme_wording_hash: str
+    allow_unapproved: bool
     members: list[ManifestMember]
     dxf_members: list[ManifestDxfMember]
     excluded_members: list[ManifestExcludedMember]

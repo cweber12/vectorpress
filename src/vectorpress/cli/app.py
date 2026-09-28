@@ -17,6 +17,11 @@ from vectorpress.build.asset_resolution import (
     AssetProductMembership,
     resolve_asset_reuse,
 )
+from vectorpress.build.needs_rebuild import (
+    NeedsRebuildOutcome,
+    NeedsRebuildResult,
+    compute_needs_rebuild,
+)
 from vectorpress.build.product_build import BuildOutcome, build_product
 from vectorpress.build.product_resolution import (
     ValidationScopeOutcome,
@@ -247,8 +252,10 @@ def _lookup_and_resolve_collection_or_exit(
 def status(ctx: typer.Context) -> None:
     """Show the catalog's inventory and every metadata problem.
 
-    Exits 1 when any metadata problem exists, so it works as a check in
-    scripts.
+    Also counts missing, impossible and stale derivatives, stale overrides,
+    review status, asset publication, and how many products need
+    rebuilding. Exits 1 when any metadata problem exists, so it works as a
+    check in scripts.
     \f
     Aggregates problems from catalog config, assets, collections, products
     and brand. Missing, impossible and stale derivative counts, the stale
@@ -265,6 +272,11 @@ def status(ctx: typer.Context) -> None:
     metadata problem count drives the exit code, since resolution does not
     stop the rest of a collection's members from resolving and so is never
     itself a load failure (§11).
+
+    "Products needing rebuild" (§23, §34) counts every loaded product whose
+    build.needs_rebuild.compute_needs_rebuild outcome is needs-rebuild --
+    'vpress product' shows the same answer for one product in full,
+    including every difference.
     """
     root = _locate_root(ctx)
     catalog = load_catalog(root)
@@ -280,10 +292,20 @@ def status(ctx: typer.Context) -> None:
         counts = count_derivative_states(catalog.assets, root, catalog.config)
         status_counts = count_derivative_statuses(catalog.assets, root, catalog.config)
         stale_override_count = count_stale_overrides(catalog.assets, root, catalog.config)
+        needs_rebuild_count = sum(
+            1
+            for loaded_product in catalog.products
+            if compute_needs_rebuild(
+                loaded_product, root, catalog.config, catalog.assets, catalog.collections
+            ).outcome
+            is NeedsRebuildOutcome.NEEDS_REBUILD
+        )
     else:
         counts = DerivativeStateCounts(missing=0, impossible=0, stale=0)
         status_counts = StatusCounts(needs_review=0, approved=0, rejected=0, regenerate=0)
         stale_override_count = 0
+        needs_rebuild_count = 0
+    typer.echo(f"Products needing rebuild: {needs_rebuild_count}")
     typer.echo(f"Missing derivatives: {counts.missing}")
     typer.echo(f"Impossible derivatives: {counts.impossible}")
     typer.echo(f"Stale derivatives: {counts.stale}")
@@ -1564,6 +1586,39 @@ def products(ctx: typer.Context) -> None:
         )
 
 
+def _echo_needs_rebuild(result: NeedsRebuildResult) -> None:
+    """``vpress product``'s ``Build:`` section (§23, CONTEXT.md "Needs
+    rebuild"): ``current``, ``never built``, or ``needs rebuild`` with every
+    reason -- a member difference per (asset, derivative type), the brand's
+    license template or README wording having changed, the resolved
+    reference size having changed, or the last manifest predating the
+    current format (in which case it is the only reason shown: there is
+    nothing on record to compare against)."""
+    if result.outcome is NeedsRebuildOutcome.NEVER_BUILT:
+        typer.echo("Build: never built")
+        return
+    if result.outcome is NeedsRebuildOutcome.CURRENT:
+        typer.echo("Build: current")
+        return
+
+    typer.echo("Build: needs rebuild")
+    if result.manifest_format_outdated:
+        typer.echo("  manifest predates the current format")
+        return
+    for difference in result.member_differences:
+        typer.echo(
+            f"  {difference.asset_id}\t{difference.derivative_type.value}\t{difference.reason.value}"
+        )
+    if result.license_template_changed:
+        typer.echo("  license template: changed")
+    if result.readme_wording_changed:
+        typer.echo("  README wording: changed")
+    if result.reference_size_change is not None:
+        previous = format_number(result.reference_size_change.previous_in)
+        current = format_number(result.reference_size_change.current_in)
+        typer.echo(f"  reference size: changed ({previous}in → {current}in)")
+
+
 @app.command()
 def product(
     ctx: typer.Context,
@@ -1589,6 +1644,7 @@ def product(
     known_assets = load_assets(root, config).assets
     known_collections = load_collections(root, config).collections
     resolved = resolve_product(loaded, root, config, known_assets, known_collections)
+    needs_rebuild = compute_needs_rebuild(loaded, root, config, known_assets, known_collections)
 
     title = loaded.listing.title if loaded.listing is not None else loaded.slug
     typer.echo(f"{loaded.slug}\t{title}")
@@ -1606,6 +1662,7 @@ def product(
         assert loaded.membership is not None  # enforced by Product's own validation
         collection_ref = f"inline ({loaded.membership.form.value})"
     typer.echo(f"Collection: {collection_ref}")
+    _echo_needs_rebuild(needs_rebuild)
 
     typer.echo(f"Members: {len(resolved.members)}")
     typer.echo(f"Eligible: {len(resolved.eligible_members)}")
