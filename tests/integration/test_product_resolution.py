@@ -159,8 +159,8 @@ def test_a_rights_blocked_asset_stays_excluded_even_fully_approved(
     assert "missing" not in member_section
 
 
-# --- acceptance criterion 5 (§26): an ai_generated member with empty ------
-# --- licensing notes stays excluded even fully approved --------------------
+# --- an ai_generated member with empty licensing notes stays excluded, even -------
+# --- fully approved (§26) ----------------------------------------------------------
 
 
 def _add_ai_generated_test_product(root: Path) -> None:

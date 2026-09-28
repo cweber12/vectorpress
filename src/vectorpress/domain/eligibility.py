@@ -112,8 +112,9 @@ class BlockingReason:
     """One reason an asset is blocked from publication (§10.1): ``kind``
     says what kind of fact it is, ``derivative_type`` names which type it
     concerns (set exactly for :attr:`BlockingReasonKind.DERIVATIVE_STATE`
-    and :attr:`BlockingReasonKind.DERIVATIVE_STATUS`, ``None`` for the two
-    asset-level kinds), and ``value`` is the underlying enum's own string
+    and :attr:`BlockingReasonKind.DERIVATIVE_STATUS`, ``None`` for every
+    kind in :data:`ASSET_LEVEL_BLOCKING_REASON_KINDS`), and ``value`` is
+    the underlying enum's own string
     value (a :class:`~vectorpress.domain.asset.RightsStatus`,
     :class:`~vectorpress.domain.asset.AccuracyStatus`,
     :class:`~vectorpress.domain.derivative_state.DerivativeState` or
@@ -216,7 +217,8 @@ def asset_eligibility(
     accuracy_status: AccuracyStatus,
     missing_metadata_fields: Sequence[str],
     included_derivatives: Sequence[IncludedDerivative],
-    licensing_notes: str = "",
+    *,
+    licensing_notes: str,
     allow_unapproved: bool = False,
 ) -> EligibilityResult:
     """Whether an asset may ship with ``included_derivatives`` (§10, §10.1).

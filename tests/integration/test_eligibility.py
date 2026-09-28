@@ -7,10 +7,12 @@ asset's ``derived/``, and the fixture catalog must never contain one
 (``tests/fixtures/catalog/README.md``).
 """
 
+import re
 import shutil
 from pathlib import Path
 
 import pytest
+from syrupy.assertion import SnapshotAssertion
 from typer.testing import CliRunner
 
 from vectorpress.cli.app import app
@@ -18,6 +20,17 @@ from vectorpress.cli.app import app
 runner = CliRunner()
 
 FIXTURE_CATALOG_ROOT = Path(__file__).parents[1] / "fixtures" / "catalog"
+
+#: Same normalisation CLAUDE.md prescribes for CLI output assertions: CI
+#: runners detect color support and split words across ANSI escape codes,
+#: and Rich box-drawing shows up in usage-error panels (see
+#: tests/integration/test_validate.py's own ``_normalized_output``).
+_ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
+_BOX_DRAWING_RE = re.compile(r"[─-╿]")
+
+
+def _normalized_output(output: str) -> str:
+    return " ".join(_BOX_DRAWING_RE.sub(" ", _ANSI_RE.sub("", output)).split("\n"))
 
 
 @pytest.fixture
@@ -137,15 +150,17 @@ def test_gumboot_chiton_stays_blocked_by_rights_status_even_fully_approved(
     assert "missing" not in section
 
 
-# --- acceptance criterion 5 (§26): ai_generated, blocking only on empty notes -------
+# --- ai_generated (§26): not blocking on its own, blocked once licensing_notes is empty --
 
 
 def _blank_owl_limpets_licensing_notes(root: Path) -> None:
     """Blank ``owl_limpet``'s ``licensing_notes`` in a temp catalog copy
-    alone: the committed fixture keeps them non-empty (this module's own
-    docstring says never to mutate the committed catalog), so the empty-
-    notes case is test-only, mirroring the CLAUDE.md convention every other
-    §10.1 block fixture in this file already uses."""
+    alone -- ``root`` is always a ``temp_catalog_root``, never
+    ``FIXTURE_CATALOG_ROOT`` itself (this module's own docstring, and
+    ``tests/fixtures/catalog/README.md``'s "never point the tool's tests at
+    a real catalog"). The committed fixture keeps ``owl_limpet``'s notes
+    non-empty; the empty-notes case is test-only, unlike ``gumboot_chiton``
+    above, which is committed already rights-blocked."""
     path = root / "assets" / "owl_limpet" / "asset.toml"
     text = path.read_text(encoding="utf-8")
     assert 'rights_status = "ai_generated"\n' in text
@@ -205,3 +220,24 @@ def test_owl_limpet_is_blocked_with_empty_licensing_notes_even_fully_approved(
     section = _eligibility_section(result.stdout)
     assert "needs review" not in section
     assert "missing" not in section
+
+
+@pytest.mark.integration
+def test_owl_limpet_blocked_output_with_empty_licensing_notes_is_locked_by_snapshot(
+    monkeypatch: pytest.MonkeyPatch, temp_catalog_root: Path, snapshot: SnapshotAssertion
+) -> None:
+    """§26's new blocking-reason kind, pinned at the CLI layer the same way
+    ``vpress product``'s own output is (``test_product_resolution.py``'s
+    ``test_standard_pack_output_is_locked_by_snapshot``), so a wording or
+    ordering change to the rendered sentence is a deliberate, reviewed
+    snapshot update rather than a substring assert that would miss one."""
+    _blank_owl_limpets_licensing_notes(temp_catalog_root)
+    monkeypatch.chdir(temp_catalog_root)
+    runner.invoke(app, ["generate", "owl_limpet"])
+    approve_result = runner.invoke(app, ["approve", "owl_limpet", "--all-types"])
+    assert approve_result.exit_code == 0, approve_result.output
+
+    result = runner.invoke(app, ["asset", "owl_limpet"])
+
+    assert result.exit_code == 0, result.output
+    assert _normalized_output(result.stdout) == snapshot

@@ -35,7 +35,10 @@ from typer.testing import CliRunner
 from vectorpress.build._dxf_conversion import (
     svg_to_dxf_bytes,  # pyright: ignore[reportPrivateUsage]
 )
+from vectorpress.catalog.manifests import read_manifest
 from vectorpress.cli.app import app
+from vectorpress.domain.asset import RightsStatus
+from vectorpress.domain.manifest import ManifestAssetRightsStatus
 
 runner = CliRunner()
 
@@ -424,6 +427,63 @@ def test_build_refuses_naming_an_ai_generated_member_with_empty_licensing_notes(
         in result.output
     )
     assert not (temp_catalog_root / "builds").exists()
+
+
+_AI_GENERATED_PRODUCT_SLUG = "owl_limpet_ai_generated_product"
+
+
+def _add_owl_limpet_ai_generated_product(root: Path) -> None:
+    """A temp-only product (not part of the committed fixture) whose sole
+    member is ``owl_limpet``, with its committed ``licensing_notes`` left
+    untouched -- unlike ``_add_ai_generated_test_product`` above, so a build
+    over it actually ships an ``ai_generated`` member instead of refusing
+    on one."""
+    product_text = (
+        'derivative_types = ["cut_svg"]\n'
+        'formats = ["svg"]\n'
+        'tier = "individual"\n'
+        "price = 1.00\n\n"
+        "[membership]\n"
+        'asset_ids = ["owl_limpet"]\n'
+    )
+    (root / "products" / f"{_AI_GENERATED_PRODUCT_SLUG}.toml").write_text(
+        product_text, encoding="utf-8"
+    )
+
+
+@pytest.mark.integration
+def test_manifest_records_ai_generated_for_an_included_asset_and_read_manifest_parses_it_back(
+    monkeypatch: pytest.MonkeyPatch, temp_catalog_root: Path
+) -> None:
+    """§26: a built manifest actually contains an ``ai_generated`` entry
+    (``test_manifest_records_every_included_assets_rights_status`` below
+    only covers three non-``ai_generated`` statuses), and
+    ``catalog.manifests.read_manifest`` parses it back into the identical
+    :class:`~vectorpress.domain.manifest.ManifestAssetRightsStatus` rather
+    than raising ``ManifestFormatError``."""
+    _add_owl_limpet_ai_generated_product(temp_catalog_root)
+    monkeypatch.chdir(temp_catalog_root)
+    runner.invoke(app, ["generate", "owl_limpet"])
+    approve_result = runner.invoke(app, ["approve", "owl_limpet", "--all-types"])
+    assert approve_result.exit_code == 0, approve_result.output
+
+    build_result = runner.invoke(app, ["build", _AI_GENERATED_PRODUCT_SLUG])
+    assert build_result.exit_code == 0, build_result.output
+
+    manifest_json = json.loads(
+        (temp_catalog_root / "builds" / _AI_GENERATED_PRODUCT_SLUG / "manifest.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert manifest_json["asset_rights_statuses"] == [
+        {"asset_id": "owl_limpet", "rights_status": "ai_generated"}
+    ]
+
+    manifest = read_manifest(temp_catalog_root, _AI_GENERATED_PRODUCT_SLUG)
+    assert manifest is not None
+    assert manifest.asset_rights_statuses == [
+        ManifestAssetRightsStatus(asset_id="owl_limpet", rights_status=RightsStatus.AI_GENERATED)
+    ]
 
 
 @pytest.mark.integration

@@ -66,6 +66,7 @@ def test_a_fully_approved_asset_with_no_problems_is_eligible_with_no_reasons_or_
         AccuracyStatus.APPROVED,
         [],
         [_APPROVED_PNG, _APPROVED_CUT],
+        licensing_notes="",
     )
 
     assert result.eligibility is Eligibility.ELIGIBLE
@@ -78,7 +79,11 @@ def test_a_fully_approved_asset_with_no_problems_is_eligible_with_no_reasons_or_
 
 def test_rights_do_not_publish_blocks() -> None:
     result = asset_eligibility(
-        RightsStatus.DO_NOT_PUBLISH, AccuracyStatus.APPROVED, [], [_APPROVED_PNG]
+        RightsStatus.DO_NOT_PUBLISH,
+        AccuracyStatus.APPROVED,
+        [],
+        [_APPROVED_PNG],
+        licensing_notes="",
     )
 
     assert result.eligibility is Eligibility.BLOCKED
@@ -90,7 +95,11 @@ def test_rights_do_not_publish_blocks() -> None:
 
 def test_rights_review_required_blocks() -> None:
     result = asset_eligibility(
-        RightsStatus.RIGHTS_REVIEW_REQUIRED, AccuracyStatus.APPROVED, [], [_APPROVED_PNG]
+        RightsStatus.RIGHTS_REVIEW_REQUIRED,
+        AccuracyStatus.APPROVED,
+        [],
+        [_APPROVED_PNG],
+        licensing_notes="",
     )
 
     assert result.eligibility is Eligibility.BLOCKED
@@ -162,7 +171,11 @@ def test_licensing_notes_are_irrelevant_for_a_non_ai_generated_rights_status() -
 
 def test_accuracy_issue_found_blocks() -> None:
     result = asset_eligibility(
-        RightsStatus.ORIGINAL_ARTWORK, AccuracyStatus.ISSUE_FOUND, [], [_APPROVED_PNG]
+        RightsStatus.ORIGINAL_ARTWORK,
+        AccuracyStatus.ISSUE_FOUND,
+        [],
+        [_APPROVED_PNG],
+        licensing_notes="",
     )
 
     assert result.eligibility is Eligibility.BLOCKED
@@ -178,7 +191,11 @@ def test_an_unapproved_included_derivative_blocks_naming_its_status() -> None:
     )
 
     result = asset_eligibility(
-        RightsStatus.ORIGINAL_ARTWORK, AccuracyStatus.APPROVED, [], [_APPROVED_PNG, needs_review]
+        RightsStatus.ORIGINAL_ARTWORK,
+        AccuracyStatus.APPROVED,
+        [],
+        [_APPROVED_PNG, needs_review],
+        licensing_notes="",
     )
 
     assert result.eligibility is Eligibility.BLOCKED
@@ -191,7 +208,11 @@ def test_a_rejected_included_derivative_blocks_naming_rejected() -> None:
     rejected = IncludedDerivative(DerivativeType.CUT_SVG, DerivativeState.CURRENT, Status.REJECTED)
 
     result = asset_eligibility(
-        RightsStatus.ORIGINAL_ARTWORK, AccuracyStatus.APPROVED, [], [rejected]
+        RightsStatus.ORIGINAL_ARTWORK,
+        AccuracyStatus.APPROVED,
+        [],
+        [rejected],
+        licensing_notes="",
     )
 
     assert result.blocking_reasons == [
@@ -203,7 +224,11 @@ def test_a_missing_included_derivative_blocks_naming_the_missing_state() -> None
     missing = IncludedDerivative(DerivativeType.CUT_SVG, DerivativeState.MISSING, None)
 
     result = asset_eligibility(
-        RightsStatus.ORIGINAL_ARTWORK, AccuracyStatus.APPROVED, [], [_APPROVED_PNG, missing]
+        RightsStatus.ORIGINAL_ARTWORK,
+        AccuracyStatus.APPROVED,
+        [],
+        [_APPROVED_PNG, missing],
+        licensing_notes="",
     )
 
     assert result.eligibility is Eligibility.BLOCKED
@@ -216,7 +241,11 @@ def test_an_impossible_included_derivative_blocks_naming_the_impossible_state() 
     impossible = IncludedDerivative(DerivativeType.FLATCOLOR_SVG, DerivativeState.IMPOSSIBLE, None)
 
     result = asset_eligibility(
-        RightsStatus.ORIGINAL_ARTWORK, AccuracyStatus.APPROVED, [], [_APPROVED_PNG, impossible]
+        RightsStatus.ORIGINAL_ARTWORK,
+        AccuracyStatus.APPROVED,
+        [],
+        [_APPROVED_PNG, impossible],
+        licensing_notes="",
     )
 
     assert result.eligibility is Eligibility.BLOCKED
@@ -240,6 +269,7 @@ def test_every_unapproved_included_type_gets_its_own_reason() -> None:
         AccuracyStatus.APPROVED,
         [],
         [_APPROVED_PNG, needs_review, missing],
+        licensing_notes="",
     )
 
     assert result.eligibility is Eligibility.BLOCKED
@@ -258,7 +288,11 @@ def test_every_unapproved_included_type_gets_its_own_reason() -> None:
 
 def test_accuracy_not_reviewed_is_a_warning_that_leaves_the_asset_eligible() -> None:
     result = asset_eligibility(
-        RightsStatus.ORIGINAL_ARTWORK, AccuracyStatus.NOT_REVIEWED, [], [_APPROVED_PNG]
+        RightsStatus.ORIGINAL_ARTWORK,
+        AccuracyStatus.NOT_REVIEWED,
+        [],
+        [_APPROVED_PNG],
+        licensing_notes="",
     )
 
     assert result.eligibility is Eligibility.ELIGIBLE
@@ -272,6 +306,7 @@ def test_missing_optional_metadata_is_a_warning_that_leaves_the_asset_eligible()
         AccuracyStatus.APPROVED,
         ["scientific_name", "tags"],
         [_APPROVED_PNG],
+        licensing_notes="",
     )
 
     assert result.eligibility is Eligibility.ELIGIBLE
@@ -289,6 +324,7 @@ def test_warnings_alone_leave_the_asset_eligible() -> None:
         AccuracyStatus.NOT_REVIEWED,
         ["notes"],
         [_APPROVED_PNG, _APPROVED_CUT],
+        licensing_notes="",
     )
 
     assert result.eligibility is Eligibility.ELIGIBLE
@@ -309,6 +345,7 @@ def test_blocking_reasons_and_warnings_are_both_reported_together() -> None:
         AccuracyStatus.NOT_REVIEWED,
         ["scientific_name"],
         [needs_review],
+        licensing_notes="",
     )
 
     assert result.eligibility is Eligibility.BLOCKED
@@ -346,7 +383,11 @@ def test_without_allow_unapproved_nothing_is_ever_admitted() -> None:
     )
 
     result = asset_eligibility(
-        RightsStatus.ORIGINAL_ARTWORK, AccuracyStatus.APPROVED, [], [needs_review]
+        RightsStatus.ORIGINAL_ARTWORK,
+        AccuracyStatus.APPROVED,
+        [],
+        [needs_review],
+        licensing_notes="",
     )
 
     assert result.eligibility is Eligibility.BLOCKED
@@ -363,6 +404,7 @@ def test_allow_unapproved_admits_a_needs_review_derivative_recording_its_status(
         AccuracyStatus.APPROVED,
         [],
         [needs_review],
+        licensing_notes="",
         allow_unapproved=True,
     )
 
@@ -383,6 +425,7 @@ def test_allow_unapproved_admits_a_generated_derivative_recording_its_status() -
         AccuracyStatus.APPROVED,
         [],
         [generated],
+        licensing_notes="",
         allow_unapproved=True,
     )
 
@@ -403,6 +446,7 @@ def test_allow_unapproved_still_blocks_a_rejected_derivative() -> None:
         AccuracyStatus.APPROVED,
         [],
         [rejected],
+        licensing_notes="",
         allow_unapproved=True,
     )
 
@@ -425,6 +469,7 @@ def test_allow_unapproved_still_blocks_a_regenerate_derivative() -> None:
         AccuracyStatus.APPROVED,
         [],
         [regenerate],
+        licensing_notes="",
         allow_unapproved=True,
     )
 
@@ -441,7 +486,12 @@ def test_allow_unapproved_never_admits_a_missing_derivative() -> None:
     missing = IncludedDerivative(DerivativeType.CUT_SVG, DerivativeState.MISSING, None)
 
     result = asset_eligibility(
-        RightsStatus.ORIGINAL_ARTWORK, AccuracyStatus.APPROVED, [], [missing], allow_unapproved=True
+        RightsStatus.ORIGINAL_ARTWORK,
+        AccuracyStatus.APPROVED,
+        [],
+        [missing],
+        licensing_notes="",
+        allow_unapproved=True,
     )
 
     assert result.eligibility is Eligibility.BLOCKED
@@ -461,6 +511,7 @@ def test_allow_unapproved_does_not_override_a_rights_block() -> None:
         AccuracyStatus.APPROVED,
         [],
         [needs_review],
+        licensing_notes="",
         allow_unapproved=True,
     )
 
@@ -480,6 +531,7 @@ def test_allow_unapproved_does_not_override_an_accuracy_block() -> None:
         AccuracyStatus.ISSUE_FOUND,
         [],
         [needs_review],
+        licensing_notes="",
         allow_unapproved=True,
     )
 
