@@ -32,9 +32,8 @@ import pytest
 from syrupy.assertion import SnapshotAssertion
 from typer.testing import CliRunner
 
-from vectorpress.build._dxf_conversion import (  # pyright: ignore[reportPrivateUsage]
-    closed_rings,
-    svg_to_dxf_bytes,
+from vectorpress.build._dxf_conversion import (
+    svg_to_dxf_bytes,  # pyright: ignore[reportPrivateUsage]
 )
 from vectorpress.cli.app import app
 
@@ -138,6 +137,29 @@ def _entity_count(dxf_bytes: bytes) -> int:
     doc = ezdxf.read(io.StringIO(dxf_bytes.decode("ascii")))  # pyright: ignore[reportPrivateImportUsage]
     polylines = doc.modelspace().query("POLYLINE")  # pyright: ignore[reportUnknownArgumentType]
     return len(list(polylines))  # pyright: ignore[reportUnknownArgumentType]
+
+
+def _count_close_commands(svg_bytes: bytes) -> int:
+    """The number of explicit ``Z``/``z`` close commands across every
+    ``<path>``'s own ``d`` in ``svg_bytes`` -- a second, independent way to
+    count closed subpaths, via plain XML parsing and a regex over the raw
+    ``d`` text, never through ``build._dxf_conversion.closed_rings`` itself.
+    A fixture cut file is potrace-generated: every subpath it has is closed
+    with an explicit ``Z`` (:mod:`vectorpress.pipeline.svg_document`), so
+    this count is exact for it, and comparing the DXF's own entity count
+    against it -- rather than against ``closed_rings``'s own count -- would
+    still catch ``closed_rings`` silently dropping a subpath, which
+    comparing it against itself never could.
+    """
+    import re
+    import xml.etree.ElementTree as ET
+
+    root = ET.fromstring(svg_bytes)
+    return sum(
+        len(re.findall(r"[Zz]", element.attrib.get("d", "")))
+        for element in root.iter()
+        if element.tag.rsplit("}", 1)[-1] == "path"
+    )
 
 
 def _build_dir(root: Path, slug: str) -> Path:
@@ -522,7 +544,7 @@ def test_build_on_a_format_type_mismatch_product_fails_to_load_and_writes_nothin
     assert not (temp_catalog_root / "builds").exists()
 
 
-# --- DXF conversion (issue #94, ADR 0013, §7) --------------------------------
+# --- DXF conversion (ADR 0013, §7) -------------------------------------------
 
 
 @pytest.mark.integration
@@ -681,4 +703,7 @@ def test_dxf_is_locked_by_snapshot_and_its_entity_count_matches_the_svgs_closed_
     svg_bytes = (package_dir / "SVG" / "ochre-sea-star-cut.svg").read_bytes()
 
     assert dxf_bytes.decode("ascii") == snapshot(name="ochre_sea_star_cut_dxf")
-    assert _entity_count(dxf_bytes) == len(closed_rings(svg_bytes))
+    # an independent oracle (§_count_close_commands's own docstring), not
+    # closed_rings itself: this asset's cut file is potrace-generated, so
+    # its own explicit Z count already equals its closed-subpath count.
+    assert _entity_count(dxf_bytes) == _count_close_commands(svg_bytes)

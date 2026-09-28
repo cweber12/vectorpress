@@ -5,8 +5,11 @@
 """``build._dxf_conversion``: every closed subpath of an SVG becomes one DXF
 polyline (ADR 0013, §7, §35, §36)."""
 
+from datetime import datetime
+
 import ezdxf
 import pytest
+from ezdxf.tools.juliandate import juliandate
 
 from vectorpress.build._dxf_conversion import (
     DxfConversionError,
@@ -34,6 +37,32 @@ _OPEN_LINE_SVG = b"""<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"
 #: straight ``L`` segments.
 _CURVE_SVG = b"""<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10">
 <path d="M10,0 C10,5.523 5.523,10 0,10 L0,0 Z"/>
+</svg>"""
+
+_RECT_SVG = b"""<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10">
+<rect x="1" y="1" width="4" height="4"/>
+</svg>"""
+
+_CIRCLE_SVG = b"""<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10">
+<circle cx="5" cy="5" r="3"/>
+</svg>"""
+
+_POLYGON_SVG = b"""<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10">
+<polygon points="0,0 10,0 10,10 0,10"/>
+</svg>"""
+
+_SHAPES_SVG = b"""<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 30 30">
+<rect x="1" y="1" width="4" height="4"/>
+<circle cx="15" cy="15" r="3"/>
+<polygon points="20,20 28,20 28,28 20,28"/>
+</svg>"""
+
+#: The same rectangle as ``_RECTANGLE_SVG``, but placed with its own
+#: ``transform`` -- ADR 0007 makes a hand-edited override the effective
+#: derivative, so a shape a human moved with a transform is exactly as real
+#: a cut line as one authored at its final coordinates directly.
+_TRANSLATED_RECTANGLE_SVG = b"""<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 30 30">
+<path d="M0,0 L10,0 L10,10 L0,10 Z" transform="translate(10,20)"/>
 </svg>"""
 
 
@@ -87,6 +116,32 @@ def test_closed_rings_raises_on_unparseable_path_data() -> None:
         closed_rings(svg)
 
 
+def test_closed_rings_converts_a_rect_element() -> None:
+    (ring,) = closed_rings(_RECT_SVG)
+    assert sorted(set(ring)) == [(1.0, 1.0), (1.0, 5.0), (5.0, 1.0), (5.0, 5.0)]
+
+
+def test_closed_rings_converts_a_circle_element() -> None:
+    (ring,) = closed_rings(_CIRCLE_SVG)
+    # a circle has no straight corner to anchor on; curve flattening alone
+    # gives it far more than the 3-point floor a real ring needs.
+    assert len(ring) > 10
+
+
+def test_closed_rings_converts_a_polygon_element() -> None:
+    (ring,) = closed_rings(_POLYGON_SVG)
+    assert sorted(set(ring)) == [(0.0, 0.0), (0.0, 10.0), (10.0, 0.0), (10.0, 10.0)]
+
+
+def test_closed_rings_applies_a_paths_own_transform_attribute() -> None:
+    """A ``transform`` on a ``<path>`` moves its ring's coordinates -- an
+    override placed with one is exactly as real a cut line as one authored
+    at its final position directly (ADR 0007)."""
+    (plain_ring,) = closed_rings(_RECTANGLE_SVG)
+    (translated_ring,) = closed_rings(_TRANSLATED_RECTANGLE_SVG)
+    assert translated_ring == tuple((x + 10.0, y + 20.0) for x, y in plain_ring)
+
+
 def test_svg_to_dxf_bytes_writes_one_polyline_entity_per_closed_subpath() -> None:
     dxf_bytes = svg_to_dxf_bytes(_DONUT_SVG)
     rings = _polyline_rings(dxf_bytes)
@@ -99,13 +154,44 @@ def test_svg_to_dxf_bytes_keeps_the_svgs_own_coordinates() -> None:
     assert sorted(set(ring)) == [(0.0, 0.0), (0.0, 10.0), (10.0, 0.0), (10.0, 10.0)]
 
 
-def test_svg_to_dxf_bytes_never_writes_insunits_or_a_wall_clock_timestamp() -> None:
+def test_svg_to_dxf_bytes_writes_a_polyline_for_a_rect_a_circle_and_a_polygon() -> None:
+    dxf_bytes = svg_to_dxf_bytes(_SHAPES_SVG)
+    assert len(_polyline_rings(dxf_bytes)) == 3
+
+
+def test_svg_to_dxf_bytes_moves_coordinates_for_a_transformed_path() -> None:
+    """End to end: a ``transform`` on a ``<path>`` moves the coordinates
+    actually shipped in the DXF, not just the in-memory ring
+    (:func:`test_closed_rings_applies_a_paths_own_transform_attribute`)."""
+    (plain_ring,) = _polyline_rings(svg_to_dxf_bytes(_RECTANGLE_SVG))
+    (translated_ring,) = _polyline_rings(svg_to_dxf_bytes(_TRANSLATED_RECTANGLE_SVG))
+    assert sorted(translated_ring) == sorted((x + 10.0, y + 20.0) for x, y in plain_ring)
+
+
+def _header_var(dxf_text: str, name: str) -> str:
+    """One DXF header variable's own value, read straight from the raw text
+    -- never through ``ezdxf.read()``, which re-stamps ``$TDCREATE`` with
+    the real wall-clock time the moment a document is loaded, defeating the
+    very thing this is checking."""
+    marker = f"{name}\n"
+    start = dxf_text.index(marker) + len(marker)
+    # the next two lines are the value's own group code, then the value.
+    _group_code, value, *_rest = dxf_text[start:].split("\n", 2)
+    return value
+
+
+def test_svg_to_dxf_bytes_never_writes_insunits_and_fixes_the_timestamp() -> None:
     """The DXF carries no more physical sizing than the SVG did (ADR 0013),
     and never a build-time timestamp that would break a byte-identical
-    rebuild (§36)."""
+    rebuild (§36) -- ``$TDCREATE``/``$TDUPDATE`` hold ``ezdxf``'s own fixed
+    epoch (2000-01-01), not the real time this test actually ran at."""
     dxf_text = svg_to_dxf_bytes(_RECTANGLE_SVG).decode("ascii")
     assert "$INSUNITS" not in dxf_text
     assert "\r\n" not in dxf_text
+
+    fixed_epoch = juliandate(datetime(2000, 1, 1, 0, 0))
+    for header_var in ("$TDCREATE", "$TDUPDATE"):
+        assert float(_header_var(dxf_text, header_var)) == fixed_epoch
 
 
 def test_svg_to_dxf_bytes_is_byte_identical_across_repeated_calls() -> None:

@@ -18,8 +18,22 @@ right, so both keep their own polyline, never merged or dropped (ADR 0013:
 "Holes and islands keep their structure").
 
 This module never rasterizes or vectorizes (ADR 0013): it only walks
-already-vector ``<path>`` geometry a generator or a human already produced,
-the one thing a "format conversion" is allowed to do.
+already-vector geometry a generator or a human already produced, the one
+thing a "format conversion" is allowed to do. Every ``<path>``, ``<rect>``,
+``<circle>``, ``<ellipse>`` and ``<polygon>`` element is converted, each
+with its own ``transform`` attribute already baked into its coordinates --
+an override drawn with a shape primitive, or one placed with a
+``transform``, is exactly as real a cut line as a potrace-traced, untransformed
+``<path>``, and shipping a DXF that silently dropped or misplaced it would
+defeat the point of ADR 0007 treating an override as *the* effective
+derivative. Each element is converted on its own, via
+:meth:`~svgelements.Shape.segments`, never by parsing the whole document
+with ``svgelements.SVG.parse`` -- that also applies the root ``<svg>``'s
+own viewBox-to-viewport scale, which would shift every coordinate away from
+the plain numbers the document itself uses (the same reason
+:mod:`vectorpress.validate._svg_document` parses one ``<path>`` at a time).
+A ``<polyline>``/``<line>`` is left out: this module only ever emits closed
+geometry, and neither closes on its own.
 
 **Determinism.** ``ezdxf`` (added via ``uv add``) is this build's DXF
 writer. Three of its defaults are not reproducible run to run and are all
@@ -29,8 +43,11 @@ avoided here rather than patched after the fact:
   ``$FINGERPRINTGUID``/``$VERSIONGUID`` header values. ``ezdxf.options.
   write_fixed_meta_data_for_testing`` is ``ezdxf``'s own switch for fixing
   both (despite its "for_testing" name, it exists precisely for
-  reproducible output) -- set once, at import time, for every document this
-  module ever writes.
+  reproducible output) -- :func:`svg_to_dxf_bytes` sets it for the duration
+  of its own write and restores whatever it was before, rather than at
+  import time: this module has no business leaving a process-global
+  ``ezdxf`` option flipped for every other piece of code sharing the
+  process just because it was imported.
 - ``ezdxf.new()`` also auto-creates two layout objects whose relative order
   in the OBJECTS section depends on Python's per-process string hash seed,
   varying between interpreter runs even with fixed metadata. Building the
@@ -77,10 +94,19 @@ CURVE_STEPS = 24
 #: ``_CLOSE_TOLERANCE``.
 _CLOSE_TOLERANCE = 1e-6
 
-#: ``ezdxf``'s own deterministic-output switch (see this module's
-#: docstring). Set once at import time: every :class:`Drawing` this module
-#: creates picks it up automatically.
-ezdxf.options.write_fixed_meta_data_for_testing = True  # pyright: ignore[reportPrivateImportUsage]
+#: Every element kind this module converts, and the ``svgelements`` shape
+#: class that reads its own SVG attributes (ADR 0013): ``<path>``'s ``d``,
+#: or a primitive shape's own geometry attributes -- either way, its
+#: ``transform`` attribute (present on any of them) is read the same way,
+#: by :func:`_shape_subpaths`. ``<polyline>``/``<line>`` have no entry:
+#: this module's own docstring says why.
+_SHAPE_CLASSES: dict[str, type[se.Shape]] = {
+    "path": se.Path,
+    "rect": se.Rect,
+    "circle": se.Circle,
+    "ellipse": se.Ellipse,
+    "polygon": se.Polygon,
+}
 
 
 class DxfConversionError(Exception):
@@ -126,18 +152,45 @@ def _is_closed(subpath: se.Subpath, points: tuple[Point, ...]) -> bool:
     return abs(start_x - end_x) < _CLOSE_TOLERANCE and abs(start_y - end_y) < _CLOSE_TOLERANCE
 
 
-def closed_rings(svg_bytes: bytes) -> list[tuple[Point, ...]]:
-    """Every closed subpath in ``svg_bytes``'s ``<path>`` elements, flattened
-    to a polygon ring, in document order (§7's "convert every closed path"):
-    an explicit ``Z``, or a flattened end landing back on its own start
-    within :data:`_CLOSE_TOLERANCE`. An open subpath -- one a human approved
-    despite it -- is left out rather than failing the conversion: nothing
-    about "closed path" fits it either way. A degenerate subpath (fewer than
-    three distinct points once flattened) is left out too: neither a line
-    nor a point is geometry a DXF polyline entity can usefully carry.
+def _shape_subpaths(element: ET.Element, shape_cls: type[se.Shape]) -> list[se.Subpath]:
+    """``element``'s own geometry as subpaths, with its own ``transform``
+    attribute (if any) already baked into every coordinate --
+    ``shape.segments(transformed=True)`` applies exactly that shape's own
+    matrix, never the root ``<svg>``'s viewBox-to-viewport scale (this
+    module's own docstring says why that matters). Every SVG attribute
+    ``element`` carries is forwarded as a keyword (``d`` for a ``<path>``,
+    geometry attributes for a primitive shape, ``transform`` for either);
+    the ones a shape's own constructor does not use are simply ignored by
+    it, the same as ``svgelements`` already does when it parses a full
+    document itself.
 
-    Raises :class:`DxfConversionError` on malformed XML or unparseable path
-    data (§35).
+    Raises :class:`DxfConversionError` on unparseable geometry (§35).
+    """
+    try:
+        shape = shape_cls(**element.attrib)
+        transformed = se.Path(shape.segments(transformed=True))
+    except Exception as exc:
+        raise DxfConversionError(
+            f"unparseable {_local_name(element.tag)!r} geometry: {exc}"
+        ) from exc
+    return list(transformed.as_subpaths())
+
+
+def closed_rings(svg_bytes: bytes) -> list[tuple[Point, ...]]:
+    """Every closed subpath of ``svg_bytes``'s ``<path>``, ``<rect>``,
+    ``<circle>``, ``<ellipse>`` and ``<polygon>`` elements, flattened to a
+    polygon ring, in document order, each with its own ``transform``
+    already applied (§7's "convert every closed path", this module's own
+    docstring): an explicit ``Z``, or a flattened end landing back on its
+    own start within :data:`_CLOSE_TOLERANCE`. An open subpath -- one a
+    human approved despite it -- is left out rather than failing the
+    conversion: nothing about "closed path" fits it either way. A
+    degenerate subpath (fewer than three distinct points once flattened) is
+    left out too: neither a line nor a point is geometry a DXF polyline
+    entity can usefully carry.
+
+    Raises :class:`DxfConversionError` on malformed XML or unparseable
+    geometry (§35).
     """
     try:
         root = ET.fromstring(svg_bytes)
@@ -146,14 +199,10 @@ def closed_rings(svg_bytes: bytes) -> list[tuple[Point, ...]]:
 
     rings: list[tuple[Point, ...]] = []
     for element in root.iter():
-        if _local_name(element.tag) != "path":
+        shape_cls = _SHAPE_CLASSES.get(_local_name(element.tag))
+        if shape_cls is None:
             continue
-        d = element.attrib.get("d", "")
-        try:
-            path = se.Path(d)
-        except Exception as exc:
-            raise DxfConversionError(f"unparseable path data {d!r}: {exc}") from exc
-        for subpath in path.as_subpaths():
+        for subpath in _shape_subpaths(element, shape_cls):
             points = _flatten_subpath(subpath)
             if len(points) < 3:
                 continue
@@ -174,14 +223,23 @@ def svg_to_dxf_bytes(svg_bytes: bytes) -> bytes:
     """
     rings = closed_rings(svg_bytes)
 
-    doc = Drawing.new("R12")
-    modelspace = doc.modelspace()
-    for ring in rings:
-        modelspace.add_polyline2d(list(ring), close=True)
-
-    stream = io.StringIO()
+    # scoped to this whole write (document creation included -- ezdxf
+    # stamps a "created by" marker the moment the document exists, not
+    # only when it is written) and restored after, rather than left flipped
+    # for the whole process just because this module was imported (this
+    # module's own docstring).
+    previous = ezdxf.options.write_fixed_meta_data_for_testing  # pyright: ignore[reportPrivateImportUsage]
+    ezdxf.options.write_fixed_meta_data_for_testing = True  # pyright: ignore[reportPrivateImportUsage]
     try:
+        doc = Drawing.new("R12")
+        modelspace = doc.modelspace()
+        for ring in rings:
+            modelspace.add_polyline2d(list(ring), close=True)
+
+        stream = io.StringIO()
         doc.write(stream)
     except Exception as exc:
         raise DxfConversionError(f"DXF writer failed: {exc}") from exc
+    finally:
+        ezdxf.options.write_fixed_meta_data_for_testing = previous  # pyright: ignore[reportPrivateImportUsage]
     return stream.getvalue().encode("ascii")
