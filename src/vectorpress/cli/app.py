@@ -60,7 +60,7 @@ from vectorpress.domain.derivative_type import DerivativeType, derivative_filena
 from vectorpress.domain.eligibility import BlockingReason, BlockingReasonKind, EligibilityResult
 from vectorpress.domain.finding import Finding, ValidationOutcome
 from vectorpress.domain.numeric_format import format_number
-from vectorpress.domain.product import Product
+from vectorpress.domain.product import IneligibleMembersMode, Product
 from vectorpress.domain.recipe import RECIPES
 from vectorpress.domain.reference_size import resolve_cleanup_size_in, resolve_reference_size_in
 from vectorpress.domain.status import Status
@@ -1634,6 +1634,16 @@ def build(
     slug: str = typer.Argument(
         help="The product's slug (its file name under products/, without .toml)."
     ),
+    allow_unapproved: bool = typer.Option(
+        False,
+        "--allow-unapproved",
+        help=(
+            "Admit included derivatives that are generated or needs review, not just"
+            " approved. Never admits a rejected or regenerate derivative, and never"
+            " overrides a rights or accuracy block. Applies to this build only; nothing"
+            " is remembered for the next one."
+        ),
+    ),
 ) -> None:
     """Build one product into builds/<slug>/: a customer package (SVG/ and
     PNG/ folders, plus a converted DXF/ folder when the product lists that
@@ -1649,18 +1659,25 @@ def build(
     same as 'vpress product') refuses the build under this product's
     default ineligible_members = "refuse"; set to "exclude", it ships the
     eligible members instead, reporting and recording each excluded one --
-    and still refuses, the same way, when none are eligible. Rebuilding
-    with no changes reproduces the same package and ZIP byte for byte.
+    and still refuses, the same way, when none are eligible. --allow-unapproved
+    widens eligibility for this one build only: a generated or needs-review
+    derivative ships instead of blocking, listed in the output and recorded
+    in the manifest with its status; a rejected or regenerate derivative, or
+    a rights/accuracy block, still makes its member ineligible regardless.
+    Rebuilding with no changes reproduces the same package and ZIP byte for
+    byte.
     \f
     vectorpress.build.product_build.build_product does the whole build;
-    this only renders its BuildResult. --allow-unapproved is not built yet.
+    this only renders its BuildResult.
     """
     root, config = _locate_and_load_config(ctx)
     loaded = _lookup_product_or_exit(root, config, slug)
     known_assets = load_assets(root, config).assets
     known_collections = load_collections(root, config).collections
 
-    result = build_product(loaded, root, config, known_assets, known_collections)
+    result = build_product(
+        loaded, root, config, known_assets, known_collections, allow_unapproved=allow_unapproved
+    )
 
     if result.outcome is BuildOutcome.REFUSED_BRAND_PROBLEMS:
         assert result.brand_problems is not None
@@ -1685,10 +1702,20 @@ def build(
 
     if result.outcome is BuildOutcome.REFUSED_INELIGIBLE_MEMBERS:
         assert result.ineligible_members is not None
-        typer.echo(
-            f"build: {slug} refused: {len(result.ineligible_members)} ineligible member(s)",
-            err=True,
-        )
+        # exclude only ever reaches this refusal by excluding down to zero
+        # (product_build.build_product): say so, in wording distinct from
+        # refuse's "N ineligible member(s)" -- one is "nothing was eligible
+        # to ship", the other is "N named members block the whole build".
+        if loaded.ineligible_members is IneligibleMembersMode.EXCLUDE:
+            typer.echo(
+                f"build: {slug} refused: no eligible member (ineligible_members = exclude)",
+                err=True,
+            )
+        else:
+            typer.echo(
+                f"build: {slug} refused: {len(result.ineligible_members)} ineligible member(s)",
+                err=True,
+            )
         for member in result.ineligible_members:
             reasons = "; ".join(_render_blocking_reason(r) for r in member.blocking_reasons)
             typer.echo(f"  {member.asset_id}\t{reasons}")
@@ -1731,6 +1758,11 @@ def build(
     for excluded in result.manifest.excluded_members:
         reasons = "; ".join(_render_blocking_reason(r) for r in excluded.blocking_reasons)
         typer.echo(f"  {excluded.asset_id}\t{reasons}")
+    typer.echo(f"Admitted unapproved: {len(result.manifest.admitted_unapproved_members)}")
+    for admitted in result.manifest.admitted_unapproved_members:
+        typer.echo(
+            f"  {admitted.asset_id}\t{admitted.derivative_type.value}\t{admitted.status.value}"
+        )
 
 
 # --- vpress attention: the inbox (§34, §24, CONTEXT.md "Attention report / Inbox") ---

@@ -10,9 +10,8 @@ function of its manifest inputs"). This module only defines that shape;
 ``build`` resolves it from disk, serializes it to JSON, and writes it
 (ADR 0006 -- domain has no I/O).
 
-Deliberately minimal: admitted-unapproved derivatives, rights status and
-warnings extend this shape as further optional fields, never by reshaping
-``members`` itself.
+Deliberately minimal: rights status and warnings extend this shape as
+further optional fields, never by reshaping ``members`` itself.
 """
 
 from dataclasses import dataclass
@@ -22,6 +21,7 @@ from vectorpress.domain.asset import AssetId
 from vectorpress.domain.derivative_type import DerivativeType
 from vectorpress.domain.eligibility import BlockingReason
 from vectorpress.domain.product import ProductSlug
+from vectorpress.domain.status import Status
 
 
 class ManifestMemberSource(StrEnum):
@@ -70,6 +70,20 @@ class ManifestDxfMember:
 
 
 @dataclass(frozen=True)
+class ManifestAdmittedUnapproved:
+    """One (asset, derivative type) a build shipped despite it not being
+    approved, under a per-build ``--allow-unapproved`` override (§10.1's
+    "unless explicitly overridden"): its status at build time, so the
+    manifest alone shows exactly what shipped unreviewed. Never a
+    ``rejected`` or ``regenerate`` status -- those still exclude their
+    member regardless of the override."""
+
+    asset_id: AssetId
+    derivative_type: DerivativeType
+    status: Status
+
+
+@dataclass(frozen=True)
 class ManifestExcludedMember:
     """One member an ``exclude`` build left out (§10, CONTEXT.md "Excluded
     member"): the asset ID and every §10.1 blocking reason product
@@ -85,10 +99,13 @@ class Manifest:
     """One build's complete record (§14, ADR 0004): the product it built,
     the reference size it was built at, the LICENSE.txt build year,
     the tool version that built it, every included member, every excluded
-    one (empty unless the product is set to ``exclude``, §10), and every
-    converted ``DXF/`` file. ``members`` and ``dxf_members`` are each sorted
-    by (asset ID, derivative type), and ``excluded_members`` by asset ID, so
-    two builds of unchanged inputs produce an identical manifest (§36).
+    one (empty unless the product is set to ``exclude``, §10), every
+    converted ``DXF/`` file, and every derivative admitted despite not
+    being approved (empty unless the build ran with ``--allow-unapproved``).
+    ``members`` and ``dxf_members`` are each sorted by (asset ID, derivative
+    type), ``excluded_members`` by asset ID, and
+    ``admitted_unapproved_members`` by (asset ID, derivative type), so two
+    builds of unchanged inputs produce an identical manifest (§36).
     ``license_year`` is the one field expected to change on its own with no
     other input changing -- once a calendar year turns over -- which is why
     it is recorded rather than left implicit (§27's "must not break the
@@ -101,3 +118,4 @@ class Manifest:
     members: list[ManifestMember]
     dxf_members: list[ManifestDxfMember]
     excluded_members: list[ManifestExcludedMember]
+    admitted_unapproved_members: list[ManifestAdmittedUnapproved]

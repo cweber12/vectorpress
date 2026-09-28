@@ -17,6 +17,7 @@ from vectorpress.domain.asset import AccuracyStatus, Asset, RightsStatus, Source
 from vectorpress.domain.derivative_state import DerivativeState
 from vectorpress.domain.derivative_type import DerivativeType
 from vectorpress.domain.eligibility import (
+    AdmittedUnapproved,
     BlockingReason,
     BlockingReasonKind,
     Eligibility,
@@ -271,3 +272,158 @@ def test_missing_optional_metadata_fields_names_every_empty_optional_field() -> 
     asset = _asset(scientific_name=None, tags=[], notes="")
 
     assert missing_optional_metadata_fields(asset) == ["scientific_name", "tags", "notes"]
+
+
+# --- allow_unapproved: §10.1's "unless explicitly overridden" -----------------------
+
+
+def test_without_allow_unapproved_nothing_is_ever_admitted() -> None:
+    """The default (``allow_unapproved=False``): an unapproved derivative
+    still blocks, and ``admitted_unapproved`` stays empty -- the flag is
+    opt-in per build, not a change to the existing default behavior."""
+    needs_review = IncludedDerivative(
+        DerivativeType.CUT_SVG, DerivativeState.CURRENT, Status.NEEDS_REVIEW
+    )
+
+    result = asset_eligibility(
+        RightsStatus.ORIGINAL_ARTWORK, AccuracyStatus.APPROVED, [], [needs_review]
+    )
+
+    assert result.eligibility is Eligibility.BLOCKED
+    assert result.admitted_unapproved == []
+
+
+def test_allow_unapproved_admits_a_needs_review_derivative_recording_its_status() -> None:
+    needs_review = IncludedDerivative(
+        DerivativeType.CUT_SVG, DerivativeState.CURRENT, Status.NEEDS_REVIEW
+    )
+
+    result = asset_eligibility(
+        RightsStatus.ORIGINAL_ARTWORK,
+        AccuracyStatus.APPROVED,
+        [],
+        [needs_review],
+        allow_unapproved=True,
+    )
+
+    assert result.eligibility is Eligibility.ELIGIBLE
+    assert result.blocking_reasons == []
+    assert result.admitted_unapproved == [
+        AdmittedUnapproved(DerivativeType.CUT_SVG, Status.NEEDS_REVIEW)
+    ]
+
+
+def test_allow_unapproved_admits_a_generated_derivative_recording_its_status() -> None:
+    generated = IncludedDerivative(
+        DerivativeType.CUT_SVG, DerivativeState.CURRENT, Status.GENERATED
+    )
+
+    result = asset_eligibility(
+        RightsStatus.ORIGINAL_ARTWORK,
+        AccuracyStatus.APPROVED,
+        [],
+        [generated],
+        allow_unapproved=True,
+    )
+
+    assert result.eligibility is Eligibility.ELIGIBLE
+    assert result.blocking_reasons == []
+    assert result.admitted_unapproved == [
+        AdmittedUnapproved(DerivativeType.CUT_SVG, Status.GENERATED)
+    ]
+
+
+def test_allow_unapproved_still_blocks_a_rejected_derivative() -> None:
+    """A human said no: ``allow_unapproved`` never admits ``rejected``
+    (§10.1's override "covers approval only")."""
+    rejected = IncludedDerivative(DerivativeType.CUT_SVG, DerivativeState.CURRENT, Status.REJECTED)
+
+    result = asset_eligibility(
+        RightsStatus.ORIGINAL_ARTWORK,
+        AccuracyStatus.APPROVED,
+        [],
+        [rejected],
+        allow_unapproved=True,
+    )
+
+    assert result.eligibility is Eligibility.BLOCKED
+    assert result.blocking_reasons == [
+        BlockingReason(BlockingReasonKind.DERIVATIVE_STATUS, DerivativeType.CUT_SVG, "rejected")
+    ]
+    assert result.admitted_unapproved == []
+
+
+def test_allow_unapproved_still_blocks_a_regenerate_derivative() -> None:
+    """A human asked for a new take: ``allow_unapproved`` never admits
+    ``regenerate`` either -- the old output no longer applies."""
+    regenerate = IncludedDerivative(
+        DerivativeType.CUT_SVG, DerivativeState.CURRENT, Status.REGENERATE
+    )
+
+    result = asset_eligibility(
+        RightsStatus.ORIGINAL_ARTWORK,
+        AccuracyStatus.APPROVED,
+        [],
+        [regenerate],
+        allow_unapproved=True,
+    )
+
+    assert result.eligibility is Eligibility.BLOCKED
+    assert result.blocking_reasons == [
+        BlockingReason(BlockingReasonKind.DERIVATIVE_STATUS, DerivativeType.CUT_SVG, "regenerate")
+    ]
+    assert result.admitted_unapproved == []
+
+
+def test_allow_unapproved_never_admits_a_missing_derivative() -> None:
+    """Nothing exists to admit: ``allow_unapproved`` widens which *status*
+    is acceptable, not whether an output exists at all."""
+    missing = IncludedDerivative(DerivativeType.CUT_SVG, DerivativeState.MISSING, None)
+
+    result = asset_eligibility(
+        RightsStatus.ORIGINAL_ARTWORK, AccuracyStatus.APPROVED, [], [missing], allow_unapproved=True
+    )
+
+    assert result.eligibility is Eligibility.BLOCKED
+    assert result.blocking_reasons == [
+        BlockingReason(BlockingReasonKind.DERIVATIVE_STATE, DerivativeType.CUT_SVG, "missing")
+    ]
+    assert result.admitted_unapproved == []
+
+
+def test_allow_unapproved_does_not_override_a_rights_block() -> None:
+    needs_review = IncludedDerivative(
+        DerivativeType.CUT_SVG, DerivativeState.CURRENT, Status.NEEDS_REVIEW
+    )
+
+    result = asset_eligibility(
+        RightsStatus.DO_NOT_PUBLISH,
+        AccuracyStatus.APPROVED,
+        [],
+        [needs_review],
+        allow_unapproved=True,
+    )
+
+    assert result.eligibility is Eligibility.BLOCKED
+    assert result.blocking_reasons == [
+        BlockingReason(BlockingReasonKind.RIGHTS_STATUS, None, "do_not_publish")
+    ]
+
+
+def test_allow_unapproved_does_not_override_an_accuracy_block() -> None:
+    needs_review = IncludedDerivative(
+        DerivativeType.CUT_SVG, DerivativeState.CURRENT, Status.NEEDS_REVIEW
+    )
+
+    result = asset_eligibility(
+        RightsStatus.ORIGINAL_ARTWORK,
+        AccuracyStatus.ISSUE_FOUND,
+        [],
+        [needs_review],
+        allow_unapproved=True,
+    )
+
+    assert result.eligibility is Eligibility.BLOCKED
+    assert result.blocking_reasons == [
+        BlockingReason(BlockingReasonKind.ACCURACY_STATUS, None, "issue_found")
+    ]

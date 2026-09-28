@@ -52,6 +52,7 @@ from vectorpress.domain.collection_resolution import ResolvedMember, WayIn, reso
 from vectorpress.domain.derivative_state import DerivativeState
 from vectorpress.domain.derivative_type import DerivativeType
 from vectorpress.domain.eligibility import (
+    AdmittedUnapproved,
     BlockingReason,
     Eligibility,
     asset_eligibility,
@@ -74,13 +75,16 @@ class ProductMember:
     """One member of a product's resolved membership: how it got in (the
     same ``ways_in`` a resolved collection carries), whether it is eligible
     for this product's own ``derivative_types``, every blocking reason when
-    excluded, and every warning either way."""
+    excluded, every warning either way, and every derivative
+    ``allow_unapproved`` admitted for it (empty unless the caller passed
+    ``allow_unapproved=True`` to :func:`resolve_product`)."""
 
     asset_id: AssetId
     ways_in: tuple[WayIn, ...]
     eligibility: MemberEligibility
     blocking_reasons: list[BlockingReason]
     warnings: list[str]
+    admitted_unapproved: list[AdmittedUnapproved]
 
 
 @dataclass(frozen=True)
@@ -158,6 +162,7 @@ def resolve_product(
     config: CatalogConfig,
     known_assets: list[Asset],
     known_collections: list[Collection],
+    allow_unapproved: bool = False,
 ) -> ResolvedProduct:
     """Resolve one product's effective contents (§7, §10, §10.1, §13, §28).
 
@@ -167,6 +172,11 @@ def resolve_product(
     future caller cannot forget to pass every loaded collection (needed for
     a union, or to tell an unknown ``collection_slug`` from a loaded one)
     and silently lose part of the resolution.
+
+    ``allow_unapproved`` is the per-build ``--allow-unapproved`` override
+    (§10.1's "unless explicitly overridden"), threaded straight into
+    :func:`~vectorpress.domain.eligibility.asset_eligibility` -- an option
+    on the one eligibility decision, not a second one.
     """
     resolved_members, reference_problems = _resolved_members_and_reference_problems(
         product, config, known_assets, known_collections
@@ -184,6 +194,7 @@ def resolve_product(
             asset.accuracy_status,
             missing_optional_metadata_fields(asset),
             included,
+            allow_unapproved=allow_unapproved,
         )
         eligibility = (
             MemberEligibility.ELIGIBLE
@@ -197,6 +208,7 @@ def resolve_product(
                 eligibility=eligibility,
                 blocking_reasons=result.blocking_reasons,
                 warnings=result.warnings,
+                admitted_unapproved=result.admitted_unapproved,
             )
         )
         missing.extend(
