@@ -10,7 +10,7 @@ conversion and its DXF slice, rather than each keeping its own copy.
 
 from collections.abc import Iterable
 
-from vectorpress.domain.derivative_type import DerivativeType
+from vectorpress.domain.derivative_type import DerivativeType, derivative_filename
 from vectorpress.domain.format import Format
 
 #: Every derivative type copied straight into a format folder (ADR 0013).
@@ -51,6 +51,19 @@ def dxf_source(included_types: Iterable[DerivativeType]) -> DerivativeType | Non
         if candidate in included:
             return candidate
     return None
+
+
+def dxf_filename(display_name: str, source_type: DerivativeType) -> str:
+    """The customer-facing ``DXF/`` filename converted from ``source_type``
+    (ADR 0013, §20): the same slug and type suffix as ``source_type``'s own
+    SVG filename, with ``.dxf`` in place of ``.svg`` -- ``carabiner-cut.dxf``
+    for a ``cut_svg`` source. Sharing the slug and suffix this way means the
+    same collision rule (§20) already applied to every copied file also
+    covers a converted one, with no separate check.
+    """
+    svg_filename = derivative_filename(display_name, source_type)
+    assert svg_filename.endswith(".svg")  # dxf_source only ever names a *_svg type
+    return f"{svg_filename.removesuffix('.svg')}.dxf"
 
 
 def format_type_mismatch_problems(

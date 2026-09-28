@@ -11,6 +11,14 @@ Uses ``pacific_coast_tide_pool_png_only`` (``derivative_types =
 PNG-only fixture product PRD 5's own acceptance test already exercises
 (``test_prd05_acceptance.py``): its package/ZIP name falls back to its slug,
 Title-Case-Hyphen, since it has no listing yet.
+
+DXF conversion (ADR 0013) is exercised against
+``pacific_coast_tide_pool_standard_pack``, whose ``derivative_types`` already
+list both ``cut_svg`` and ``silhouette_svg`` alongside ``formats = [...,
+"dxf"]`` -- so ``DXF/`` is converted from ``cut_svg`` there. A silhouette-only
+fallback product is written into the temp catalog copy directly, the same
+way other tests here mutate a hand-authored file mid-test, rather than
+adding a second checked-in fixture product for one case.
 """
 
 import hashlib
@@ -19,10 +27,15 @@ import shutil
 import zipfile
 from pathlib import Path
 
+import ezdxf
 import pytest
 from syrupy.assertion import SnapshotAssertion
 from typer.testing import CliRunner
 
+from vectorpress.build._dxf_conversion import (  # pyright: ignore[reportPrivateUsage]
+    closed_rings,
+    svg_to_dxf_bytes,
+)
 from vectorpress.cli.app import app
 
 runner = CliRunner()
@@ -39,6 +52,18 @@ PNG_ONLY_FILES = {
     "ochre_sea_star": "ochre-sea-star-color.png",
     "giant_green_anemone": "giant-green-anemone-color.png",
     "purple_sea_urchin": "purple-sea-urchin-color.png",
+}
+
+STANDARD_PACK_SLUG = "pacific_coast_tide_pool_standard_pack"
+STANDARD_PACK_TOP_LEVEL = "Tide-Pool-Collection"
+
+# (asset ID, its cut_svg customer filename): §20's slugified display name
+# plus cut_svg's own "-cut.svg" suffix -- the DXF converted from it is the
+# same name with ".dxf" in place of ".svg" (ADR 0013).
+STANDARD_PACK_CUT_SVG_FILES = {
+    "ochre_sea_star": "ochre-sea-star-cut.svg",
+    "giant_green_anemone": "giant-green-anemone-cut.svg",
+    "purple_sea_urchin": "purple-sea-urchin-cut.svg",
 }
 
 
@@ -59,6 +84,60 @@ def _generate_and_approve_transparent_png(monkeypatch: pytest.MonkeyPatch, root:
     runner.invoke(app, ["generate", "--all"])
     approve_result = runner.invoke(app, ["approve", "--all", "--type", "transparent_png"])
     assert approve_result.exit_code == 0, approve_result.output
+
+
+def _generate_and_approve_standard_pack_types(monkeypatch: pytest.MonkeyPatch, root: Path) -> None:
+    """Get every ``pacific_coast_tide_pool_standard_pack`` member to
+    eligible: generate everything, then approve every asset's ``cut_svg``,
+    ``silhouette_svg`` and ``transparent_png`` -- the three types this
+    product's own ``derivative_types`` lists."""
+    monkeypatch.chdir(root)
+    runner.invoke(app, ["generate", "--all"])
+    for derivative_type in ("cut_svg", "silhouette_svg", "transparent_png"):
+        approve_result = runner.invoke(app, ["approve", "--all", "--type", derivative_type])
+        assert approve_result.exit_code == 0, approve_result.output
+
+
+#: Short on purpose (Windows' MAX_PATH, ~260 characters, is otherwise a real
+#: risk once a build's own ``.tmp-<slug>-<32 hex chars>/<Title-Case-Name>/``
+#: prefix is added on top of pytest's own long ``tmp_path`` for a slow test
+#: name -- this fixture product's slug stays deliberately short rather than
+#: descriptive.
+SILHOUETTE_ONLY_SLUG = "tide_pool_silhouette_dxf"
+SILHOUETTE_ONLY_TOP_LEVEL = "Tide-Pool-Silhouette-Dxf"
+
+
+def _write_silhouette_only_dxf_product(root: Path, slug: str) -> None:
+    """A product referencing the same ``pacific_coast_tide_pool`` collection
+    as the standard pack, but with only ``silhouette_svg`` included: the
+    fixture for ADR 0013's fallback rule (§7's "DXF/ converted from cut_svg,
+    else silhouette_svg"), written straight into a temp catalog copy rather
+    than as a second checked-in fixture product (this module's own
+    docstring)."""
+    (root / "products" / f"{slug}.toml").write_text(
+        'collection_slug = "pacific_coast_tide_pool"\n'
+        'derivative_types = ["silhouette_svg"]\n'
+        'formats = ["svg", "dxf"]\n'
+        'tier = "individual"\n'
+        "price = 4.00\n",
+        encoding="utf-8",
+    )
+
+
+def _dxf_filename(svg_filename: str) -> str:
+    return f"{svg_filename.removesuffix('.svg')}.dxf"
+
+
+def _entity_count(dxf_bytes: bytes) -> int:
+    """The DXF's own ``POLYLINE`` entity count, read back with ``ezdxf``
+    directly as this test's own oracle -- entirely independent of
+    ``build._dxf_conversion``'s own writer, so it does not just check the
+    conversion against itself."""
+    import io
+
+    doc = ezdxf.read(io.StringIO(dxf_bytes.decode("ascii")))  # pyright: ignore[reportPrivateImportUsage]
+    polylines = doc.modelspace().query("POLYLINE")  # pyright: ignore[reportUnknownArgumentType]
+    return len(list(polylines))  # pyright: ignore[reportUnknownArgumentType]
 
 
 def _build_dir(root: Path, slug: str) -> Path:
@@ -441,3 +520,165 @@ def test_build_on_a_format_type_mismatch_product_fails_to_load_and_writes_nothin
     assert build_result.exit_code == 1
     assert build_result.output == load_result.output
     assert not (temp_catalog_root / "builds").exists()
+
+
+# --- DXF conversion (issue #94, ADR 0013, §7) --------------------------------
+
+
+@pytest.mark.integration
+def test_build_produces_dxf_converted_from_the_effective_cut_svg(
+    monkeypatch: pytest.MonkeyPatch, temp_catalog_root: Path
+) -> None:
+    """A product with ``cut_svg`` included and ``dxf`` listed produces
+    ``DXF/<name>-cut.dxf`` per member, converted from the effective
+    ``cut_svg`` -- the override when one is present, not the generated file
+    underneath it."""
+    _generate_and_approve_standard_pack_types(monkeypatch, temp_catalog_root)
+
+    # ochre_sea_star's cut_svg is overridden with a distinct, real generated
+    # cut_svg (ADR 0007's override is any file under overrides/ named like
+    # the generated one; this does not need to have come from an editor).
+    other_cut_svg = (
+        temp_catalog_root
+        / "assets"
+        / "giant_green_anemone"
+        / "derived"
+        / "giant-green-anemone-cut.svg"
+    ).read_bytes()
+    ochre_dir = temp_catalog_root / "assets" / "ochre_sea_star"
+    generated_cut_svg = (ochre_dir / "derived" / "ochre-sea-star-cut.svg").read_bytes()
+    assert other_cut_svg != generated_cut_svg
+    override_path = ochre_dir / "overrides" / "ochre-sea-star-cut.svg"
+    override_path.parent.mkdir(parents=True, exist_ok=True)
+    override_path.write_bytes(other_cut_svg)
+    approve_result = runner.invoke(app, ["approve", "--all", "--type", "cut_svg"])
+    assert approve_result.exit_code == 0, approve_result.output
+
+    result = runner.invoke(app, ["build", STANDARD_PACK_SLUG])
+    assert result.exit_code == 0, result.output
+
+    build_dir = _build_dir(temp_catalog_root, STANDARD_PACK_SLUG)
+    package_dir = build_dir / STANDARD_PACK_TOP_LEVEL
+    manifest = json.loads((build_dir / "manifest.json").read_text(encoding="utf-8"))
+    dxf_members = {m["asset_id"]: m for m in manifest["dxf_members"]}
+
+    for asset_id, cut_svg_filename in STANDARD_PACK_CUT_SVG_FILES.items():
+        dxf_path = package_dir / "DXF" / _dxf_filename(cut_svg_filename)
+        assert dxf_path.is_file()
+        assert dxf_members[asset_id]["source_derivative_type"] == "cut_svg"
+
+    # ochre_sea_star's DXF came from its override, not the generated cut_svg
+    # underneath it.
+    ochre_dxf_bytes = (package_dir / "DXF" / "ochre-sea-star-cut.dxf").read_bytes()
+    assert ochre_dxf_bytes == svg_to_dxf_bytes(other_cut_svg)
+    assert ochre_dxf_bytes != svg_to_dxf_bytes(generated_cut_svg)
+    assert (
+        dxf_members["ochre_sea_star"]["source_content_hash"]
+        == hashlib.sha256(other_cut_svg).hexdigest()
+    )
+    assert (
+        dxf_members["ochre_sea_star"]["content_hash"] == hashlib.sha256(ochre_dxf_bytes).hexdigest()
+    )
+
+
+@pytest.mark.integration
+def test_build_produces_dxf_converted_from_silhouette_svg_when_cut_svg_not_included(
+    monkeypatch: pytest.MonkeyPatch, temp_catalog_root: Path
+) -> None:
+    """A product with ``silhouette_svg`` and no ``cut_svg`` produces DXFs
+    converted from ``silhouette_svg`` (ADR 0013's fallback)."""
+    _write_silhouette_only_dxf_product(temp_catalog_root, SILHOUETTE_ONLY_SLUG)
+    monkeypatch.chdir(temp_catalog_root)
+    runner.invoke(app, ["generate", "--all"])
+    approve_result = runner.invoke(app, ["approve", "--all", "--type", "silhouette_svg"])
+    assert approve_result.exit_code == 0, approve_result.output
+
+    result = runner.invoke(app, ["build", SILHOUETTE_ONLY_SLUG])
+    assert result.exit_code == 0, result.output
+
+    build_dir = _build_dir(temp_catalog_root, SILHOUETTE_ONLY_SLUG)
+    package_dir = build_dir / SILHOUETTE_ONLY_TOP_LEVEL
+    manifest = json.loads((build_dir / "manifest.json").read_text(encoding="utf-8"))
+
+    for asset_id in ("ochre_sea_star", "giant_green_anemone", "purple_sea_urchin"):
+        silhouette_svg = temp_catalog_root / "assets" / asset_id / "derived"
+        svg_filename = next(
+            p.name for p in silhouette_svg.iterdir() if p.name.endswith("-silhouette.svg")
+        )
+        dxf_bytes = (package_dir / "DXF" / _dxf_filename(svg_filename)).read_bytes()
+        assert dxf_bytes == svg_to_dxf_bytes((silhouette_svg / svg_filename).read_bytes())
+
+    dxf_members = {m["asset_id"]: m for m in manifest["dxf_members"]}
+    for asset_id in ("ochre_sea_star", "giant_green_anemone", "purple_sea_urchin"):
+        assert dxf_members[asset_id]["source_derivative_type"] == "silhouette_svg"
+
+
+@pytest.mark.integration
+def test_rebuilding_the_standard_pack_with_no_changes_produces_byte_identical_dxfs(
+    monkeypatch: pytest.MonkeyPatch, temp_catalog_root: Path
+) -> None:
+    _generate_and_approve_standard_pack_types(monkeypatch, temp_catalog_root)
+
+    first = runner.invoke(app, ["build", STANDARD_PACK_SLUG])
+    assert first.exit_code == 0, first.output
+    build_dir = _build_dir(temp_catalog_root, STANDARD_PACK_SLUG)
+    package_dir = build_dir / STANDARD_PACK_TOP_LEVEL
+    dxf_bytes_1 = {
+        asset_id: (package_dir / "DXF" / _dxf_filename(cut_svg_filename)).read_bytes()
+        for asset_id, cut_svg_filename in STANDARD_PACK_CUT_SVG_FILES.items()
+    }
+    manifest_bytes_1 = (build_dir / "manifest.json").read_bytes()
+
+    second = runner.invoke(app, ["build", STANDARD_PACK_SLUG])
+    assert second.exit_code == 0, second.output
+    dxf_bytes_2 = {
+        asset_id: (package_dir / "DXF" / _dxf_filename(cut_svg_filename)).read_bytes()
+        for asset_id, cut_svg_filename in STANDARD_PACK_CUT_SVG_FILES.items()
+    }
+    manifest_bytes_2 = (build_dir / "manifest.json").read_bytes()
+
+    assert dxf_bytes_2 == dxf_bytes_1
+    assert manifest_bytes_2 == manifest_bytes_1
+
+
+@pytest.mark.integration
+def test_dxf_conversion_failure_refuses_the_build_and_writes_nothing(
+    monkeypatch: pytest.MonkeyPatch, temp_catalog_root: Path
+) -> None:
+    """A conversion failure (here: hand-corrupting the effective cut_svg's
+    path data past what ``svgelements`` can parse) fails the whole build,
+    naming the asset, and writes nothing (§35)."""
+    _generate_and_approve_standard_pack_types(monkeypatch, temp_catalog_root)
+
+    ochre_dir = temp_catalog_root / "assets" / "ochre_sea_star"
+    cut_svg_path = ochre_dir / "derived" / "ochre-sea-star-cut.svg"
+    corrupted = cut_svg_path.read_text(encoding="utf-8").replace('d="M', 'd="M0,0 L abc M', 1)
+    override_path = ochre_dir / "overrides" / "ochre-sea-star-cut.svg"
+    override_path.parent.mkdir(parents=True, exist_ok=True)
+    override_path.write_text(corrupted, encoding="utf-8")
+    approve_result = runner.invoke(app, ["approve", "--all", "--type", "cut_svg"])
+    assert approve_result.exit_code == 0, approve_result.output
+
+    result = runner.invoke(app, ["build", STANDARD_PACK_SLUG])
+
+    assert result.exit_code == 1
+    assert "ochre_sea_star" in result.output
+    assert "DXF" in result.output
+    assert not (temp_catalog_root / "builds").exists()
+
+
+@pytest.mark.integration
+def test_dxf_is_locked_by_snapshot_and_its_entity_count_matches_the_svgs_closed_paths(
+    monkeypatch: pytest.MonkeyPatch, temp_catalog_root: Path, snapshot: SnapshotAssertion
+) -> None:
+    _generate_and_approve_standard_pack_types(monkeypatch, temp_catalog_root)
+
+    result = runner.invoke(app, ["build", STANDARD_PACK_SLUG])
+    assert result.exit_code == 0, result.output
+
+    package_dir = _build_dir(temp_catalog_root, STANDARD_PACK_SLUG) / STANDARD_PACK_TOP_LEVEL
+    dxf_bytes = (package_dir / "DXF" / "ochre-sea-star-cut.dxf").read_bytes()
+    svg_bytes = (package_dir / "SVG" / "ochre-sea-star-cut.svg").read_bytes()
+
+    assert dxf_bytes.decode("ascii") == snapshot(name="ochre_sea_star_cut_dxf")
+    assert _entity_count(dxf_bytes) == len(closed_rings(svg_bytes))
