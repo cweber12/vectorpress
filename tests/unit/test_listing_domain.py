@@ -17,7 +17,6 @@ VALID_DATA = {
     "region": "Pacific Coast",
     "species_names": ["Ochre Sea Star"],
     "category": "Nature & Wildlife",
-    "suggested_price": 12.0,
     "license_type": "Personal & Small Business Use",
     "marketplace_notes": "Feature with the rest of the family.",
 }
@@ -27,7 +26,6 @@ def test_valid_listing_parses() -> None:
     listing = Listing.model_validate(VALID_DATA)
 
     assert listing.title == "Pacific Coast Tide Pool Cut File Collection"
-    assert listing.suggested_price == 12.0
 
 
 def test_region_and_species_names_are_optional() -> None:
@@ -54,8 +52,10 @@ def test_missing_required_field_is_rejected() -> None:
         Listing.model_validate(data)
 
 
-def test_negative_suggested_price_is_rejected() -> None:
-    data = {**VALID_DATA, "suggested_price": -1.0}
+def test_suggested_price_is_rejected_as_an_unknown_field() -> None:
+    """§18: ``product.price`` is the one price; ``Listing`` carries no price
+    field of its own at all."""
+    data = {**VALID_DATA, "suggested_price": 12.0}
 
     with pytest.raises(ValidationError):
         Listing.model_validate(data)

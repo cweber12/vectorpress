@@ -217,7 +217,6 @@ def test_unknown_listing_key_is_rejected() -> None:
             "short_title": "st",
             "description": "d",
             "category": "c",
-            "suggested_price": 1.0,
             "license_type": "l",
             "not_a_field": True,
         },
@@ -228,6 +227,34 @@ def test_unknown_listing_key_is_rejected() -> None:
 
     errors = exc_info.value.errors()
     assert any(error["loc"] == ("listing", "not_a_field") for error in errors)
+
+
+def test_listing_suggested_price_is_rejected_naming_the_field() -> None:
+    """§18: ``product.price`` is the one price; a ``[listing]`` still
+    carrying the removed ``suggested_price`` is a product metadata problem
+    naming the field, not the generic "extra field" pydantic gives any
+    other unknown key."""
+    data = {
+        **VALID_WITH_COLLECTION_SLUG,
+        "listing": {
+            "title": "t",
+            "short_title": "st",
+            "description": "d",
+            "category": "c",
+            "suggested_price": 1.0,
+            "license_type": "l",
+        },
+    }
+
+    with pytest.raises(ValidationError) as exc_info:
+        Product.model_validate(data)
+
+    errors = exc_info.value.errors()
+    assert len(errors) == 1
+    raised = errors[0].get("ctx", {}).get("error")
+    assert isinstance(raised, MetadataFieldError)
+    assert raised.field == "listing.suggested_price"
+    assert "price" in str(raised)
 
 
 def test_full_listing_is_accepted() -> None:
@@ -243,7 +270,6 @@ def test_full_listing_is_accepted() -> None:
             "region": "Pacific Coast",
             "species_names": ["Ochre Sea Star"],
             "category": "Nature & Wildlife",
-            "suggested_price": 12.0,
             "license_type": "Personal & Small Business Use",
             "marketplace_notes": "n",
         },
