@@ -25,6 +25,12 @@ derivative type) whose state is ``missing`` or ``impossible`` is gathered
 as the actionable input to a later ``generate`` run. Neither list takes
 precedence over the other -- §10's "unless explicitly overridden" is still
 not built.
+
+:func:`resolve_validation_scope` is the analogous decision for ``vpress
+validate --product``: which members to validate, or why none -- built on
+:func:`resolve_product`, never a second resolution. ``cli`` only renders
+its result, the same "cli is thin" shape :func:`~vectorpress.build.
+product_build.build_product` already established for ``vpress build``.
 """
 
 from dataclasses import dataclass
@@ -204,4 +210,69 @@ def resolve_product(
         members=members,
         missing_required_derivatives=missing,
         reference_problems=reference_problems,
+    )
+
+
+class ValidationScopeOutcome(StrEnum):
+    """One outcome of scoping ``vpress validate --product`` to a product's
+    resolved membership (§9, §13, ADR 0012): a member list to validate, or a
+    refusal/report for one of three reasons."""
+
+    SCOPED = "scoped"
+    REFUSED_REFERENCE_PROBLEMS = "refused_reference_problems"
+    NOTHING_TO_VALIDATE = "nothing_to_validate"
+    REFUSED_NOT_A_MEMBER = "refused_not_a_member"
+
+
+@dataclass(frozen=True)
+class ValidationScope:
+    """The result of :func:`resolve_validation_scope`. Exactly one of
+    ``reference_problems``, ``asset_id`` or ``member_asset_ids`` is set,
+    matching ``outcome``."""
+
+    outcome: ValidationScopeOutcome
+    reference_problems: list[MetadataProblem] | None = None
+    asset_id: AssetId | None = None
+    member_asset_ids: list[AssetId] | None = None
+
+
+def resolve_validation_scope(
+    product: Product,
+    root: Path,
+    config: CatalogConfig,
+    known_assets: list[Asset],
+    known_collections: list[Collection],
+    asset_id: AssetId | None,
+) -> ValidationScope:
+    """Scope ``vpress validate --product`` to ``product``'s resolved
+    membership (§9, §13): every resolved member -- eligible or excluded
+    alike, since findings are independent of eligibility (CONTEXT.md
+    "Findings") -- or, when ``asset_id`` is given, just that one member.
+
+    Resolves through :func:`resolve_product` (no second resolution path,
+    the same membership ``vpress product`` and ``vpress build`` show), and
+    refuses on the identical unresolved-membership condition
+    :func:`~vectorpress.build.product_build.build_product` refuses a build
+    on. Reports :attr:`ValidationScopeOutcome.NOTHING_TO_VALIDATE` for a
+    product with no ``cut_svg`` among its ``derivative_types``, and
+    :attr:`ValidationScopeOutcome.REFUSED_NOT_A_MEMBER` when ``asset_id`` is
+    given but is not one of the resolved members, rather than silently
+    validating it at the product's size.
+    """
+    resolved = resolve_product(product, root, config, known_assets, known_collections)
+    if resolved.reference_problems:
+        return ValidationScope(
+            ValidationScopeOutcome.REFUSED_REFERENCE_PROBLEMS,
+            reference_problems=resolved.reference_problems,
+        )
+    if DerivativeType.CUT_SVG not in product.derivative_types:
+        return ValidationScope(ValidationScopeOutcome.NOTHING_TO_VALIDATE)
+    if asset_id is not None:
+        member = next((m for m in resolved.members if m.asset_id == asset_id), None)
+        if member is None:
+            return ValidationScope(ValidationScopeOutcome.REFUSED_NOT_A_MEMBER, asset_id=asset_id)
+        return ValidationScope(ValidationScopeOutcome.SCOPED, member_asset_ids=[member.asset_id])
+    return ValidationScope(
+        ValidationScopeOutcome.SCOPED,
+        member_asset_ids=[member.asset_id for member in resolved.members],
     )

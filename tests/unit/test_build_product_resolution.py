@@ -21,7 +21,9 @@ from pathlib import Path
 from vectorpress.build.product_resolution import (
     MemberEligibility,
     MissingRequiredDerivative,
+    ValidationScopeOutcome,
     resolve_product,
+    resolve_validation_scope,
 )
 from vectorpress.catalog.assets import load_assets
 from vectorpress.catalog.collection_resolution import PRODUCT_COLLECTION_SLUG_FIELD
@@ -228,3 +230,116 @@ def test_a_membership_matching_nothing_resolves_to_an_empty_but_valid_product() 
     assert resolved.excluded_members == []
     assert resolved.missing_required_derivatives == []
     assert resolved.reference_problems == []
+
+
+# --- resolve_validation_scope: the decision behind `vpress validate --product` ------
+
+# CLAUDE.md's layering guardrail ("cli and ui are thin: they call the same
+# functions") puts this decision here, alongside resolve_product, rather
+# than in cli.app -- the same shape build.product_build.build_product
+# already established for `vpress build`.
+
+
+def test_validation_scope_includes_an_excluded_member_not_only_eligible_ones() -> None:
+    """Findings are independent of eligibility (CONTEXT.md "Findings"):
+    ``gumboot_chiton`` is rights-blocked (``do_not_publish``), so
+    ``resolve_product`` excludes it -- but the validation scope still
+    carries it, since a build-eligibility exclusion is not a reason to
+    leave a cut file unvalidated."""
+    config = load_catalog_config(FIXTURE_CATALOG_ROOT)
+    known_assets = load_assets(FIXTURE_CATALOG_ROOT, config).assets
+    product = _product(
+        membership=Membership(asset_ids=["gumboot_chiton"]), derivative_types=["cut_svg"]
+    )
+
+    resolved = resolve_product(
+        product, FIXTURE_CATALOG_ROOT, config, known_assets, known_collections=[]
+    )
+    assert resolved.members[0].eligibility is MemberEligibility.EXCLUDED  # sanity
+
+    scope = resolve_validation_scope(
+        product, FIXTURE_CATALOG_ROOT, config, known_assets, [], asset_id=None
+    )
+
+    assert scope.outcome is ValidationScopeOutcome.SCOPED
+    assert scope.member_asset_ids == ["gumboot_chiton"]
+
+
+def test_validation_scope_given_no_asset_id_lists_every_resolved_member() -> None:
+    config = load_catalog_config(FIXTURE_CATALOG_ROOT)
+    known_assets = load_assets(FIXTURE_CATALOG_ROOT, config).assets
+    known_collections = load_collections(FIXTURE_CATALOG_ROOT, config).collections
+    product = find_product(load_products(FIXTURE_CATALOG_ROOT, config), "kelp_forest_mini_pack")
+    assert product is not None
+
+    scope = resolve_validation_scope(
+        product, FIXTURE_CATALOG_ROOT, config, known_assets, known_collections, asset_id=None
+    )
+
+    assert scope.outcome is ValidationScopeOutcome.SCOPED
+    assert scope.member_asset_ids == ["purple_sea_urchin"]
+
+
+def test_validation_scope_given_a_member_asset_id_scopes_to_just_that_one() -> None:
+    config = load_catalog_config(FIXTURE_CATALOG_ROOT)
+    known_assets = load_assets(FIXTURE_CATALOG_ROOT, config).assets
+    product = _product(
+        membership=Membership(asset_ids=["ochre_sea_star", "giant_green_anemone"]),
+        derivative_types=["cut_svg"],
+    )
+
+    scope = resolve_validation_scope(
+        product, FIXTURE_CATALOG_ROOT, config, known_assets, [], asset_id="ochre_sea_star"
+    )
+
+    assert scope.outcome is ValidationScopeOutcome.SCOPED
+    assert scope.member_asset_ids == ["ochre_sea_star"]
+
+
+def test_validation_scope_refuses_a_given_asset_that_is_not_a_member() -> None:
+    config = load_catalog_config(FIXTURE_CATALOG_ROOT)
+    known_assets = load_assets(FIXTURE_CATALOG_ROOT, config).assets
+    product = _product(
+        membership=Membership(asset_ids=["ochre_sea_star"]), derivative_types=["cut_svg"]
+    )
+
+    scope = resolve_validation_scope(
+        product, FIXTURE_CATALOG_ROOT, config, known_assets, [], asset_id="giant_green_anemone"
+    )
+
+    assert scope.outcome is ValidationScopeOutcome.REFUSED_NOT_A_MEMBER
+    assert scope.asset_id == "giant_green_anemone"
+
+
+def test_validation_scope_reports_nothing_to_validate_without_cut_svg() -> None:
+    config = load_catalog_config(FIXTURE_CATALOG_ROOT)
+    known_assets = load_assets(FIXTURE_CATALOG_ROOT, config).assets
+    product = _product(
+        membership=Membership(asset_ids=["ochre_sea_star"]),
+        derivative_types=["transparent_png"],
+        formats=["png"],
+    )
+
+    scope = resolve_validation_scope(
+        product, FIXTURE_CATALOG_ROOT, config, known_assets, [], asset_id=None
+    )
+
+    assert scope.outcome is ValidationScopeOutcome.NOTHING_TO_VALIDATE
+    assert scope.member_asset_ids is None
+
+
+def test_validation_scope_refuses_on_unresolved_membership() -> None:
+    config = load_catalog_config(FIXTURE_CATALOG_ROOT)
+    known_assets = load_assets(FIXTURE_CATALOG_ROOT, config).assets
+    product = _product(
+        membership=None, collection_slug="not_a_real_collection", slug="unknown_ref_product"
+    )
+
+    scope = resolve_validation_scope(
+        product, FIXTURE_CATALOG_ROOT, config, known_assets, [], asset_id=None
+    )
+
+    assert scope.outcome is ValidationScopeOutcome.REFUSED_REFERENCE_PROBLEMS
+    assert scope.reference_problems is not None
+    assert len(scope.reference_problems) == 1
+    assert "not_a_real_collection" in scope.reference_problems[0].message
