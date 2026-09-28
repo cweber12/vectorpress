@@ -18540,9 +18540,25 @@
   
   '''
 # ---
+# name: test_exclude_mode_manifest_excluded_members_are_locked_by_snapshot[excluded_members]
+  list([
+    dict({
+      'asset_id': 'ochre_sea_star',
+      'blocking_reasons': list([
+        dict({
+          'derivative_type': 'cut_svg',
+          'kind': 'derivative_status',
+          'value': 'rejected',
+        }),
+      ]),
+    }),
+  ])
+# ---
 # name: test_manifest_and_zip_listing_are_locked_by_snapshot[manifest]
   dict({
     'dxf_members': list([
+    ]),
+    'excluded_members': list([
     ]),
     'license_year': 2026,
     'members': list([

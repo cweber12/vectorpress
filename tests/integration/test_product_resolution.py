@@ -407,3 +407,25 @@ def test_attention_folds_a_products_reference_problem_into_missing_metadata(
     assert "Missing metadata: 1" in result.stdout
     assert "collection_slug" in result.stdout
     assert "not_a_real_collection" in result.stdout
+
+
+# --- ineligible_members header (§10) -----------------------------------------
+
+
+@pytest.mark.integration
+def test_product_header_names_its_ineligible_members_setting(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """'vpress product' names the product's own ineligible_members mode in
+    its header (§10) -- the default 'refuse', and kelp_forest_mini_pack's
+    committed 'exclude' -- since a build's refuse-vs-exclude behavior on an
+    ineligible member depends on it."""
+    monkeypatch.chdir(FIXTURE_CATALOG_ROOT)
+
+    standard_pack = runner.invoke(app, ["product", "pacific_coast_tide_pool_standard_pack"])
+    mini_pack = runner.invoke(app, ["product", "kelp_forest_mini_pack"])
+
+    assert standard_pack.exit_code == 0, standard_pack.output
+    assert mini_pack.exit_code == 0, mini_pack.output
+    assert "Ineligible members: refuse" in standard_pack.stdout
+    assert "Ineligible members: exclude" in mini_pack.stdout

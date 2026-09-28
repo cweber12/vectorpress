@@ -544,6 +544,154 @@ def test_build_on_a_format_type_mismatch_product_fails_to_load_and_writes_nothin
     assert not (temp_catalog_root / "builds").exists()
 
 
+# --- ineligible_members: refuse (default) vs. exclude (§10) -----------------
+
+
+def _reject_ochre_sea_stars_cut_svg_after_standard_pack_approval(
+    monkeypatch: pytest.MonkeyPatch, root: Path
+) -> None:
+    """Get ``pacific_coast_tide_pool_standard_pack`` to fully eligible, then
+    reject ``ochre_sea_star``'s own ``cut_svg`` alone: the fixture for §10's
+    two ``ineligible_members`` modes. Its other approved derivatives
+    (``silhouette_svg``, ``transparent_png``) stay untouched, so
+    ``ochre_sea_star`` is ineligible only for a product that includes
+    ``cut_svg``."""
+    _generate_and_approve_standard_pack_types(monkeypatch, root)
+    reject_result = runner.invoke(app, ["reject", "ochre_sea_star", "cut_svg"])
+    assert reject_result.exit_code == 0, reject_result.output
+
+
+def _set_ineligible_members_exclude(product_path: Path) -> None:
+    """Add ``ineligible_members = "exclude"`` to a product file's top-level
+    keys -- before its first ``[listing]`` table when it has one, since a
+    bare key appended after a table header would parse as that table's own
+    key instead (TOML)."""
+    text = product_path.read_text(encoding="utf-8")
+    assert "ineligible_members" not in text
+    insertion = 'ineligible_members = "exclude"\n'
+    table_start = text.find("\n[")
+    new_text = (
+        text + insertion
+        if table_start == -1
+        else text[: table_start + 1] + insertion + text[table_start + 1 :]
+    )
+    product_path.write_text(new_text, encoding="utf-8")
+
+
+@pytest.mark.integration
+def test_refuse_mode_fails_naming_the_ineligible_member_and_writes_nothing(
+    monkeypatch: pytest.MonkeyPatch, temp_catalog_root: Path
+) -> None:
+    """``ineligible_members`` defaults to ``refuse`` (§10): one rejected
+    ``cut_svg`` fails the whole cut-file product, naming the ineligible
+    member and its reason, and writes nothing."""
+    _reject_ochre_sea_stars_cut_svg_after_standard_pack_approval(monkeypatch, temp_catalog_root)
+
+    result = runner.invoke(app, ["build", STANDARD_PACK_SLUG])
+
+    assert result.exit_code == 1
+    assert "ochre_sea_star\t" in result.output
+    assert "cut_svg: rejected" in result.output
+    assert not (temp_catalog_root / "builds").exists()
+
+
+@pytest.mark.integration
+def test_exclude_mode_ships_the_eligible_members_and_records_the_excluded_one(
+    monkeypatch: pytest.MonkeyPatch, temp_catalog_root: Path
+) -> None:
+    """Set to ``exclude``, the same product ships its two eligible members
+    and reports and records ``ochre_sea_star`` as excluded, with its
+    ``cut_svg: rejected`` reason, in both the build output and the
+    manifest (§10)."""
+    _reject_ochre_sea_stars_cut_svg_after_standard_pack_approval(monkeypatch, temp_catalog_root)
+    product_path = temp_catalog_root / "products" / f"{STANDARD_PACK_SLUG}.toml"
+    _set_ineligible_members_exclude(product_path)
+
+    result = runner.invoke(app, ["build", STANDARD_PACK_SLUG])
+
+    assert result.exit_code == 0, result.output
+    assert "Excluded: 1" in result.output
+    assert "ochre_sea_star\tcut_svg: rejected" in result.output
+
+    build_dir = _build_dir(temp_catalog_root, STANDARD_PACK_SLUG)
+    package_dir = build_dir / STANDARD_PACK_TOP_LEVEL
+    package_files = sorted(
+        p.relative_to(package_dir).as_posix() for p in package_dir.rglob("*") if p.is_file()
+    )
+    assert not any("ochre-sea-star" in f for f in package_files)
+    assert any("giant-green-anemone" in f for f in package_files)
+    assert any("purple-sea-urchin" in f for f in package_files)
+
+    manifest = json.loads((build_dir / "manifest.json").read_text(encoding="utf-8"))
+    assert all(m["asset_id"] != "ochre_sea_star" for m in manifest["members"])
+    assert manifest["excluded_members"] == [
+        {
+            "asset_id": "ochre_sea_star",
+            "blocking_reasons": [
+                {"kind": "derivative_status", "derivative_type": "cut_svg", "value": "rejected"}
+            ],
+        }
+    ]
+
+
+@pytest.mark.integration
+def test_a_product_that_does_not_include_the_rejected_type_still_ships_the_asset(
+    monkeypatch: pytest.MonkeyPatch, temp_catalog_root: Path
+) -> None:
+    """Eligibility considers only a product's own included derivative
+    types (§10): the PNG-only product still ships ``ochre_sea_star``'s PNG
+    even though its ``cut_svg`` is rejected, since ``transparent_png`` is
+    untouched -- the same rejection ``test_refuse_mode_fails_...`` and
+    ``test_exclude_mode_ships_...`` make the cut-file product refuse or
+    exclude it over."""
+    _reject_ochre_sea_stars_cut_svg_after_standard_pack_approval(monkeypatch, temp_catalog_root)
+
+    result = runner.invoke(app, ["build", PNG_ONLY_SLUG])
+
+    assert result.exit_code == 0, result.output
+    build_dir = _build_dir(temp_catalog_root, PNG_ONLY_SLUG)
+    package_dir = build_dir / PNG_ONLY_TOP_LEVEL
+    assert (package_dir / "PNG" / PNG_ONLY_FILES["ochre_sea_star"]).is_file()
+    manifest = json.loads((build_dir / "manifest.json").read_text(encoding="utf-8"))
+    assert any(m["asset_id"] == "ochre_sea_star" for m in manifest["members"])
+    assert manifest["excluded_members"] == []
+
+
+@pytest.mark.integration
+def test_exclude_product_with_no_eligible_member_refuses_and_writes_nothing(
+    monkeypatch: pytest.MonkeyPatch, temp_catalog_root: Path
+) -> None:
+    """``kelp_forest_mini_pack`` is the fixture's one committed ``exclude``
+    product. Even in ``exclude`` mode, a build with nothing eligible still
+    refuses the same way ``refuse`` does (§10) -- its single rule-matched
+    member is never generated here at all, so it excludes down to zero."""
+    monkeypatch.chdir(temp_catalog_root)
+
+    result = runner.invoke(app, ["build", "kelp_forest_mini_pack"])
+
+    assert result.exit_code == 1
+    assert "purple_sea_urchin\t" in result.output
+    assert "cut_svg: missing" in result.output
+    assert not (temp_catalog_root / "builds").exists()
+
+
+@pytest.mark.integration
+def test_exclude_mode_manifest_excluded_members_are_locked_by_snapshot(
+    monkeypatch: pytest.MonkeyPatch, temp_catalog_root: Path, snapshot: SnapshotAssertion
+) -> None:
+    _fix_license_year(monkeypatch)
+    _reject_ochre_sea_stars_cut_svg_after_standard_pack_approval(monkeypatch, temp_catalog_root)
+    product_path = temp_catalog_root / "products" / f"{STANDARD_PACK_SLUG}.toml"
+    _set_ineligible_members_exclude(product_path)
+
+    result = runner.invoke(app, ["build", STANDARD_PACK_SLUG])
+    assert result.exit_code == 0, result.output
+
+    build_dir = _build_dir(temp_catalog_root, STANDARD_PACK_SLUG)
+    manifest = json.loads((build_dir / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["excluded_members"] == snapshot(name="excluded_members")
+
+
 # --- DXF conversion (ADR 0013, §7) -------------------------------------------
 
 
