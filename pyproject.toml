@@ -6,6 +6,7 @@ readme = "README.md"
 authors = [{ name = "Cole Weber", email = "cole.d.weber12@gmail.com" }]
 requires-python = ">=3.12"
 dependencies = [
+    "ezdxf>=1.4.4",
     "pillow>=12.3.0",
     "potracer>=0.0.4",
     "pydantic>=2.11",

@@ -1,11 +1,13 @@
 """Build one product into a customer package, its ZIP, and a manifest (§14,
 §15, §20, §27, §35, §36, ADR 0004, ADR 0005, ADR 0008, ADR 0013).
 
-Only ``SVG/`` and ``PNG/`` are built here (ADR 0013's fixed table); DXF
-conversion and the ``exclude`` ineligibility mode are not. Every package
-also carries a brand-supplied ``README.txt`` and ``LICENSE.txt`` at its top
-level (§27). One function, :func:`build_product`, does the whole thing --
-``cli`` (and later ``ui``) only render its :class:`BuildResult`.
+``SVG/`` and ``PNG/`` are copied straight from their effective derivatives;
+``DXF/`` is converted from the effective ``cut_svg``, else ``silhouette_svg``
+(ADR 0013's fixed table, :mod:`vectorpress.build._dxf_conversion`). The
+``exclude`` ineligibility mode is not built yet. Every package also carries
+a brand-supplied ``README.txt`` and ``LICENSE.txt`` at its top level (§27).
+One function, :func:`build_product`, does the whole thing -- ``cli`` (and
+later ``ui``) only render its :class:`BuildResult`.
 
 **Brand gate.** A build refuses -- writes nothing -- without a valid
 ``brand.toml`` naming an existing ``license_file`` (there is no default
@@ -22,6 +24,12 @@ excluding ineligible members instead (§10's ``exclude`` mode) is built yet.
 **Customer file name collisions.** Two members whose customer file names
 collide within one format folder also refuse the build, before anything is
 written, naming every asset ID sharing that name (§20).
+
+**DXF conversion failure.** Every ``DXF/`` file is converted while
+:func:`build_product` is still only assembling its in-memory file list, so a
+conversion failure (malformed path data, or the DXF writer itself failing)
+refuses the whole build -- nothing written yet -- naming the asset and the
+derivative type it was converting (§35).
 
 **All-or-nothing (§35).** Every file the build produces is written under a
 fresh temporary directory first; only once that succeeds does it replace
@@ -43,6 +51,7 @@ from pathlib import Path
 from uuid import uuid4
 
 from vectorpress import __version__
+from vectorpress.build._dxf_conversion import DxfConversionError, svg_to_dxf_bytes
 from vectorpress.build.product_resolution import ProductMember, resolve_product
 from vectorpress.catalog.assets import asset_dir
 from vectorpress.catalog.brand import load_brand
@@ -53,8 +62,14 @@ from vectorpress.domain.asset import Asset, AssetId
 from vectorpress.domain.catalog_config import CatalogConfig
 from vectorpress.domain.collection import Collection
 from vectorpress.domain.derivative_type import DerivativeType, derivative_filename
-from vectorpress.domain.format_folder import copied_folder
-from vectorpress.domain.manifest import Manifest, ManifestMember, ManifestMemberSource
+from vectorpress.domain.format import Format
+from vectorpress.domain.format_folder import copied_folder, dxf_filename, dxf_source
+from vectorpress.domain.manifest import (
+    Manifest,
+    ManifestDxfMember,
+    ManifestMember,
+    ManifestMemberSource,
+)
 from vectorpress.domain.package_naming import package_name
 from vectorpress.domain.package_text import (
     UnknownLicensePlaceholderError,
@@ -64,6 +79,13 @@ from vectorpress.domain.package_text import (
 from vectorpress.domain.product import Product
 from vectorpress.domain.reference_size import resolve_reference_size_in
 from vectorpress.pipeline.eligibility import included_derivatives
+
+#: The one converted (never copied) format folder (ADR 0013): every other
+#: entry in a build's file list is a straight copy of an effective
+#: derivative, so this is also the one marker :func:`build_product`'s main
+#: loop needs to tell "convert this" apart from "copy this" for a planned
+#: file.
+_DXF_FOLDER = Format.DXF.value.upper()
 
 #: The two brand-supplied plain-text files every package carries at its top
 #: level, beside its format folders (§14, §27).
@@ -137,18 +159,33 @@ def _plan_files(
     eligible_members: list[ProductMember],
     included_types_by_asset: dict[AssetId, list[DerivativeType]],
     assets_by_id: dict[AssetId, Asset],
+    formats: list[Format],
 ) -> list[_PlannedFile]:
     """Every customer file :func:`build_product` would write for
     ``eligible_members`` (ADR 0013, §20), computed from display names alone
-    so a name collision is found before anything is read from disk."""
+    so a name collision is found before anything is read from disk.
+
+    A member's own included types add one *copied* ``SVG/``/``PNG/`` entry
+    each; when ``formats`` lists ``dxf``, one more *converted* ``DXF/``
+    entry is added on top, from whichever type :func:`~vectorpress.domain.
+    format_folder.dxf_source` picks for that member's own included types --
+    its ``derivative_type`` names that source, not a type of its own, since
+    a converted file is not itself a derivative type."""
     planned: list[_PlannedFile] = []
     for member in eligible_members:
         asset = assets_by_id[member.asset_id]
-        for derivative_type in included_types_by_asset[member.asset_id]:
+        included = included_types_by_asset[member.asset_id]
+        for derivative_type in included:
             folder = copied_folder(derivative_type)
             assert folder is not None  # every derivative type fills SVG or PNG (ADR 0013)
             filename = derivative_filename(asset.display_name, derivative_type)
             planned.append(_PlannedFile(asset.id, derivative_type, folder.value.upper(), filename))
+
+        if Format.DXF in formats:
+            source_type = dxf_source(included)
+            if source_type is not None:
+                filename = dxf_filename(asset.display_name, source_type)
+                planned.append(_PlannedFile(asset.id, source_type, _DXF_FOLDER, filename))
     return planned
 
 
@@ -183,7 +220,7 @@ def _find_name_collisions(planned: list[_PlannedFile]) -> list[NameCollision]:
 
 class BuildOutcome(StrEnum):
     """One ``vpress build`` outcome (§14, §35): built, or refused for one of
-    five reasons, each leaving the previous build (if any) untouched and
+    six reasons, each leaving the previous build (if any) untouched and
     writing nothing new."""
 
     BUILT = "built"
@@ -192,16 +229,28 @@ class BuildOutcome(StrEnum):
     REFUSED_REFERENCE_PROBLEMS = "refused_reference_problems"
     REFUSED_INELIGIBLE_MEMBERS = "refused_ineligible_members"
     REFUSED_NAME_COLLISION = "refused_name_collision"
+    REFUSED_DXF_CONVERSION_FAILURE = "refused_dxf_conversion_failure"
+
+
+@dataclass(frozen=True)
+class DxfConversionFailure:
+    """One member's ``DXF/`` conversion failure (§35): which asset and
+    source derivative type was being converted when it failed, and the
+    underlying error."""
+
+    asset_id: AssetId
+    source_derivative_type: DerivativeType
+    message: str
 
 
 @dataclass(frozen=True)
 class BuildResult:
     """The outcome of one :func:`build_product` call. Exactly one of
     ``brand_problems``, ``unknown_license_placeholders``,
-    ``reference_problems``, ``ineligible_members`` or ``name_collisions`` is
-    set for its matching refusal outcome; ``manifest``/``package_dir``/
-    ``zip_path`` are set exactly when ``outcome`` is
-    :attr:`BuildOutcome.BUILT`."""
+    ``reference_problems``, ``ineligible_members``, ``name_collisions`` or
+    ``dxf_conversion_failure`` is set for its matching refusal outcome;
+    ``manifest``/``package_dir``/``zip_path`` are set exactly when
+    ``outcome`` is :attr:`BuildOutcome.BUILT`."""
 
     outcome: BuildOutcome
     brand_problems: list[MetadataProblem] | None = None
@@ -209,6 +258,7 @@ class BuildResult:
     reference_problems: list[MetadataProblem] | None = None
     ineligible_members: list[ProductMember] | None = None
     name_collisions: list[NameCollision] | None = None
+    dxf_conversion_failure: DxfConversionFailure | None = None
     manifest: Manifest | None = None
     package_dir: Path | None = None
     zip_path: Path | None = None
@@ -248,6 +298,16 @@ def _manifest_json_bytes(manifest: Manifest) -> bytes:
                 "package_path": member.package_path,
             }
             for member in manifest.members
+        ],
+        "dxf_members": [
+            {
+                "asset_id": member.asset_id,
+                "source_derivative_type": member.source_derivative_type.value,
+                "source_content_hash": member.source_content_hash,
+                "content_hash": member.content_hash,
+                "package_path": member.package_path,
+            }
+            for member in manifest.dxf_members
         ],
     }
     return json.dumps(payload, indent=2, sort_keys=True).encode("utf-8") + b"\n"
@@ -350,7 +410,9 @@ def build_product(
         resolved.eligible_members, assets_by_id, root, config, product.derivative_types
     )
 
-    planned = _plan_files(resolved.eligible_members, included_types_by_asset, assets_by_id)
+    planned = _plan_files(
+        resolved.eligible_members, included_types_by_asset, assets_by_id, product.formats
+    )
     collisions = _find_name_collisions(planned)
     if collisions:
         return BuildResult(BuildOutcome.REFUSED_NAME_COLLISION, name_collisions=collisions)
@@ -362,11 +424,45 @@ def build_product(
 
     package_files: list[tuple[str, bytes]] = []
     manifest_members: list[ManifestMember] = []
+    dxf_manifest_members: list[ManifestDxfMember] = []
     for file in planned:
         asset_dir_path = asset_dir(root, config, file.asset_id)
+        rel_path = f"{file.folder}/{file.filename}"
+
+        if file.folder == _DXF_FOLDER:
+            # file.derivative_type names the *source* type (dxf_source's
+            # pick), not a type of its own -- its own effective derivative
+            # is that source's own customer file, already computed the
+            # same way any copied SVG/ entry for it would be.
+            asset = assets_by_id[file.asset_id]
+            source_filename = derivative_filename(asset.display_name, file.derivative_type)
+            source = effective_derivative(asset_dir_path, source_filename)
+            assert source is not None  # eligible => approved => the file exists on disk
+            try:
+                dxf_bytes = svg_to_dxf_bytes(source.bytes)
+            except DxfConversionError as exc:
+                return BuildResult(
+                    BuildOutcome.REFUSED_DXF_CONVERSION_FAILURE,
+                    dxf_conversion_failure=DxfConversionFailure(
+                        asset_id=file.asset_id,
+                        source_derivative_type=file.derivative_type,
+                        message=str(exc),
+                    ),
+                )
+            package_files.append((rel_path, dxf_bytes))
+            dxf_manifest_members.append(
+                ManifestDxfMember(
+                    asset_id=file.asset_id,
+                    source_derivative_type=file.derivative_type,
+                    source_content_hash=sha256_bytes(source.bytes),
+                    content_hash=sha256_bytes(dxf_bytes),
+                    package_path=rel_path,
+                )
+            )
+            continue
+
         effective = effective_derivative(asset_dir_path, file.filename)
         assert effective is not None  # eligible => approved => the file exists on disk
-        rel_path = f"{file.folder}/{file.filename}"
         package_files.append((rel_path, effective.bytes))
         manifest_members.append(
             ManifestMember(
@@ -399,12 +495,16 @@ def build_product(
     package_files.append((LICENSE_FILENAME, license_text.encode("utf-8")))
 
     manifest_members.sort(key=lambda member: (member.asset_id, member.derivative_type.value))
+    dxf_manifest_members.sort(
+        key=lambda member: (member.asset_id, member.source_derivative_type.value)
+    )
     manifest = Manifest(
         product_slug=product.slug,
         reference_size_in=reference_size_in,
         license_year=license_year,
         tool_version=__version__,
         members=manifest_members,
+        dxf_members=dxf_manifest_members,
     )
 
     builds_dir = root / BUILDS_DIRNAME

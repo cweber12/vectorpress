@@ -1635,7 +1635,8 @@ def build(
     ),
 ) -> None:
     """Build one product into builds/<slug>/: a customer package (SVG/ and
-    PNG/ folders, plus README.txt and LICENSE.txt), its ZIP, and a manifest.
+    PNG/ folders, plus a converted DXF/ folder when the product lists that
+    format, plus README.txt and LICENSE.txt), its ZIP, and a manifest.
 
     Refuses and writes nothing -- leaving any previous build of this
     product untouched -- without a valid catalog brand.toml naming an
@@ -1643,14 +1644,14 @@ def build(
     template names an unknown placeholder, if the product's membership does
     not fully resolve, if any member is not eligible for this product's
     derivative types (listing each with its reasons, the same as 'vpress
-    product'), or if two members' customer file names collide (naming every
-    asset ID sharing that name). Rebuilding with no changes reproduces the
-    same package and ZIP byte for byte.
+    product'), if two members' customer file names collide (naming every
+    asset ID sharing that name), or if a DXF conversion fails (naming the
+    asset). Rebuilding with no changes reproduces the same package and ZIP
+    byte for byte.
     \f
     vectorpress.build.product_build.build_product does the whole build;
-    this only renders its BuildResult. Only SVG/ and PNG/ are built here --
-    DXF conversion, --allow-unapproved and the 'exclude' ineligibility mode
-    are not.
+    this only renders its BuildResult. --allow-unapproved and the 'exclude'
+    ineligibility mode are not built yet.
     """
     root, config = _locate_and_load_config(ctx)
     loaded = _lookup_product_or_exit(root, config, slug)
@@ -1699,6 +1700,15 @@ def build(
             typer.echo(f"  {collision.folder}/{collision.filename}\t{asset_list}")
         raise typer.Exit(code=1)
 
+    if result.outcome is BuildOutcome.REFUSED_DXF_CONVERSION_FAILURE:
+        failure = result.dxf_conversion_failure
+        assert failure is not None
+        typer.echo(f"build: {slug} refused: DXF conversion failed", err=True)
+        typer.echo(
+            f"  {failure.asset_id}\t{failure.source_derivative_type.value}: {failure.message}"
+        )
+        raise typer.Exit(code=1)
+
     assert result.outcome is BuildOutcome.BUILT
     assert result.manifest is not None  # BUILT always carries the manifest it just wrote
     assert result.package_dir is not None
@@ -1709,6 +1719,11 @@ def build(
         typer.echo(
             f"  {member.asset_id}\t{member.derivative_type.value}\t{member.source.value}\t"
             f"{member.content_hash}\t{member.package_path}"
+        )
+    for dxf_member in result.manifest.dxf_members:
+        typer.echo(
+            f"  {dxf_member.asset_id}\t{dxf_member.source_derivative_type.value}\tdxf\t"
+            f"{dxf_member.content_hash}\t{dxf_member.package_path}"
         )
 
 
