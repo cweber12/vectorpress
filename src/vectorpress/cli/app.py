@@ -17,6 +17,10 @@ from vectorpress.build.asset_resolution import (
     AssetProductMembership,
     resolve_asset_reuse,
 )
+from vectorpress.build.listing_draft import (
+    ListingDraftOutcome,
+    draft_listing_for_product,
+)
 from vectorpress.build.needs_rebuild import (
     NeedsRebuildOutcome,
     NeedsRebuildResult,
@@ -35,6 +39,7 @@ from vectorpress.catalog.assets import (
     load_assets,
     lookup_asset,
 )
+from vectorpress.catalog.brand import load_brand
 from vectorpress.catalog.collection_resolution import (
     ResolvedCollection,
     all_reference_problems,
@@ -45,6 +50,7 @@ from vectorpress.catalog.collections import load_collections
 from vectorpress.catalog.derivatives import DerivativeStateCounts
 from vectorpress.catalog.errors import CatalogConfigError, CatalogNotFoundError
 from vectorpress.catalog.findings import FindingsCurrencyState, findings_currency
+from vectorpress.catalog.listing_draft import ListingAppendOutcome, append_listing
 from vectorpress.catalog.load import load_catalog, load_catalog_config
 from vectorpress.catalog.locate import locate_catalog_root
 from vectorpress.catalog.metadata_problem import MetadataProblem
@@ -55,7 +61,7 @@ from vectorpress.catalog.overrides import (
     list_unrecognized_overrides,
     override_currency,
 )
-from vectorpress.catalog.products import load_products, lookup_product
+from vectorpress.catalog.products import load_products, lookup_product, product_toml_path
 from vectorpress.catalog.provenance import DERIVED_DIRNAME, read_derivative_bytes
 from vectorpress.catalog.status import asset_derivative_status
 from vectorpress.domain.asset import Asset
@@ -1122,6 +1128,74 @@ def regenerate(
         status_filter,
         note,
     )
+
+
+listing_app = typer.Typer(
+    name="listing",
+    help="Draft a product's listing metadata.",
+    no_args_is_help=True,
+)
+app.add_typer(listing_app, name="listing")
+
+
+@listing_app.command("draft")
+def listing_draft(
+    ctx: typer.Context,
+    slug: str = typer.Argument(
+        help="The product's slug (its file name under products/, without .toml)."
+    ),
+) -> None:
+    """Draft a \\[listing] table into products/<slug>.toml, from its
+    collection, its currently resolved members, and the catalog's brand.
+
+    The tool's one sanctioned write into a hand-authored file: appends the
+    table once, only when the file has no \\[listing] at all. Any listing
+    already there -- valid or not, even a partial one -- refuses and writes
+    nothing; redraft by deleting the table by hand and running this again.
+    Every existing byte of the file, including its own line endings, is
+    unchanged; the combined text is re-parsed and validated before the file
+    is replaced.
+    \f
+    vectorpress.build.listing_draft.draft_listing_for_product computes the
+    values (title and description render through templates/listing/, a
+    catalog override winning by file name over the shipped one, ADR 0015);
+    vectorpress.catalog.listing_draft.append_listing does the create-only,
+    TOML-safe write. This command only formats their results.
+    """
+    root, config = _locate_and_load_config(ctx)
+    loaded = _lookup_product_or_exit(root, config, slug)
+    if loaded.listing is not None:
+        typer.echo(
+            f"listing draft: {slug} refused: product already has a [listing] table", err=True
+        )
+        raise typer.Exit(code=1)
+
+    known_assets = load_assets(root, config).assets
+    known_collections = load_collections(root, config).collections
+    brand_result = load_brand(root)
+    if brand_result.brand is None:
+        typer.echo(f"listing draft: {slug} refused: invalid or missing brand.toml", err=True)
+        _echo_problems(brand_result.problems)
+        raise typer.Exit(code=1)
+
+    draft_result = draft_listing_for_product(
+        loaded, root, config, known_assets, known_collections, brand_result.brand
+    )
+    if draft_result.outcome is ListingDraftOutcome.REFUSED_REFERENCE_PROBLEMS:
+        assert draft_result.reference_problems is not None
+        typer.echo(f"listing draft: {slug} refused: membership does not fully resolve", err=True)
+        _echo_reference_problems(draft_result.reference_problems)
+        raise typer.Exit(code=1)
+
+    assert draft_result.listing is not None
+    append_result = append_listing(root, config, slug, draft_result.listing)
+    if append_result.outcome is not ListingAppendOutcome.APPENDED:
+        typer.echo(f"listing draft: {slug} refused: {append_result.outcome.value}", err=True)
+        if append_result.detail:
+            typer.echo(f"  {append_result.detail}", err=True)
+        raise typer.Exit(code=1)
+
+    typer.echo(f"{slug}\tdrafted\t{product_toml_path(config, slug)}")
 
 
 override_app = typer.Typer(
