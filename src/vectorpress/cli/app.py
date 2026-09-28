@@ -1605,9 +1605,9 @@ def build(
     package and ZIP byte for byte.
     \f
     vectorpress.build.product_build.build_product does the whole build;
-    this only renders its BuildResult. Only SVG/ and PNG/ are built in this
-    slice -- DXF, brand README/LICENSE, --allow-unapproved and the
-    'exclude' ineligibility mode are later PRD 6 issues.
+    this only renders its BuildResult. Only SVG/ and PNG/ are built here --
+    DXF conversion, brand README/LICENSE, --allow-unapproved and the
+    'exclude' ineligibility mode are not.
     """
     root, config = _locate_and_load_config(ctx)
     loaded = _lookup_product_or_exit(root, config, slug)

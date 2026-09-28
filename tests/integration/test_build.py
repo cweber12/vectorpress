@@ -158,6 +158,33 @@ def test_build_refuses_when_any_member_is_ineligible_and_writes_nothing(
 
 
 @pytest.mark.integration
+def test_build_refuses_when_membership_does_not_resolve_and_writes_nothing(
+    monkeypatch: pytest.MonkeyPatch, temp_catalog_root: Path
+) -> None:
+    """An unknown collection_slug is a reference problem, not a load
+    failure (§11): resolve_product still returns, with no members and this
+    problem instead. vpress build refuses on it the same way it refuses on
+    an ineligible member -- exit 1, the reference problems listed, nothing
+    written."""
+    monkeypatch.chdir(temp_catalog_root)
+    product_path = temp_catalog_root / "products" / f"{PNG_ONLY_SLUG}.toml"
+    before_collection_slug = 'collection_slug = "pacific_coast_tide_pool"'
+    text = product_path.read_text(encoding="utf-8")
+    assert before_collection_slug in text
+    product_path.write_text(
+        text.replace(before_collection_slug, 'collection_slug = "no_such_collection"'),
+        encoding="utf-8",
+    )
+
+    result = runner.invoke(app, ["build", PNG_ONLY_SLUG])
+
+    assert result.exit_code == 1
+    assert "Reference problems" in result.output
+    assert "no_such_collection" in result.output
+    assert not (temp_catalog_root / "builds").exists()
+
+
+@pytest.mark.integration
 def test_build_refuses_on_a_customer_filename_collision_and_leaves_the_previous_build_untouched(
     monkeypatch: pytest.MonkeyPatch, temp_catalog_root: Path
 ) -> None:
@@ -255,10 +282,11 @@ def test_manifest_and_zip_listing_are_locked_by_snapshot(
 def test_build_on_a_format_type_mismatch_product_fails_to_load_and_writes_nothing(
     monkeypatch: pytest.MonkeyPatch, temp_catalog_root: Path
 ) -> None:
-    """A format/type mismatch is a product metadata problem at load time
-    (ADR 0013, issue #90), not a build failure: ``vpress build`` reaches the
-    exact same "product failed to load" exit ``vpress product`` already
-    gives, and writes nothing."""
+    """A listed format no included type fills, or an included type no
+    listed format carries, is a product metadata problem at load time
+    (ADR 0013), not a build failure: ``vpress build`` reaches the exact
+    same "product failed to load" exit ``vpress product`` already gives,
+    and writes nothing."""
     monkeypatch.chdir(temp_catalog_root)
     product_path = temp_catalog_root / "products" / f"{PNG_ONLY_SLUG}.toml"
     before_formats = 'formats = ["png"]'

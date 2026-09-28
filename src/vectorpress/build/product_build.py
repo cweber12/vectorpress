@@ -1,9 +1,9 @@
 """Build one product into a customer package, its ZIP, and a manifest (§14,
 §15, §20, §35, §36, ADR 0004, ADR 0005, ADR 0008, ADR 0013).
 
-This slice fills only ``SVG/`` and ``PNG/`` (ADR 0013); DXF, brand
-README/LICENSE and the ``exclude`` ineligibility mode are later PRD 6
-slices. One function, :func:`build_product`, does the whole thing --
+Only ``SVG/`` and ``PNG/`` are built here (ADR 0013's fixed table); DXF
+conversion, brand README/LICENSE, and the ``exclude`` ineligibility mode
+are not. One function, :func:`build_product`, does the whole thing --
 ``cli`` (and later ``ui``) only render its :class:`BuildResult`.
 
 **Eligibility gate (default refuse).** A build refuses -- writes nothing --
@@ -50,9 +50,10 @@ from vectorpress.domain.product import Product
 from vectorpress.domain.reference_size import resolve_reference_size_in
 from vectorpress.pipeline.eligibility import included_derivatives
 
-#: Every build's output lives under this catalog-root-relative directory
-#: (issue #89's "output location, decided"): the package, its ZIP, and the
-#: manifest, one subdirectory per product slug.
+#: Every build's output lives under this catalog-root-relative directory,
+#: never under ``sources/``, ``derived/``, ``overrides/`` or any
+#: hand-authored file (ADR 0005): the package, its ZIP, and the manifest,
+#: one subdirectory per product slug.
 BUILDS_DIRNAME = "builds"
 
 #: The build's own JSON manifest file, sibling to the package directory and
@@ -230,18 +231,24 @@ def _write_deterministic_zip(
 def _swap_into_place(tmp_dir: Path, target_dir: Path) -> None:
     """Replace ``target_dir`` with ``tmp_dir`` in as close to one atomic
     step as the filesystem allows (§35): a previous build is renamed aside,
-    ``tmp_dir`` takes its place, and only then is the old one removed -- so
-    a crash between the two renames still leaves a complete build (the old
-    one, under its temporary name) rather than a half-written one at
-    ``target_dir``."""
-    if target_dir.exists():
-        backup_dir = target_dir.with_name(f".old-{target_dir.name}-{uuid4().hex}")
-        target_dir.rename(backup_dir)
-        tmp_dir.rename(target_dir)
-        shutil.rmtree(backup_dir)
-    else:
+    ``tmp_dir`` takes its place, and only then is the old one removed. A
+    failure renaming ``tmp_dir`` into place renames the old build straight
+    back to ``target_dir`` before re-raising, so it is always found at its
+    own canonical path afterward -- never stranded under its temporary
+    name -- whether the swap succeeded or not."""
+    if not target_dir.exists():
         target_dir.parent.mkdir(parents=True, exist_ok=True)
         tmp_dir.rename(target_dir)
+        return
+
+    backup_dir = target_dir.with_name(f".old-{target_dir.name}-{uuid4().hex}")
+    target_dir.rename(backup_dir)
+    try:
+        tmp_dir.rename(target_dir)
+    except BaseException:
+        backup_dir.rename(target_dir)
+        raise
+    shutil.rmtree(backup_dir)
 
 
 def build_product(

@@ -9,9 +9,9 @@ manifest inputs"). This module only defines that shape; ``build`` resolves
 it from disk, serializes it to JSON, and writes it (ADR 0006 -- domain has
 no I/O).
 
-Deliberately minimal for this slice: later PRD 6 issues add excluded
-members and their reasons, admitted-unapproved derivatives, rights status
-and warnings as further fields, never by reshaping ``members`` itself.
+Deliberately minimal: excluded members and their reasons, admitted-
+unapproved derivatives, rights status and warnings extend this shape as
+further optional fields, never by reshaping ``members`` itself.
 """
 
 from dataclasses import dataclass
