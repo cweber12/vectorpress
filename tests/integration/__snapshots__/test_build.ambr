@@ -1,0 +1,38 @@
+# serializer version: 1
+# name: test_manifest_and_zip_listing_are_locked_by_snapshot[manifest]
+  dict({
+    'members': list([
+      dict({
+        'asset_id': 'giant_green_anemone',
+        'content_hash': '3164af36091b852d6536e8ca763b8dd847311715c39ff0c4123605b56917ac8a',
+        'derivative_type': 'transparent_png',
+        'package_path': 'PNG/giant-green-anemone-color.png',
+        'source': 'generated',
+      }),
+      dict({
+        'asset_id': 'ochre_sea_star',
+        'content_hash': '6a1fa93fdbb79bae533c9441323a0f454d72bd24658ae5d57de1057e2dfb2c04',
+        'derivative_type': 'transparent_png',
+        'package_path': 'PNG/ochre-sea-star-color.png',
+        'source': 'generated',
+      }),
+      dict({
+        'asset_id': 'purple_sea_urchin',
+        'content_hash': '46e64feac282854ae475dcb58d5b46b59c2efb4a70eabf2b1063199eceb01684',
+        'derivative_type': 'transparent_png',
+        'package_path': 'PNG/purple-sea-urchin-color.png',
+        'source': 'generated',
+      }),
+    ]),
+    'product_slug': 'pacific_coast_tide_pool_png_only',
+    'reference_size_in': 3.0,
+    'tool_version': '0.1.0',
+  })
+# ---
+# name: test_manifest_and_zip_listing_are_locked_by_snapshot[zip_listing]
+  list([
+    'Pacific-Coast-Tide-Pool-Png-Only/PNG/giant-green-anemone-color.png',
+    'Pacific-Coast-Tide-Pool-Png-Only/PNG/ochre-sea-star-color.png',
+    'Pacific-Coast-Tide-Pool-Png-Only/PNG/purple-sea-urchin-color.png',
+  ])
+# ---

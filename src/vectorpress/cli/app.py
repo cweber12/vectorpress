@@ -17,6 +17,7 @@ from vectorpress.build.asset_resolution import (
     AssetProductMembership,
     resolve_asset_reuse,
 )
+from vectorpress.build.product_build import BuildOutcome, build_product
 from vectorpress.build.product_resolution import resolve_product
 from vectorpress.catalog.assets import (
     AssetInventory,
@@ -1583,6 +1584,74 @@ def product(
         typer.echo(f"  {missing.asset_id}\t{missing.derivative_type.value}\t{missing.state.value}")
 
     _echo_reference_problems(resolved.reference_problems)
+
+
+@app.command()
+def build(
+    ctx: typer.Context,
+    slug: str = typer.Argument(
+        help="The product's slug (its file name under products/, without .toml)."
+    ),
+) -> None:
+    """Build one product into builds/<slug>/: a customer package (SVG/ and
+    PNG/ folders), its ZIP, and a manifest.
+
+    Refuses and writes nothing -- leaving any previous build of this
+    product untouched -- if the product's membership does not fully
+    resolve, if any member is not eligible for this product's derivative
+    types (listing each with its reasons, the same as 'vpress product'), or
+    if two members' customer file names collide (naming every asset ID
+    sharing that name). Rebuilding with no changes reproduces the same
+    package and ZIP byte for byte.
+    \f
+    vectorpress.build.product_build.build_product does the whole build;
+    this only renders its BuildResult. Only SVG/ and PNG/ are built here --
+    DXF conversion, brand README/LICENSE, --allow-unapproved and the
+    'exclude' ineligibility mode are not.
+    """
+    root, config = _locate_and_load_config(ctx)
+    loaded = _lookup_product_or_exit(root, config, slug)
+    known_assets = load_assets(root, config).assets
+    known_collections = load_collections(root, config).collections
+
+    result = build_product(loaded, root, config, known_assets, known_collections)
+
+    if result.outcome is BuildOutcome.REFUSED_REFERENCE_PROBLEMS:
+        assert result.reference_problems is not None
+        typer.echo(f"build: {slug} refused: product membership did not resolve", err=True)
+        _echo_reference_problems(result.reference_problems)
+        raise typer.Exit(code=1)
+
+    if result.outcome is BuildOutcome.REFUSED_INELIGIBLE_MEMBERS:
+        assert result.ineligible_members is not None
+        typer.echo(
+            f"build: {slug} refused: {len(result.ineligible_members)} ineligible member(s)",
+            err=True,
+        )
+        for member in result.ineligible_members:
+            reasons = "; ".join(_render_blocking_reason(r) for r in member.blocking_reasons)
+            typer.echo(f"  {member.asset_id}\t{reasons}")
+        raise typer.Exit(code=1)
+
+    if result.outcome is BuildOutcome.REFUSED_NAME_COLLISION:
+        assert result.name_collisions is not None
+        typer.echo(f"build: {slug} refused: customer file name collision", err=True)
+        for collision in result.name_collisions:
+            asset_list = ", ".join(collision.asset_ids)
+            typer.echo(f"  {collision.folder}/{collision.filename}\t{asset_list}")
+        raise typer.Exit(code=1)
+
+    assert result.outcome is BuildOutcome.BUILT
+    assert result.manifest is not None  # BUILT always carries the manifest it just wrote
+    assert result.package_dir is not None
+    assert result.zip_path is not None
+    typer.echo(f"{slug}\tbuilt\t{result.package_dir}")
+    typer.echo(f"{slug}\tzip\t{result.zip_path}")
+    for member in result.manifest.members:
+        typer.echo(
+            f"  {member.asset_id}\t{member.derivative_type.value}\t{member.source.value}\t"
+            f"{member.content_hash}\t{member.package_path}"
+        )
 
 
 # --- vpress attention: the inbox (§34, §24, CONTEXT.md "Attention report / Inbox") ---
