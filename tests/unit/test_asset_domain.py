@@ -132,6 +132,7 @@ def test_rights_status_has_exactly_the_section_26_states() -> None:
         "original_artwork",
         "licensed_source",
         "public_domain_source",
+        "ai_generated",
         "rights_verified",
         "rights_review_required",
         "do_not_publish",

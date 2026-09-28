@@ -159,6 +159,62 @@ def test_a_rights_blocked_asset_stays_excluded_even_fully_approved(
     assert "missing" not in member_section
 
 
+# --- an ai_generated member with empty licensing notes stays excluded, even -------
+# --- fully approved (§26) ----------------------------------------------------------
+
+
+def _add_ai_generated_test_product(root: Path) -> None:
+    """A temp-only product (not part of the committed fixture) whose sole
+    member is ``owl_limpet``, the fixture's ``ai_generated`` asset, with its
+    ``licensing_notes`` blanked in this same temp copy -- mirroring
+    ``_add_rights_blocked_test_product`` above for the new §26 block."""
+    path = root / "assets" / "owl_limpet" / "asset.toml"
+    text = path.read_text(encoding="utf-8")
+    assert 'rights_status = "ai_generated"\n' in text
+    before = (
+        'licensing_notes = "Generated with Midjourney (v6) under its commercial-use terms '
+        'for paid subscribers; the ai_generated rights-status fixture (§26)."\n'
+    )
+    assert before in text
+    path.write_text(text.replace(before, 'licensing_notes = ""\n'), encoding="utf-8")
+
+    product_text = (
+        'derivative_types = ["cut_svg"]\n'
+        'formats = ["svg"]\n'
+        'tier = "individual"\n'
+        "price = 1.00\n\n"
+        "[membership]\n"
+        'asset_ids = ["owl_limpet"]\n'
+    )
+    (root / "products" / "owl_limpet_test_product.toml").write_text(product_text, encoding="utf-8")
+
+
+@pytest.mark.integration
+def test_an_ai_generated_member_with_empty_notes_stays_excluded_even_fully_approved(
+    monkeypatch: pytest.MonkeyPatch, temp_catalog_root: Path
+) -> None:
+    _add_ai_generated_test_product(temp_catalog_root)
+    monkeypatch.chdir(temp_catalog_root)
+    runner.invoke(app, ["generate", "owl_limpet"])
+    approve_result = runner.invoke(app, ["approve", "owl_limpet", "--all-types"])
+    assert approve_result.exit_code == 0, approve_result.output
+
+    result = runner.invoke(app, ["product", "owl_limpet_test_product"])
+
+    assert result.exit_code == 0, result.output
+    assert "Eligible: 0" in result.stdout
+    assert "Excluded: 1" in result.stdout
+    assert "owl_limpet\texplicit\texcluded" in result.stdout
+    assert (
+        "licensing notes: must name the AI tool and its terms (rights status: ai generated)"
+        in result.stdout
+    )
+    # every existing derivative is approved: no per-derivative reason left.
+    member_section = _section(result.stdout, "  owl_limpet")
+    assert "needs review" not in member_section
+    assert "missing" not in member_section
+
+
 def _set_accuracy_status_issue_found(root: Path, asset_id: str) -> None:
     """Turn one fixture asset's accuracy status blocking (§10.1,
     ``AccuracyStatus.ISSUE_FOUND``), the asset-level counterpart to

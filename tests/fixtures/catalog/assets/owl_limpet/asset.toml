@@ -11,6 +11,10 @@
 # ecosystems deliberately match no rule-based fixture collection: neither
 # "Kelp forest" (kelp_forest_ecosystem's rule) nor pacific_coast_tide_pool
 # (an explicit, hand-picked asset list this asset was never added to).
+#
+# Also the fixture's ai_generated rights-status asset (§26): non-empty
+# licensing_notes naming the tool and its terms, so it is eligible once its
+# derivatives are approved, same as any other rights status.
 
 common_name = "Owl limpet"
 display_name = "Owl Limpet"
@@ -27,8 +31,8 @@ taxonomic_group = "Mollusk"
 product_use_categories = ["apparel", "stickers", "wall art"]
 notes = "Silhouette source purpose-built to exercise cut_svg cleanup (issue #36): a speck, a pinhole, a hairline spur, and a surviving detached piece."
 
-rights_status = "original_artwork"
-licensing_notes = "Original illustration commissioned for this catalog; no external license required."
+rights_status = "ai_generated"
+licensing_notes = "Generated with Midjourney (v6) under its commercial-use terms for paid subscribers; the ai_generated rights-status fixture (§26)."
 
 accuracy_status = "not_reviewed"
 

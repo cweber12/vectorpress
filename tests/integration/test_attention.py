@@ -104,6 +104,49 @@ def test_attention_names_the_resolving_command_for_each_kind(
     assert "resolve: edit assets/gumboot_chiton/asset.toml" in result.stdout
 
 
+def _blank_owl_limpets_licensing_notes(root: Path) -> None:
+    """Blank ``owl_limpet``'s ``licensing_notes`` in a temp catalog copy
+    alone -- ``root`` is always a ``temp_catalog_root``, never
+    ``FIXTURE_CATALOG_ROOT`` itself. The committed fixture keeps
+    ``owl_limpet``'s notes non-empty; the empty-notes case (§26) is
+    test-only, the same as ``tests/integration/test_eligibility.py``'s own
+    helper of the same name."""
+    path = root / "assets" / "owl_limpet" / "asset.toml"
+    text = path.read_text(encoding="utf-8")
+    assert 'rights_status = "ai_generated"\n' in text
+    before = (
+        'licensing_notes = "Generated with Midjourney (v6) under its commercial-use terms '
+        'for paid subscribers; the ai_generated rights-status fixture (§26)."\n'
+    )
+    assert before in text
+    path.write_text(text.replace(before, 'licensing_notes = ""\n'), encoding="utf-8")
+
+
+@pytest.mark.integration
+def test_attention_lists_an_ai_generated_asset_with_empty_notes_as_blocked(
+    monkeypatch: pytest.MonkeyPatch, temp_catalog_root: Path
+) -> None:
+    """§26's new blocking-reason kind is asset-level (``domain.eligibility.
+    ASSET_LEVEL_BLOCKING_REASON_KINDS``), so it surfaces in ``vpress
+    attention``'s "Blocked assets" section the same way a rights block
+    already does -- no generation needed, the same as ``gumboot_chiton``'s
+    own committed rights block."""
+    _blank_owl_limpets_licensing_notes(temp_catalog_root)
+    monkeypatch.chdir(temp_catalog_root)
+
+    result = runner.invoke(app, ["attention"])
+
+    assert result.exit_code == 0, result.output
+    assert (
+        "  owl_limpet\tlicensing notes: must name the AI tool and its terms "
+        "(rights status: ai generated)" in result.stdout
+    )
+    assert (
+        "    resolve: edit assets/owl_limpet/asset.toml's"
+        " rights_status/accuracy_status/licensing_notes" in result.stdout
+    )
+
+
 @pytest.mark.integration
 def test_attention_on_the_clean_fixture_reports_no_metadata_problems(
     monkeypatch: pytest.MonkeyPatch, temp_catalog_root: Path

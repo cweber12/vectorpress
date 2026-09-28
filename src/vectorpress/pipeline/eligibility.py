@@ -101,4 +101,5 @@ def asset_eligibility_for(
         asset.accuracy_status,
         missing_optional_metadata_fields(asset),
         included_derivatives(asset, asset_dir_path, derivative_types, config),
+        licensing_notes=asset.licensing_notes,
     )

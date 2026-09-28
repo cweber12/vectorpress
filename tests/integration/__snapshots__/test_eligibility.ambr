@@ -1,0 +1,4 @@
+# serializer version: 1
+# name: test_owl_limpet_blocked_output_with_empty_licensing_notes_is_locked_by_snapshot
+  'owl_limpet\tOwl Limpet Rights status: ai_generated Accuracy status: not_reviewed Sources:   silhouette.png\tsilhouette Derivatives:   transparent_png\tcurrent\towl-limpet-color.png\tapproved   silhouette_svg\tcurrent\towl-limpet-silhouette.svg\tapproved   cut_svg\tcurrent\towl-limpet-cut.svg\tapproved\tnot validated   flatcolor_svg\timpossible\tno source with an accepted role (flatcolor) Eligibility (transparent_png, silhouette_svg, cut_svg): blocked   licensing notes: must name the AI tool and its terms (rights status: ai generated) Warnings:   accuracy status: not reviewed Collections: none Products: none '
+# ---

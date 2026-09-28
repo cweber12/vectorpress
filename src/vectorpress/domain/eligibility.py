@@ -2,17 +2,17 @@
 derivative types (§10, §10.1, ADR 0008, CONTEXT.md "Blocked", "Eligible").
 
 No I/O here (ADR 0006): eligibility is a pure decision over already-resolved
-inputs -- the asset's rights and accuracy status, its missing optional
-metadata fields, and each included derivative type's state and (where it
-exists) effective status. Gathering those inputs from disk is
-:mod:`vectorpress.pipeline.eligibility`'s job.
+inputs -- the asset's rights status, licensing notes and accuracy status,
+its missing optional metadata fields, and each included derivative type's
+state and (where it exists) effective status. Gathering those inputs from
+disk is :mod:`vectorpress.pipeline.eligibility`'s job.
 
 §10's "unless explicitly overridden" is ``allow_unapproved``: a caller (a
 per-build ``--allow-unapproved`` flag) may ask that a ``generated`` or
 ``needs_review`` derivative admit rather than block. It never touches a
-rights or accuracy block, and never admits ``rejected`` or ``regenerate``
--- a human said no, or asked for a new take -- so it is a third outcome per
-included derivative, not a second implementation: see
+rights, accuracy or licensing-notes block, and never admits ``rejected`` or
+``regenerate`` -- a human said no, or asked for a new take -- so it is a
+third outcome per included derivative, not a second implementation: see
 :func:`_derivative_outcome`.
 
 Each blocking reason is a :class:`BlockingReason` -- a kind, the derivative
@@ -73,16 +73,24 @@ class Eligibility(StrEnum):
 
 class BlockingReasonKind(StrEnum):
     """What kind of fact is behind one :class:`BlockingReason` (§10.1):
-    ``RIGHTS_STATUS`` and ``ACCURACY_STATUS`` are asset-level -- true of the
-    asset regardless of any derivative type -- while ``DERIVATIVE_STATE``
+    ``RIGHTS_STATUS``, ``ACCURACY_STATUS`` and
+    ``AI_GENERATED_LICENSING_NOTES`` are asset-level -- true of the asset
+    regardless of any derivative type -- while ``DERIVATIVE_STATE``
     (missing/impossible) and ``DERIVATIVE_STATUS`` (needs_review/rejected/
     regenerate) each concern one included derivative type. A catalog-wide
     attention report uses this split: an asset-level reason is worth its
     own "blocked" line, a per-derivative one is already covered by that
-    derivative's own needs-review line."""
+    derivative's own needs-review line.
+
+    ``AI_GENERATED_LICENSING_NOTES`` is distinct from ``RIGHTS_STATUS``
+    (§26): ``ai_generated`` alone never blocks, only ``ai_generated`` paired
+    with empty ``licensing_notes`` does -- its own reason so a catalog-wide
+    report and ``cli`` can tell "rights status blocks outright" from "rights
+    status needs a licensing note" apart."""
 
     RIGHTS_STATUS = "rights_status"
     ACCURACY_STATUS = "accuracy_status"
+    AI_GENERATED_LICENSING_NOTES = "ai_generated_licensing_notes"
     DERIVATIVE_STATE = "derivative_state"
     DERIVATIVE_STATUS = "derivative_status"
 
@@ -95,6 +103,7 @@ class BlockingReasonKind(StrEnum):
 ASSET_LEVEL_BLOCKING_REASON_KINDS = (
     BlockingReasonKind.RIGHTS_STATUS,
     BlockingReasonKind.ACCURACY_STATUS,
+    BlockingReasonKind.AI_GENERATED_LICENSING_NOTES,
 )
 
 
@@ -103,8 +112,9 @@ class BlockingReason:
     """One reason an asset is blocked from publication (§10.1): ``kind``
     says what kind of fact it is, ``derivative_type`` names which type it
     concerns (set exactly for :attr:`BlockingReasonKind.DERIVATIVE_STATE`
-    and :attr:`BlockingReasonKind.DERIVATIVE_STATUS`, ``None`` for the two
-    asset-level kinds), and ``value`` is the underlying enum's own string
+    and :attr:`BlockingReasonKind.DERIVATIVE_STATUS`, ``None`` for every
+    kind in :data:`ASSET_LEVEL_BLOCKING_REASON_KINDS`), and ``value`` is
+    the underlying enum's own string
     value (a :class:`~vectorpress.domain.asset.RightsStatus`,
     :class:`~vectorpress.domain.asset.AccuracyStatus`,
     :class:`~vectorpress.domain.derivative_state.DerivativeState` or
@@ -207,21 +217,27 @@ def asset_eligibility(
     accuracy_status: AccuracyStatus,
     missing_metadata_fields: Sequence[str],
     included_derivatives: Sequence[IncludedDerivative],
+    *,
+    licensing_notes: str,
     allow_unapproved: bool = False,
 ) -> EligibilityResult:
     """Whether an asset may ship with ``included_derivatives`` (§10, §10.1).
 
     Blocking: rights status ``do_not_publish`` or ``rights_review_required``;
-    accuracy status ``issue_found``; any included derivative not approved
-    and not admitted, one reason per type naming its status when it has
-    one, else its state (a missing or impossible derivative counts as not
-    approved, and is never admitted).
+    rights status ``ai_generated`` with empty (or whitespace-only)
+    ``licensing_notes`` (§26 -- not blocking on its own, only paired with
+    missing notes); accuracy status ``issue_found``; any included derivative
+    not approved and not admitted, one reason per type naming its status
+    when it has one, else its state (a missing or impossible derivative
+    counts as not approved, and is never admitted).
 
     ``allow_unapproved`` (§10.1's "unless explicitly overridden") admits a
     ``generated`` or ``needs_review`` included derivative instead of
     blocking on it, recorded in ``admitted_unapproved`` -- it never touches
-    a rights or accuracy block, and never admits ``rejected`` or
-    ``regenerate`` (:func:`_derivative_outcome`).
+    a rights, accuracy or licensing-notes block, and never admits
+    ``rejected`` or ``regenerate`` (:func:`_derivative_outcome`). Rights
+    status is hand-authored and asset-level (CONTEXT.md "AI-generated"):
+    nothing here ever lifts an ``ai_generated`` licensing-notes block either.
 
     Warnings, which never block: accuracy status ``not_reviewed``; one per
     field named in ``missing_metadata_fields`` ("missing optional metadata").
@@ -236,6 +252,13 @@ def asset_eligibility(
     if rights_status in (RightsStatus.DO_NOT_PUBLISH, RightsStatus.RIGHTS_REVIEW_REQUIRED):
         blocking_reasons.append(
             BlockingReason(BlockingReasonKind.RIGHTS_STATUS, None, rights_status.value)
+        )
+
+    if rights_status is RightsStatus.AI_GENERATED and not licensing_notes.strip():
+        blocking_reasons.append(
+            BlockingReason(
+                BlockingReasonKind.AI_GENERATED_LICENSING_NOTES, None, rights_status.value
+            )
         )
 
     if accuracy_status is AccuracyStatus.ISSUE_FOUND:

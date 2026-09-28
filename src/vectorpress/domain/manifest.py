@@ -10,14 +10,14 @@ function of its manifest inputs"). This module only defines that shape;
 ``build`` resolves it from disk, serializes it to JSON, and writes it
 (ADR 0006 -- domain has no I/O).
 
-Deliberately minimal: rights status and warnings extend this shape as
-further optional fields, never by reshaping ``members`` itself.
+Deliberately minimal: further facts extend this shape as additional
+optional fields, never by reshaping ``members`` itself.
 """
 
 from dataclasses import dataclass
 from enum import StrEnum
 
-from vectorpress.domain.asset import AssetId
+from vectorpress.domain.asset import AssetId, RightsStatus
 from vectorpress.domain.derivative_type import DerivativeType
 from vectorpress.domain.eligibility import BlockingReason
 from vectorpress.domain.product import ProductSlug
@@ -95,6 +95,17 @@ class ManifestExcludedMember:
 
 
 @dataclass(frozen=True)
+class ManifestAssetRightsStatus:
+    """One included asset's rights status (§26, CONTEXT.md "Rights
+    status"): recorded for every shipped member, not only ``ai_generated``
+    ones, so a later marketplace disclosure step never has to re-open
+    ``asset.toml`` to learn whether an asset shipped was AI-generated."""
+
+    asset_id: AssetId
+    rights_status: RightsStatus
+
+
+@dataclass(frozen=True)
 class Manifest:
     """One build's complete record (§14, §23, ADR 0004): the product it
     built, the reference size it was built at, the LICENSE.txt build year,
@@ -118,6 +129,12 @@ class Manifest:
     whether this build ran with ``--allow-unapproved``, so needs-rebuild can
     re-resolve eligibility under the identical setting rather than showing
     this build's own admitted members as spuriously ``removed``.
+
+    ``asset_rights_statuses`` records every eligible member's own rights
+    status (§26), one entry per asset ID (not per member row: an asset with
+    several included derivative types still gets one entry), sorted by
+    asset ID -- the input a later marketplace-disclosure step reads rather
+    than re-loading every member's own ``asset.toml``.
     """
 
     product_slug: ProductSlug
@@ -131,3 +148,4 @@ class Manifest:
     dxf_members: list[ManifestDxfMember]
     excluded_members: list[ManifestExcludedMember]
     admitted_unapproved_members: list[ManifestAdmittedUnapproved]
+    asset_rights_statuses: list[ManifestAssetRightsStatus]

@@ -18578,6 +18578,20 @@
     'admitted_unapproved_members': list([
     ]),
     'allow_unapproved': False,
+    'asset_rights_statuses': list([
+      dict({
+        'asset_id': 'giant_green_anemone',
+        'rights_status': 'public_domain_source',
+      }),
+      dict({
+        'asset_id': 'ochre_sea_star',
+        'rights_status': 'original_artwork',
+      }),
+      dict({
+        'asset_id': 'purple_sea_urchin',
+        'rights_status': 'rights_verified',
+      }),
+    ]),
     'dxf_members': list([
     ]),
     'excluded_members': list([
