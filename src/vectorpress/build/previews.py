@@ -1,16 +1,22 @@
 """Render a product's marketplace preview images (§14, §16, ADR 0014, ADR
 0015).
 
-The thinnest end-to-end slice: only the ``main`` preview type, at both fixed
-canvases. Jinja HTML/CSS templates (:mod:`vectorpress.build.template_lookup`,
-kind ``previews``) are screenshotted by Playwright's headless Chromium
-(ADR 0014) -- no network, no system fonts. Every image a template needs
-(the brand mark, a member's effective derivative, the two shipped fonts) is
-embedded as a ``data:`` URI computed here in Python, never referenced by a
-relative or absolute path: a template has nothing to link to outside its own
-inline content, so the only way a render can still reach the network is a
-catalog override writing a URL of its own -- exactly what the Chromium
-request guard below exists to catch.
+One rendering path shared by every preview type (:data:`PREVIEW_TYPES`),
+never copied per type: each is a fixed context (ADR 0015) rendered through
+its own shipped ``<type>.html.j2`` and screenshotted at both fixed canvases
+by Playwright's headless Chromium (ADR 0014) -- no network, no system
+fonts. Every image a template needs (the brand mark, a member's effective
+derivative, the two shipped fonts) is embedded as a ``data:`` URI computed
+here in Python, never referenced by a relative or absolute path: a template
+has nothing to link to outside its own inline content, so the only way a
+render can still reach the network is a catalog override writing a URL of
+its own -- exactly what the Chromium request guard below exists to catch.
+
+The context's canvas- and page-independent parts (``brand``, ``product``,
+``members``, ``featured``) are computed once per build
+(:func:`_preview_context`) and reused for every type/canvas combination --
+recomputing a member's own image data URIs per render would redo the
+expensive part of this module's work once per canvas per type for nothing.
 
 ``brand`` and ``product`` context values are content, not brand/product
 model instances: this module fills the exact fixed shape ADR 0015 documents
@@ -46,12 +52,33 @@ from vectorpress.domain.product import Product
 #: ``templates/previews/`` first, then the shipped folder of the same name.
 PREVIEWS_KIND = "previews"
 
-#: §16's fixed upload-order number for the ``main`` preview type -- the only
-#: type this slice renders.
-MAIN_PREVIEW_NUMBER = "01"
-
 #: §16's "up to 9 featured members" on ``main``.
 FEATURED_LIMIT = 9
+
+
+@dataclass(frozen=True)
+class PreviewType:
+    """One §16 preview type: its fixed upload-order number and its own
+    shipped ``<name>.html.j2`` template (ADR 0015). A left-out type
+    (``variants``, ``contents``) simply has no entry in
+    :data:`PREVIEW_TYPES` yet -- its number stays unused (§16), not
+    reserved by a placeholder."""
+
+    number: str
+    name: str
+    template_name: str
+
+
+#: Every preview type this build renders, in upload-order (§16 "nn sets
+#: upload order"). ``included`` and ``formats`` cap or select what they show
+#: inside their own shipped template (§16's "up to 12 members" and its
+#: per-format one-line use text), not through a context field ADR 0015 does
+#: not document.
+PREVIEW_TYPES: tuple[PreviewType, ...] = (
+    PreviewType(number="01", name="main", template_name="main.html.j2"),
+    PreviewType(number="02", name="included", template_name="included.html.j2"),
+    PreviewType(number="03", name="formats", template_name="formats.html.j2"),
+)
 
 
 @dataclass(frozen=True)
@@ -365,8 +392,54 @@ def _render_html(
         raise PreviewRenderError(str(exc), template_name=name) from exc
 
 
-def render_main_html(
+@dataclass(frozen=True)
+class _PreviewContext:
+    """The parts of the ADR 0015 context that never vary by canvas or page:
+    computed once per build (:func:`_preview_context`), never rebuilt per
+    (type, canvas) render."""
+
+    brand: PreviewBrand
+    product: PreviewProduct
+    members: list[PreviewMember]
+    featured: list[PreviewMember]
+
+
+def _preview_context(
     root: Path,
+    product: Product,
+    brand: Brand,
+    eligible_members: list[ProductMember],
+    assets_by_id: dict[AssetId, Asset],
+    content_by_member: dict[AssetId, dict[DerivativeType, bytes]],
+    files_by_folder: dict[str, list[str]],
+) -> _PreviewContext:
+    members = preview_members(eligible_members, assets_by_id, content_by_member)
+    return _PreviewContext(
+        brand=_preview_brand(root, brand),
+        product=_preview_product(product, files_by_folder, len(eligible_members)),
+        members=members,
+        featured=members[:FEATURED_LIMIT],
+    )
+
+
+def _template_context(context: _PreviewContext, canvas: Canvas) -> dict[str, object]:
+    # ``page`` is always ``None`` -- no preview type this build renders
+    # paginates yet (§16: only ``contents`` does, and it is not one of
+    # :data:`PREVIEW_TYPES`). It is still passed, since ADR 0015 fixes
+    # ``page`` as part of every preview's context, read or not.
+    return {
+        "canvas": canvas,
+        "brand": context.brand,
+        "product": context.product,
+        "members": context.members,
+        "featured": context.featured,
+        "page": None,
+    }
+
+
+def render_preview_html(
+    root: Path,
+    preview_type: PreviewType,
     canvas: Canvas,
     product: Product,
     brand: Brand,
@@ -375,21 +448,18 @@ def render_main_html(
     content_by_member: dict[AssetId, dict[DerivativeType, bytes]],
     files_by_folder: dict[str, list[str]],
 ) -> str:
-    """The ``main`` preview's rendered HTML for one canvas (§16) -- Jinja
-    only, no Chromium, so a template's own undefined-variable problem is
-    caught here without ever launching a browser. Raises
-    :class:`PreviewRenderError` naming the offending template."""
+    """One preview type's rendered HTML for one canvas (§16) -- Jinja only,
+    no Chromium, so a template's own undefined-variable problem is caught
+    here without ever launching a browser. The same fixed context (ADR
+    0015) serves every type; only ``preview_type.template_name`` differs.
+    Raises :class:`PreviewRenderError` naming the offending template."""
     environment = template_environment(root, PREVIEWS_KIND)
-    members = preview_members(eligible_members, assets_by_id, content_by_member)
-    context = {
-        "canvas": canvas,
-        "brand": _preview_brand(root, brand),
-        "product": _preview_product(product, files_by_folder, len(eligible_members)),
-        "members": members,
-        "featured": members[:FEATURED_LIMIT],
-        "page": None,
-    }
-    return _render_html(environment, root, "main.html.j2", **context)
+    context = _preview_context(
+        root, product, brand, eligible_members, assets_by_id, content_by_member, files_by_folder
+    )
+    return _render_html(
+        environment, root, preview_type.template_name, **_template_context(context, canvas)
+    )
 
 
 # --- Chromium rendering: one reused browser per process, no network (ADR 0014) --
@@ -457,7 +527,7 @@ def _screenshot(html: str, canvas: Canvas, template_name: str) -> bytes:
     return png_bytes
 
 
-def render_main_previews(
+def render_previews(
     root: Path,
     product: Product,
     brand: Brand,
@@ -466,27 +536,35 @@ def render_main_previews(
     content_by_member: dict[AssetId, dict[DerivativeType, bytes]],
     files_by_folder: dict[str, list[str]],
 ) -> list[tuple[str, bytes]]:
-    """Render the ``main`` preview at both fixed canvases (§16 nn=``01``,
-    the only preview type this slice builds): ``(path under previews/,
-    PNG bytes)`` pairs, sizes exactly matching each :data:`Canvas`.
+    """Render every :data:`PREVIEW_TYPES` entry at both fixed canvases
+    (§16): ``(path under previews/, PNG bytes)`` pairs, sizes exactly
+    matching each :data:`Canvas`. The canvas- and page-independent context
+    is built once (:func:`_preview_context`) and reused across every
+    type/canvas combination, not rebuilt per render.
 
     Raises :class:`PreviewRenderError` on an undefined template variable, a
     template requesting a disallowed URL, or Chromium itself failing --
     :func:`~vectorpress.build.product_build.build_product` turns any of
     these into a whole-build refusal, per this module's own docstring.
     """
+    environment = template_environment(root, PREVIEWS_KIND)
+    context = _preview_context(
+        root, product, brand, eligible_members, assets_by_id, content_by_member, files_by_folder
+    )
     results: list[tuple[str, bytes]] = []
-    for canvas in CANVASES:
-        html = render_main_html(
-            root,
-            canvas,
-            product,
-            brand,
-            eligible_members,
-            assets_by_id,
-            content_by_member,
-            files_by_folder,
-        )
-        png_bytes = _screenshot(html, canvas, "main.html.j2")
-        results.append((f"previews/{MAIN_PREVIEW_NUMBER}-main-{canvas.name}.png", png_bytes))
+    for preview_type in PREVIEW_TYPES:
+        for canvas in CANVASES:
+            html = _render_html(
+                environment,
+                root,
+                preview_type.template_name,
+                **_template_context(context, canvas),
+            )
+            png_bytes = _screenshot(html, canvas, preview_type.template_name)
+            results.append(
+                (
+                    f"previews/{preview_type.number}-{preview_type.name}-{canvas.name}.png",
+                    png_bytes,
+                )
+            )
     return results

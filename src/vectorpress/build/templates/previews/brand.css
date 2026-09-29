@@ -130,3 +130,37 @@ html, body {
   height: 12rem;
   object-fit: contain;
 }
+
+.format-cards {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 1.5rem;
+  list-style: none;
+  margin: 1rem 0 0;
+  padding: 0;
+  width: 100%;
+}
+
+.format-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  border: 2px solid var(--accent-color);
+  border-radius: 1rem;
+  padding: 1.5rem;
+}
+
+.format-card-label {
+  font-family: var(--heading-font);
+  font-weight: 700;
+  font-size: 1.5rem;
+}
+
+.format-card-count {
+  font-weight: 600;
+  opacity: 0.8;
+}
+
+.format-card-use {
+  margin: 0;
+}

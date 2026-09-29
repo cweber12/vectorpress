@@ -1,12 +1,12 @@
-"""build.previews: the ``main`` preview's context and Jinja rendering (§16,
+"""build.previews: every preview type's context and Jinja rendering (§16,
 ADR 0014, ADR 0015).
 
 Everything here runs against hand-built domain objects and a bare
 ``tmp_path`` catalog root -- no generated derivative, no catalog fixture,
-and (this module's own point) no Chromium: :func:`render_main_html` is pure
-Jinja, so an undefined-variable problem is a plain Python exception, never a
-browser launch. Rendering the resulting HTML into an actual PNG
-(:func:`~vectorpress.build.previews.render_main_previews`) is covered by
+and (this module's own point) no Chromium: :func:`render_preview_html` is
+pure Jinja, so an undefined-variable problem is a plain Python exception,
+never a browser launch. Rendering the resulting HTML into an actual PNG
+(:func:`~vectorpress.build.previews.render_previews`) is covered by
 ``tests/integration/test_previews.py`` instead, against the real fixture
 catalog, since that needs Chromium installed.
 """
@@ -18,10 +18,12 @@ import pytest
 from syrupy.assertion import SnapshotAssertion
 
 from vectorpress.build.previews import (
+    PREVIEW_TYPES,
     Canvas,
     PreviewRenderError,
+    PreviewType,
     preview_members,
-    render_main_html,
+    render_preview_html,
 )
 from vectorpress.build.product_resolution import MemberEligibility, ProductMember
 from vectorpress.domain.asset import Asset, AssetId
@@ -32,6 +34,11 @@ from vectorpress.domain.listing import Listing
 from vectorpress.domain.product import Product
 
 _SQUARE = Canvas("square", 2000, 2000)
+
+_PREVIEW_TYPES_BY_NAME: dict[str, PreviewType] = {t.name: t for t in PREVIEW_TYPES}
+_MAIN = _PREVIEW_TYPES_BY_NAME["main"]
+_INCLUDED = _PREVIEW_TYPES_BY_NAME["included"]
+_FORMATS = _PREVIEW_TYPES_BY_NAME["formats"]
 
 
 def _asset(asset_id: str, display_name: str) -> Asset:
@@ -173,27 +180,34 @@ def test_preview_members_images_by_type_covers_every_included_type() -> None:
     assert set(result[0].images_by_type) == {"transparent_png", "cut_svg"}
 
 
-# --- render_main_html: the fixed context, and template-render failures -----
+# --- render_preview_html: the fixed context, and template-render failures --
 
 
 def _render(
     tmp_path: Path,
     *,
+    preview_type: PreviewType = _MAIN,
+    canvas: Canvas = _SQUARE,
     product: Product | None = None,
     brand: Brand | None = None,
     members: list[ProductMember] | None = None,
     assets_by_id: dict[AssetId, Asset] | None = None,
+    content_by_member: dict[AssetId, dict[DerivativeType, bytes]] | None = None,
+    files_by_folder: dict[str, list[str]] | None = None,
 ) -> str:
     (tmp_path / "mark.png").write_bytes(b"MARKBYTES")
-    return render_main_html(
+    return render_preview_html(
         tmp_path,
-        _SQUARE,
+        preview_type,
+        canvas,
         product or _product(),
         brand or _brand(),
         members if members is not None else [_member("a")],
         assets_by_id or {"a": _asset("a", "Ochre Sea Star")},
-        {"a": {DerivativeType.TRANSPARENT_PNG: b"PNGBYTES"}},
-        {"PNG": ["ochre-sea-star-color.png"]},
+        content_by_member
+        if content_by_member is not None
+        else {"a": {DerivativeType.TRANSPARENT_PNG: b"PNGBYTES"}},
+        files_by_folder if files_by_folder is not None else {"PNG": ["ochre-sea-star-color.png"]},
     )
 
 
@@ -342,5 +356,95 @@ def test_render_main_html_is_locked_by_snapshot(
             },
         )
         html = _render(tmp_path)
+
+    assert _DATA_URI_RE.sub("data:<omitted>", html) == snapshot
+
+
+# --- `included` (§16 nn=02): up to 12 members, labeled with display names --
+
+
+def test_included_html_shows_every_members_display_name_up_to_twelve(tmp_path: Path) -> None:
+    assets_by_id = {str(i): _asset(str(i), f"Member {i}") for i in range(15)}
+    members = [_member(str(i)) for i in range(15)]
+
+    html = _render(tmp_path, preview_type=_INCLUDED, members=members, assets_by_id=assets_by_id)
+
+    assert sum(f"Member {i}" in html for i in range(15)) == 12
+
+
+def test_included_html_is_locked_by_snapshot(tmp_path: Path, snapshot: SnapshotAssertion) -> None:
+    with pytest.MonkeyPatch.context() as monkeypatch:
+        monkeypatch.setattr(
+            "vectorpress.build.previews._shipped_font_data_uris",
+            lambda: {
+                "inter_regular": "data:font/woff2;base64,AAAA",
+                "inter_bold": "data:font/woff2;base64,AAAA",
+                "space_grotesk_regular": "data:font/woff2;base64,AAAA",
+                "space_grotesk_bold": "data:font/woff2;base64,AAAA",
+            },
+        )
+        html = _render(tmp_path, preview_type=_INCLUDED)
+
+    assert _DATA_URI_RE.sub("data:<omitted>", html) == snapshot
+
+
+# --- `formats` (§16 nn=03): a badge per format with its file count and use -
+
+
+def test_formats_html_shows_each_formats_file_count(tmp_path: Path) -> None:
+    product = _product(
+        derivative_types=[DerivativeType.CUT_SVG, DerivativeType.TRANSPARENT_PNG],
+        formats=[Format.SVG, Format.PNG, Format.DXF],
+    )
+    files_by_folder = {
+        "SVG": ["a-cut.svg", "a-silhouette.svg", "b-cut.svg", "b-silhouette.svg"],
+        "PNG": ["a-color.png"],
+        "DXF": ["a-cut.dxf"],
+    }
+
+    html = _render(
+        tmp_path, preview_type=_FORMATS, product=product, files_by_folder=files_by_folder
+    )
+
+    assert "SVG" in html and "4 files" in html
+    assert "PNG" in html
+    assert "DXF" in html
+    assert html.count("1 files") == 2  # PNG's and DXF's own one-file counts
+
+
+def test_formats_html_shows_a_one_line_use_per_format(tmp_path: Path) -> None:
+    product = _product(derivative_types=[DerivativeType.CUT_SVG], formats=[Format.DXF])
+    files_by_folder = {"DXF": ["a-cut.dxf"]}
+
+    html = _render(
+        tmp_path, preview_type=_FORMATS, product=product, files_by_folder=files_by_folder
+    )
+
+    assert "laser cutters" in html
+
+
+def test_formats_html_is_locked_by_snapshot(tmp_path: Path, snapshot: SnapshotAssertion) -> None:
+    product = _product(
+        derivative_types=[DerivativeType.CUT_SVG, DerivativeType.TRANSPARENT_PNG],
+        formats=[Format.SVG, Format.PNG, Format.DXF],
+    )
+    files_by_folder = {
+        "SVG": ["a-cut.svg", "a-silhouette.svg"],
+        "PNG": ["a-color.png"],
+        "DXF": ["a-cut.dxf"],
+    }
+    with pytest.MonkeyPatch.context() as monkeypatch:
+        monkeypatch.setattr(
+            "vectorpress.build.previews._shipped_font_data_uris",
+            lambda: {
+                "inter_regular": "data:font/woff2;base64,AAAA",
+                "inter_bold": "data:font/woff2;base64,AAAA",
+                "space_grotesk_regular": "data:font/woff2;base64,AAAA",
+                "space_grotesk_bold": "data:font/woff2;base64,AAAA",
+            },
+        )
+        html = _render(
+            tmp_path, preview_type=_FORMATS, product=product, files_by_folder=files_by_folder
+        )
 
     assert _DATA_URI_RE.sub("data:<omitted>", html) == snapshot
