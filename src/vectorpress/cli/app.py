@@ -1675,7 +1675,9 @@ def _echo_needs_rebuild(result: NeedsRebuildResult) -> None:
     rebuild"): ``current``, ``never built``, or ``needs rebuild`` with every
     reason -- a member difference per (asset, derivative type), the brand's
     license template or README wording having changed, the resolved
-    reference size having changed, or the last manifest predating the
+    reference size having changed, the presentation hash having changed
+    (ADR 0014's "previews out of date"), the listing hash having changed
+    (ADR 0017's "listing changed"), or the last manifest predating the
     current format (in which case it is the only reason shown: there is
     nothing on record to compare against)."""
     if result.outcome is NeedsRebuildOutcome.NEVER_BUILT:
@@ -1701,6 +1703,10 @@ def _echo_needs_rebuild(result: NeedsRebuildResult) -> None:
         previous = format_number(result.reference_size_change.previous_in)
         current = format_number(result.reference_size_change.current_in)
         typer.echo(f"  reference size: changed ({previous}in → {current}in)")
+    if result.previews_out_of_date:
+        typer.echo("  previews out of date")
+    if result.listing_changed:
+        typer.echo("  listing changed")
 
 
 @app.command()

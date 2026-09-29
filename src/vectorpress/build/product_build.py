@@ -70,7 +70,11 @@ itself -- no second read of any effective derivative. A rendering failure
 disallowed URL) refuses the whole build the same way a DXF conversion
 failure does, before anything is written; previews are never inside the
 package or the ZIP (§14), and the manifest records their file names, never
-image hashes.
+image hashes -- plus the ADR 0014 presentation hash
+(:attr:`~vectorpress.build.previews.PreviewRenderResult.presentation_hash`)
+and the ADR 0017 listing hash (:func:`_listing_hash`), so
+:mod:`~vectorpress.build.needs_rebuild` can report **previews out of date**
+and **listing changed** without re-rendering anything.
 
 **Catalog template overrides (ADR 0015).** ``BuildResult.template_overrides``
 names every catalog ``templates/<kind>/`` file this build actually loaded --
@@ -116,6 +120,7 @@ from vectorpress.domain.collection import Collection
 from vectorpress.domain.derivative_type import DerivativeType, derivative_filename
 from vectorpress.domain.format import Format
 from vectorpress.domain.format_folder import copied_folder, dxf_filename, dxf_source
+from vectorpress.domain.listing import Listing
 from vectorpress.domain.manifest import (
     Manifest,
     ManifestAdmittedUnapproved,
@@ -443,6 +448,14 @@ def _readme_wording_hash(brand: Brand) -> str:
     )
 
 
+def _listing_hash(listing: Listing) -> str:
+    """The ADR 0017 listing hash: a content hash of the whole ``[listing]``
+    table (§23, §34), so any field edit -- not only ``title``/``short_title``,
+    the two the previews themselves print -- flags "listing changed",
+    distinct from "previews out of date" (ADR 0014's own, narrower hash)."""
+    return sha256_bytes(json.dumps(listing.model_dump(), sort_keys=True).encode("utf-8"))
+
+
 def _manifest_json_bytes(manifest: Manifest) -> bytes:
     """``manifest`` as deterministic JSON bytes (§36): sorted keys, a fixed
     2-space indent, and ``members``/``excluded_members`` already sorted by
@@ -525,6 +538,8 @@ def _manifest_json_bytes(manifest: Manifest) -> bytes:
             for warning in manifest.byte_identical_derivatives
         ],
         "previews": manifest.previews,
+        "presentation_hash": manifest.presentation_hash,
+        "listing_hash": manifest.listing_hash,
     }
     return json.dumps(payload, indent=2, sort_keys=True).encode("utf-8") + b"\n"
 
@@ -790,6 +805,7 @@ def build_product(
     )
     byte_identical_derivatives = _byte_identical_derivative_warnings(content_by_member)
     previews = sorted((rel_path for rel_path, _ in preview_files), key=_preview_upload_order_key)
+    assert product.listing is not None  # build_product's own listing gate already refused
     manifest = Manifest(
         product_slug=product.slug,
         reference_size_in=reference_size_in,
@@ -806,6 +822,8 @@ def build_product(
         cleanup_size_warnings=cleanup_size_warnings,
         byte_identical_derivatives=byte_identical_derivatives,
         previews=previews,
+        presentation_hash=preview_result.presentation_hash,
+        listing_hash=_listing_hash(product.listing),
     )
 
     builds_dir = root / BUILDS_DIRNAME

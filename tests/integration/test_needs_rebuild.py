@@ -1,5 +1,5 @@
 """Needs rebuild end to end, against a temporary copy of the fixture catalog
-(§23, §34, ADR 0004, CONTEXT.md "Needs rebuild").
+(§23, §34, ADR 0004, ADR 0014, ADR 0017, CONTEXT.md "Needs rebuild").
 
 Runs against a temporary copy, never the committed fixture directly: these
 tests build real products under ``builds/`` (``tests/fixtures/catalog/README.md``).
@@ -11,6 +11,10 @@ collection: ``ochre_sea_star``, ``giant_green_anemone``, ``purple_sea_urchin``) 
 ``purple_sea_urchin``, §10's ``exclude`` product) -- so a source change to
 ``ochre_sea_star`` names exactly the two products that include it, and
 ``kelp_forest_mini_pack`` -- containing neither -- stays current.
+
+The **previews out of date** and **listing changed** sections below render
+real previews through Chromium (every ``_build_every_fixture_product`` call
+does), so they run slower than the member-difference tests above.
 """
 
 import io
@@ -468,3 +472,191 @@ def test_a_build_made_with_allow_unapproved_reads_as_current_with_no_further_cha
     assert "Admitted unapproved: 3" in build_result.output
 
     assert "Build: current" in _product_output(temp_catalog_root, PNG_ONLY_SLUG)
+
+
+# --- acceptance: a brand edit reaches every built product, no product.toml changes ---
+
+
+@pytest.mark.integration
+def test_card_style_change_flags_previews_out_of_date_for_every_built_product(
+    monkeypatch: pytest.MonkeyPatch, temp_catalog_root: Path
+) -> None:
+    """ADR 0014's own worked example: ``card_style`` is one of the
+    presentation hash's brand fields, so editing it reaches every already
+    built product as "previews out of date" -- naming no product.toml
+    change -- and rebuilding both clears the reason and changes the
+    previews' own rendered bytes (ADR 0014: previews are not held to
+    byte-identical output, but a real style edit must still show up in the
+    pixels)."""
+    _build_every_fixture_product(monkeypatch, temp_catalog_root)
+
+    product_bytes_before = {
+        slug: (temp_catalog_root / "products" / f"{slug}.toml").read_bytes()
+        for slug in (PNG_ONLY_SLUG, STANDARD_PACK_SLUG, MINI_PACK_SLUG)
+    }
+    main_preview_path = (
+        temp_catalog_root / "builds" / PNG_ONLY_SLUG / "previews" / "01-main-square.png"
+    )
+    preview_before = main_preview_path.read_bytes()
+
+    brand_path = temp_catalog_root / "brand.toml"
+    text = brand_path.read_text(encoding="utf-8")
+    before = 'accent_color = "#C45D26"'
+    assert before in text
+    brand_path.write_text(text.replace(before, 'accent_color = "#2244FF"'), encoding="utf-8")
+
+    for slug in (PNG_ONLY_SLUG, STANDARD_PACK_SLUG, MINI_PACK_SLUG):
+        output = _product_output(temp_catalog_root, slug)
+        assert "Build: needs rebuild" in output
+        assert "previews out of date" in output
+        assert "listing changed" not in output
+
+    for slug, original_bytes in product_bytes_before.items():
+        assert (temp_catalog_root / "products" / f"{slug}.toml").read_bytes() == original_bytes
+
+    monkeypatch.chdir(temp_catalog_root)
+    for slug in (PNG_ONLY_SLUG, STANDARD_PACK_SLUG, MINI_PACK_SLUG):
+        build_result = runner.invoke(app, ["build", slug])
+        assert build_result.exit_code == 0, build_result.output
+        assert "Build: current" in _product_output(temp_catalog_root, slug)
+
+    assert main_preview_path.read_bytes() != preview_before
+
+
+# --- acceptance: a catalog template override reports previews out of date ---
+
+
+@pytest.mark.integration
+def test_adding_a_catalog_template_override_reports_previews_out_of_date(
+    monkeypatch: pytest.MonkeyPatch, temp_catalog_root: Path
+) -> None:
+    """ADR 0014's "every template file the build used, shipped or
+    override" -- adding a catalog ``templates/previews/`` override, even
+    one that changes nothing about what a template shows
+    (``{% extends %}`` with no block overridden), still flags previews out
+    of date: the override file itself is now part of what a build loads."""
+    _build_every_fixture_product(monkeypatch, temp_catalog_root)
+
+    override_path = temp_catalog_root / "templates" / "previews" / "main.html.j2"
+    override_path.parent.mkdir(parents=True, exist_ok=True)
+    override_path.write_text('{% extends "shipped/main.html.j2" %}\n', encoding="utf-8")
+
+    output = _product_output(temp_catalog_root, PNG_ONLY_SLUG)
+    assert "Build: needs rebuild" in output
+    assert "previews out of date" in output
+
+
+# --- acceptance: replacing the mark or a font file reports previews out of date ---
+
+
+@pytest.mark.integration
+def test_replacing_the_mark_file_reports_previews_out_of_date(
+    monkeypatch: pytest.MonkeyPatch, temp_catalog_root: Path
+) -> None:
+    """ADR 0014's "the mark and font file bytes" are hashed directly --
+    replacing ``brand.toml``'s own ``mark_file`` on disk, with
+    ``brand.toml`` itself untouched, still flags previews out of date."""
+    _build_every_fixture_product(monkeypatch, temp_catalog_root)
+
+    mark_path = temp_catalog_root / "mark.png"
+    with Image.open(mark_path) as image:
+        edited = image.convert("RGBA")
+        ImageDraw.Draw(edited).rectangle((0, 0, 9, 9), fill=(0, 255, 0, 255))
+        buffer = io.BytesIO()
+        edited.save(buffer, format="PNG")
+    assert buffer.getvalue() != mark_path.read_bytes()
+    mark_path.write_bytes(buffer.getvalue())
+
+    output = _product_output(temp_catalog_root, PNG_ONLY_SLUG)
+    assert "Build: needs rebuild" in output
+    assert "previews out of date" in output
+
+
+@pytest.mark.integration
+def test_replacing_a_catalog_font_file_reports_previews_out_of_date(
+    monkeypatch: pytest.MonkeyPatch, temp_catalog_root: Path
+) -> None:
+    """The font-file half of the same ADR 0014 input: a brand naming a
+    catalog font file (rather than one of the two shipped families) whose
+    file bytes change on disk -- ``brand.toml`` itself untouched -- must
+    still flag previews out of date."""
+    font_path = temp_catalog_root / "custom-heading.woff2"
+    font_path.write_bytes(b"FONT-BYTES-V1")
+    brand_path = temp_catalog_root / "brand.toml"
+    text = brand_path.read_text(encoding="utf-8")
+    before = 'heading_font = "Space Grotesk"\n'
+    assert before in text
+    brand_path.write_text(
+        text.replace(before, before + 'heading_font_file = "custom-heading.woff2"\n'),
+        encoding="utf-8",
+    )
+
+    _build_every_fixture_product(monkeypatch, temp_catalog_root)
+
+    font_path.write_bytes(b"FONT-BYTES-V2-DIFFERENT-LENGTH")
+
+    output = _product_output(temp_catalog_root, PNG_ONLY_SLUG)
+    assert "Build: needs rebuild" in output
+    assert "previews out of date" in output
+
+
+# --- acceptance: editing listing text reports listing changed, rebuild clears it ---
+
+
+@pytest.mark.integration
+def test_editing_a_non_preview_listing_field_reports_listing_changed_only(
+    monkeypatch: pytest.MonkeyPatch, temp_catalog_root: Path
+) -> None:
+    """ADR 0017: the listing hash covers the whole ``[listing]`` table, not
+    only ``title``/``short_title`` (the two fields previews themselves
+    print, ADR 0014's own listing inputs) -- editing ``marketplace_notes``
+    alone flags "listing changed" with no "previews out of date". Rebuilding
+    clears it, and the product's own TOML file is never rewritten by the
+    tool (ADR 0005): its bytes after the rebuild are exactly what this test
+    itself wrote."""
+    _build_every_fixture_product(monkeypatch, temp_catalog_root)
+
+    product_path = temp_catalog_root / "products" / f"{PNG_ONLY_SLUG}.toml"
+    text = product_path.read_text(encoding="utf-8")
+    before = 'marketplace_notes = ""'
+    assert before in text
+    edited_text = text.replace(before, 'marketplace_notes = "Bundle price valid through June."')
+    product_path.write_text(edited_text, encoding="utf-8")
+
+    output = _product_output(temp_catalog_root, PNG_ONLY_SLUG)
+    assert "Build: needs rebuild" in output
+    assert "listing changed" in output
+    assert "previews out of date" not in output
+
+    monkeypatch.chdir(temp_catalog_root)
+    build_result = runner.invoke(app, ["build", PNG_ONLY_SLUG])
+    assert build_result.exit_code == 0, build_result.output
+
+    assert "Build: current" in _product_output(temp_catalog_root, PNG_ONLY_SLUG)
+    assert product_path.read_text(encoding="utf-8") == edited_text
+
+
+# --- acceptance: a rights status change never reports previews out of date ---
+
+
+@pytest.mark.integration
+def test_changing_an_assets_rights_status_does_not_report_previews_out_of_date(
+    monkeypatch: pytest.MonkeyPatch, temp_catalog_root: Path
+) -> None:
+    """ADR 0015: rights status is not in the preview context at all -- a
+    rights-status edit alone, no derivative content change, must leave
+    every needs-rebuild reason untouched, including the presentation
+    hash."""
+    _build_every_fixture_product(monkeypatch, temp_catalog_root)
+
+    asset_path = temp_catalog_root / "assets" / "ochre_sea_star" / "asset.toml"
+    text = asset_path.read_text(encoding="utf-8")
+    before = 'rights_status = "original_artwork"'
+    assert before in text
+    asset_path.write_text(
+        text.replace(before, 'rights_status = "licensed_source"'), encoding="utf-8"
+    )
+
+    output = _product_output(temp_catalog_root, PNG_ONLY_SLUG)
+    assert "Build: current" in output
+    assert "previews out of date" not in output

@@ -24,6 +24,7 @@ adding a second checked-in fixture product for one case.
 
 import hashlib
 import json
+import re
 import shutil
 import zipfile
 from pathlib import Path
@@ -700,6 +701,29 @@ def test_manifest_records_every_included_assets_rights_status(
         {"asset_id": "ochre_sea_star", "rights_status": "original_artwork"},
         {"asset_id": "purple_sea_urchin", "rights_status": "rights_verified"},
     ]
+
+
+@pytest.mark.integration
+def test_manifest_records_a_presentation_hash_and_a_listing_hash(
+    monkeypatch: pytest.MonkeyPatch, temp_catalog_root: Path
+) -> None:
+    """ADR 0014's presentation hash and ADR 0017's listing hash (§23):
+    each a plain SHA-256 hex digest (ADR 0004's "hashes are SHA-256 of
+    bytes") -- both covered, alongside every other manifest field, by
+    test_manifest_and_zip_listing_are_locked_by_snapshot below; this test
+    only pins their shape, since a 64-character hex string is otherwise
+    unreadable in that snapshot's own diff."""
+    _generate_and_approve_transparent_png(monkeypatch, temp_catalog_root)
+
+    result = runner.invoke(app, ["build", PNG_ONLY_SLUG])
+    assert result.exit_code == 0, result.output
+
+    build_dir = _build_dir(temp_catalog_root, PNG_ONLY_SLUG)
+    manifest = json.loads((build_dir / "manifest.json").read_text(encoding="utf-8"))
+    for field in ("presentation_hash", "listing_hash"):
+        value = manifest[field]
+        assert isinstance(value, str)
+        assert re.fullmatch(r"[0-9a-f]{64}", value)
 
 
 @pytest.mark.integration

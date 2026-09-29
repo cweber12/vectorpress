@@ -18634,6 +18634,7 @@
     ]),
     'license_template_hash': '5ebd27971491321fa49369d43df7f17cdc3d79dae210de60edb0b785a9f3d2e8',
     'license_year': 2026,
+    'listing_hash': 'c69e059eef28c1da7bdc72c7e81b0fd8d93ed26782b9c6e9d23f5a7303cffe64',
     'members': list([
       dict({
         'asset_id': 'giant_green_anemone',
@@ -18657,6 +18658,7 @@
         'source': 'generated',
       }),
     ]),
+    'presentation_hash': '2708c91e99c9e43643eb9fbb0bdd2fc060ffa42f68098fec96a23f1f9ff9c2c1',
     'previews': list([
       'previews/01-main-landscape.png',
       'previews/01-main-square.png',
