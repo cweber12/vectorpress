@@ -1,0 +1,27 @@
+{% extends "_base.html.j2" %}
+
+{# §16: the first featured member, once per included derivative type, each
+   card labeled with that type's own customer-facing label -- never the
+   member's display name, which is what every other type labels its cards
+   with. #}
+{% block content %}
+<div class="preview preview-variants">
+  <header class="brand-header">
+    <img class="brand-mark" src="{{ brand.mark_url }}" alt="{{ brand.name }}">
+    <span class="brand-name">{{ brand.name }}</span>
+  </header>
+  <h1 class="product-title">{{ product.title }}</h1>
+  <p class="product-meta">Available as {{ product.derivative_types | length }} file styles</p>
+  {% set member = featured[0] %}
+  <ul class="featured-members">
+    {% for derivative_type in product.derivative_types %}
+    <li class="featured-member">
+      {% if derivative_type.value in member.images_by_type %}
+      <img src="{{ member.images_by_type[derivative_type.value] }}" alt="{{ derivative_type.label }}">
+      {% endif %}
+      <span>{{ derivative_type.label }}</span>
+    </li>
+    {% endfor %}
+  </ul>
+</div>
+{% endblock %}

@@ -1,0 +1,29 @@
+{% extends "_base.html.j2" %}
+
+{# §16: every member, labeled, 48 per page -- the page boundary lives here,
+   inside this type's own template, the same reason `included`'s 12-member
+   cap does: not a context field ADR 0015 does not document. `page.number`
+   picks this page's slice of the full `members` list. #}
+{% set page_size = 48 %}
+{% set page_start = (page.number - 1) * page_size %}
+
+{% block content %}
+<div class="preview preview-contents">
+  <header class="brand-header">
+    <img class="brand-mark" src="{{ brand.mark_url }}" alt="{{ brand.name }}">
+    <span class="brand-name">{{ brand.name }}</span>
+  </header>
+  <h1 class="product-title">{{ product.title }}</h1>
+  <p class="product-meta">Page {{ page.number }} of {{ page.count }}</p>
+  <ul class="featured-members">
+    {% for member in members[page_start:page_start + page_size] %}
+    <li class="featured-member">
+      {% if member.image_url %}
+      <img src="{{ member.image_url }}" alt="{{ member.display_name }}">
+      {% endif %}
+      <span>{{ member.display_name }}</span>
+    </li>
+    {% endfor %}
+  </ul>
+</div>
+{% endblock %}

@@ -59,10 +59,10 @@ FEATURED_LIMIT = 9
 @dataclass(frozen=True)
 class PreviewType:
     """One §16 preview type: its fixed upload-order number and its own
-    shipped ``<name>.html.j2`` template (ADR 0015). A left-out type
-    (``variants``, ``contents``) simply has no entry in
-    :data:`PREVIEW_TYPES` yet -- its number stays unused (§16), not
-    reserved by a placeholder."""
+    shipped ``<name>.html.j2`` template (ADR 0015). ``variants`` and
+    ``contents`` still have an entry here even though they are conditional
+    (:func:`_renders`) -- a left-out one simply renders nothing, so its
+    number stays unused (§16) rather than reserved by a placeholder file."""
 
     number: str
     name: str
@@ -73,12 +73,19 @@ class PreviewType:
 #: upload order"). ``included`` and ``formats`` cap or select what they show
 #: inside their own shipped template (§16's "up to 12 members" and its
 #: per-format one-line use text), not through a context field ADR 0015 does
-#: not document.
+#: not document. ``variants`` and ``contents`` are conditional (§16: "a
+#: left-out type leaves its number unused") -- :func:`render_previews` skips
+#: either one whose condition (:func:`_renders`) the product does not meet.
 PREVIEW_TYPES: tuple[PreviewType, ...] = (
     PreviewType(number="01", name="main", template_name="main.html.j2"),
     PreviewType(number="02", name="included", template_name="included.html.j2"),
     PreviewType(number="03", name="formats", template_name="formats.html.j2"),
+    PreviewType(number="04", name="variants", template_name="variants.html.j2"),
+    PreviewType(number="05", name="contents", template_name="contents.html.j2"),
 )
+
+#: §16: ``contents`` shows every member at this many per page.
+CONTENTS_PAGE_SIZE = 48
 
 
 @dataclass(frozen=True)
@@ -180,13 +187,24 @@ class PreviewProduct:
 
 
 @dataclass(frozen=True)
+class PreviewPage:
+    """The preview context's ``page`` (ADR 0015): "exists for ``contents``"
+    -- every other type's context carries ``None`` instead. ``number`` is
+    1-based; ``count`` is the total number of pages this build's ``contents``
+    has, so the last page's template can tell itself apart from a full one."""
+
+    number: int
+    count: int
+
+
+@dataclass(frozen=True)
 class PreviewMember:
     """The preview context's one member entry (ADR 0015): ``image_url`` is
     the one image that stands for this member -- the first included type in
     the fixed order ``flatcolor_svg``, ``transparent_png``, ``silhouette_svg``,
     ``cut_svg`` (§16) -- and ``images_by_type`` holds every included type's
-    own image, for a later preview type (``variants``) this slice does not
-    render yet. Both are ``data:`` URIs (this module's own docstring)."""
+    own image, which ``variants`` reads to show one derivative type's image
+    per card. Both are ``data:`` URIs (this module's own docstring)."""
 
     display_name: str
     image_url: str
@@ -422,10 +440,11 @@ def _preview_context(
     )
 
 
-def _template_context(context: _PreviewContext, canvas: Canvas) -> dict[str, object]:
-    # ``page`` is always ``None`` -- no preview type this build renders
-    # paginates yet (§16: only ``contents`` does, and it is not one of
-    # :data:`PREVIEW_TYPES`). It is still passed, since ADR 0015 fixes
+def _template_context(
+    context: _PreviewContext, canvas: Canvas, page: PreviewPage | None
+) -> dict[str, object]:
+    # ``page`` is ``None`` for every type but ``contents`` (ADR 0015: "exists
+    # for contents"). It is still passed for the rest, since ADR 0015 fixes
     # ``page`` as part of every preview's context, read or not.
     return {
         "canvas": canvas,
@@ -433,7 +452,7 @@ def _template_context(context: _PreviewContext, canvas: Canvas) -> dict[str, obj
         "product": context.product,
         "members": context.members,
         "featured": context.featured,
-        "page": None,
+        "page": page,
     }
 
 
@@ -447,18 +466,21 @@ def render_preview_html(
     assets_by_id: dict[AssetId, Asset],
     content_by_member: dict[AssetId, dict[DerivativeType, bytes]],
     files_by_folder: dict[str, list[str]],
+    page: PreviewPage | None = None,
 ) -> str:
     """One preview type's rendered HTML for one canvas (§16) -- Jinja only,
     no Chromium, so a template's own undefined-variable problem is caught
     here without ever launching a browser. The same fixed context (ADR
     0015) serves every type; only ``preview_type.template_name`` differs.
-    Raises :class:`PreviewRenderError` naming the offending template."""
+    ``page`` is only ever set for ``contents`` (ADR 0015: "exists for
+    contents"). Raises :class:`PreviewRenderError` naming the offending
+    template."""
     environment = template_environment(root, PREVIEWS_KIND)
     context = _preview_context(
         root, product, brand, eligible_members, assets_by_id, content_by_member, files_by_folder
     )
     return _render_html(
-        environment, root, preview_type.template_name, **_template_context(context, canvas)
+        environment, root, preview_type.template_name, **_template_context(context, canvas, page)
     )
 
 
@@ -536,11 +558,14 @@ def render_previews(
     content_by_member: dict[AssetId, dict[DerivativeType, bytes]],
     files_by_folder: dict[str, list[str]],
 ) -> list[tuple[str, bytes]]:
-    """Render every :data:`PREVIEW_TYPES` entry at both fixed canvases
-    (§16): ``(path under previews/, PNG bytes)`` pairs, sizes exactly
-    matching each :data:`Canvas`. The canvas- and page-independent context
-    is built once (:func:`_preview_context`) and reused across every
-    type/canvas combination, not rebuilt per render.
+    """Render every :data:`PREVIEW_TYPES` entry that applies at both fixed
+    canvases (§16): ``(path under previews/, PNG bytes)`` pairs, sizes
+    exactly matching each :data:`Canvas`. ``variants`` and ``contents`` are
+    skipped (:func:`_renders`) when the product does not meet their own
+    condition; ``contents`` otherwise renders once per page (:func:`_pages`).
+    The canvas- and member-independent context is built once
+    (:func:`_preview_context`) and reused across every type/page/canvas
+    combination, not rebuilt per render.
 
     Raises :class:`PreviewRenderError` on an undefined template variable, a
     template requesting a disallowed URL, or Chromium itself failing --
@@ -553,18 +578,48 @@ def render_previews(
     )
     results: list[tuple[str, bytes]] = []
     for preview_type in PREVIEW_TYPES:
-        for canvas in CANVASES:
-            html = _render_html(
-                environment,
-                root,
-                preview_type.template_name,
-                **_template_context(context, canvas),
-            )
-            png_bytes = _screenshot(html, canvas, preview_type.template_name)
-            results.append(
-                (
-                    f"previews/{preview_type.number}-{preview_type.name}-{canvas.name}.png",
-                    png_bytes,
+        if not _renders(preview_type, product, len(context.members)):
+            continue
+        for page in _pages(preview_type, len(context.members)):
+            name = preview_type.name
+            if page is not None:
+                name = f"{name}-{page.number}"
+            for canvas in CANVASES:
+                html = _render_html(
+                    environment,
+                    root,
+                    preview_type.template_name,
+                    **_template_context(context, canvas, page),
                 )
-            )
+                png_bytes = _screenshot(html, canvas, preview_type.template_name)
+                results.append(
+                    (f"previews/{preview_type.number}-{name}-{canvas.name}.png", png_bytes)
+                )
     return results
+
+
+def _renders(preview_type: PreviewType, product: Product, member_count: int) -> bool:
+    """Whether one conditional preview type is rendered at all (§16): ``04
+    variants`` needs 2 or more of the product's own derivative types; ``05
+    contents`` needs more than 12 members. Every unconditional type (``01``-
+    ``03``) always renders. A left-out type leaves its own number unused,
+    rather than reserved by a placeholder file."""
+    if preview_type.name == "variants":
+        return len(product.derivative_types) >= 2
+    if preview_type.name == "contents":
+        return member_count > 12
+    return True
+
+
+def _pages(preview_type: PreviewType, member_count: int) -> list[PreviewPage | None]:
+    """The pages one preview type renders at (§16): ``[None]`` for every
+    type but ``contents``, which paginates at :data:`CONTENTS_PAGE_SIZE` per
+    page -- ``ceil(member_count / CONTENTS_PAGE_SIZE)`` pages, numbered from
+    1. The page's own member slice is the template's job (``members[start:
+    start + page_size]``), the same way ``included`` caps to 12 inside its
+    own template rather than through a context field ADR 0015 does not
+    document."""
+    if preview_type.name != "contents":
+        return [None]
+    page_count = -(-member_count // CONTENTS_PAGE_SIZE)  # ceiling division
+    return [PreviewPage(number=number, count=page_count) for number in range(1, page_count + 1)]
