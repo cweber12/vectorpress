@@ -180,6 +180,7 @@ def _render(
     tmp_path: Path,
     *,
     product: Product | None = None,
+    brand: Brand | None = None,
     members: list[ProductMember] | None = None,
     assets_by_id: dict[AssetId, Asset] | None = None,
 ) -> str:
@@ -188,7 +189,7 @@ def _render(
         tmp_path,
         _SQUARE,
         product or _product(),
-        _brand(),
+        brand or _brand(),
         members if members is not None else [_member("a")],
         assets_by_id or {"a": _asset("a", "Ochre Sea Star")},
         {"a": {DerivativeType.TRANSPARENT_PNG: b"PNGBYTES"}},
@@ -222,6 +223,64 @@ def test_render_main_html_shows_at_most_nine_featured_members(tmp_path: Path) ->
     html = _render(tmp_path, members=members, assets_by_id=assets_by_id)
 
     assert sum(f"Member {i}" in html for i in range(12)) == 9
+
+
+# --- brand.css names only shipped fonts, never a system font (ADR 0014) ----
+
+
+def test_unshipped_brand_fonts_fall_back_to_inter_with_no_generic_fallback(
+    tmp_path: Path,
+) -> None:
+    """A brand naming a font this tool does not ship (the fixture catalog's
+    own ``brand.toml`` names "Quicksand"/"Nunito Sans") never reaches
+    ``brand.css`` as a CSS family name, and the rendered page never carries
+    a generic fallback either -- both would risk a same-named or generic
+    font already installed on the render machine (ADR 0014: "no system
+    fonts"). It falls back to Inter, the one font this tool always ships."""
+    brand = _brand(typography=BrandTypography(heading_font="Quicksand", body_font="Nunito Sans"))
+
+    html = _render(tmp_path, brand=brand)
+
+    assert "sans-serif" not in html
+    assert "Quicksand" not in html
+    assert "Nunito Sans" not in html
+    assert html.count('font-family: "Inter"') >= 2  # heading_font's and body_font's own @font-face
+    assert '--heading-font: "Inter"' in html
+    assert '--body-font: "Inter"' in html
+
+
+def test_brand_naming_space_grotesk_uses_it_verbatim(tmp_path: Path) -> None:
+    brand = _brand(
+        typography=BrandTypography(heading_font="Space Grotesk", body_font="Space Grotesk")
+    )
+
+    html = _render(tmp_path, brand=brand)
+
+    assert "sans-serif" not in html
+    assert '--heading-font: "Space Grotesk"' in html
+    assert '--body-font: "Space Grotesk"' in html
+
+
+def test_catalog_override_cannot_read_anything_outside_the_documented_context(
+    tmp_path: Path,
+) -> None:
+    """ADR 0015: "reading anything else fails the build" -- including a
+    name that used to be a shipped-template implementation detail
+    (``shipped_fonts``, before this reached templates through
+    ``brand.heading_font``/``body_font`` instead). Nothing is ever added to
+    the environment's or a template's own globals, so a catalog override
+    has no back door around the fixed context's own undefined check."""
+    override_dir = tmp_path / "templates" / "previews"
+    override_dir.mkdir(parents=True)
+    (override_dir / "brand.css").write_text(
+        "body { font: {{ shipped_fonts.inter_regular }}; }\n", encoding="utf-8"
+    )
+
+    with pytest.raises(PreviewRenderError) as excinfo:
+        _render(tmp_path)
+
+    assert excinfo.value.template_name == "brand.css"
+    assert "shipped_fonts" in str(excinfo.value)
 
 
 def test_catalog_override_reading_an_undefined_variable_fails_naming_the_template(

@@ -16,7 +16,12 @@ request guard below exists to catch.
 model instances: this module fills the exact fixed shape ADR 0015 documents
 (``canvas``, ``brand``, ``product``, ``members``, ``featured``, ``page``),
 never the domain objects themselves, so a template can never read a field
-the ADR does not name.
+the ADR does not name -- and never anything beyond that shape, including
+through a mechanism StrictUndefined would not catch (Jinja's per-template
+``globals``): ``brand.heading_font`` and ``brand.body_font`` are this
+shape's own two existing fields, resolved to a :class:`PreviewFont` rather
+than a plain string (this module's own decision, not a new context field --
+see :class:`PreviewFont`).
 """
 
 import base64
@@ -88,6 +93,26 @@ class PreviewBrandColors:
 
 
 @dataclass(frozen=True)
+class PreviewFont:
+    """One of ``brand``'s two existing ADR 0015 font fields (``heading_font``,
+    ``body_font``), resolved to a font this module actually ships (ADR
+    0014): ``family`` is the CSS family name ``brand.css``'s own
+    ``@font-face`` rules declare and the *only* one the CSS ever references
+    -- never the brand's own raw, unvalidated font name (a brand naming a
+    font this tool does not ship is a later slice's metadata problem to
+    catch; until then it silently maps to Inter here rather than ever
+    reaching a template). ``regular_url`` and ``bold_url`` are that shipped
+    family's own two weights, each a ``data:`` URI. No generic CSS fallback
+    is ever paired with ``family``: pairing one (``sans-serif``, or the raw
+    brand name itself) risks matching a same-named font already installed
+    on the machine, exactly what ADR 0014's "no system fonts" forbids."""
+
+    family: str
+    regular_url: str
+    bold_url: str
+
+
+@dataclass(frozen=True)
 class PreviewBrand:
     """The preview context's ``brand`` (ADR 0015): ``mark_url`` is the mark
     file's own bytes as a ``data:`` URI, never a path -- a template has no
@@ -95,8 +120,8 @@ class PreviewBrand:
 
     name: str
     mark_url: str
-    heading_font: str
-    body_font: str
+    heading_font: PreviewFont
+    body_font: PreviewFont
     colors: PreviewBrandColors
 
 
@@ -211,26 +236,39 @@ _SHIPPED_FONT_FILES: dict[str, Path] = {
 @lru_cache(maxsize=1)
 def _shipped_font_data_uris() -> dict[str, str]:
     """The shipped fonts' own bytes as ``data:`` URIs, cached for the life
-    of the process (package data never changes underneath a running build).
-    Not part of the ADR 0015 context ``brand`` names -- a per-brand font
-    choice with no matching shipped file falls back to whatever the
-    browser's own generic family resolves to, since font-name validation is
-    a later slice's concern -- so these reach the shipped ``_base.html.j2``
-    and ``brand.css`` as extra per-template-load globals instead (see
-    :func:`_render_html`), the same way Jinja's own built-ins (``range``,
-    ``namespace``) are always available without being part of any one
-    render call's own context."""
+    of the process (package data never changes underneath a running
+    build)."""
     return {
         key: _data_uri("font/woff2", path.read_bytes()) for key, path in _SHIPPED_FONT_FILES.items()
     }
+
+
+def _shipped_font(requested_family: str) -> PreviewFont:
+    """The :class:`PreviewFont` for one ADR 0015 ``brand.heading_font`` /
+    ``body_font`` value: ``requested_family`` as shipped, when it names one
+    of the two this tool ships; Inter otherwise. Brand-font validation
+    (ADR 0014: "else it is a brand metadata problem") is a later slice, so
+    an unshipped or misspelled name is never a build failure here -- but it
+    is never passed through to ``brand.css`` either, since that would let
+    a same-named system font render instead (this module's own point)."""
+    data_uris = _shipped_font_data_uris()
+    if requested_family == "Space Grotesk":
+        return PreviewFont(
+            family="Space Grotesk",
+            regular_url=data_uris["space_grotesk_regular"],
+            bold_url=data_uris["space_grotesk_bold"],
+        )
+    return PreviewFont(
+        family="Inter", regular_url=data_uris["inter_regular"], bold_url=data_uris["inter_bold"]
+    )
 
 
 def _preview_brand(root: Path, brand: Brand) -> PreviewBrand:
     return PreviewBrand(
         name=brand.name,
         mark_url=_mark_data_uri(root, brand),
-        heading_font=brand.typography.heading_font,
-        body_font=brand.typography.body_font,
+        heading_font=_shipped_font(brand.typography.heading_font),
+        body_font=_shipped_font(brand.typography.body_font),
         colors=PreviewBrandColors(
             background_color=brand.card_style.background_color,
             accent_color=brand.card_style.accent_color,
@@ -314,15 +352,12 @@ def preview_members(
 def _render_html(
     environment: Environment, root: Path, template_name: str, **context: object
 ) -> str:
-    # The shipped fonts reach every template in the {% extends %}/
-    # {% include %} chain through Jinja's own per-load globals (propagated
-    # to included/extended templates, unlike mutating Environment.globals
-    # directly), not through the ADR 0015 context: they are an
-    # implementation detail of the shipped _base.html.j2/brand.css, not a
-    # documented field a catalog override could rely on.
-    template = environment.get_template(
-        template_name, globals={"shipped_fonts": _shipped_font_data_uris()}
-    )
+    # Every value a template can read arrives through this one ``context``
+    # (ADR 0015's own fixed shape) -- nothing is ever added to the
+    # environment's or the template's own globals, which StrictUndefined
+    # does not gate: a catalog override reading anything else must still
+    # fail, exactly the same as reading an unrelated undefined name.
+    template = environment.get_template(template_name)
     try:
         return template.render(**context)
     except UndefinedError as exc:

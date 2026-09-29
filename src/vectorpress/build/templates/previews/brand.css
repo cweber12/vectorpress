@@ -1,27 +1,27 @@
 @font-face {
-  font-family: "Inter";
-  src: url("{{ shipped_fonts.inter_regular }}") format("woff2");
+  font-family: "{{ brand.heading_font.family }}";
+  src: url("{{ brand.heading_font.regular_url }}") format("woff2");
   font-weight: 400;
   font-style: normal;
 }
 
 @font-face {
-  font-family: "Inter";
-  src: url("{{ shipped_fonts.inter_bold }}") format("woff2");
+  font-family: "{{ brand.heading_font.family }}";
+  src: url("{{ brand.heading_font.bold_url }}") format("woff2");
   font-weight: 700;
   font-style: normal;
 }
 
 @font-face {
-  font-family: "Space Grotesk";
-  src: url("{{ shipped_fonts.space_grotesk_regular }}") format("woff2");
+  font-family: "{{ brand.body_font.family }}";
+  src: url("{{ brand.body_font.regular_url }}") format("woff2");
   font-weight: 400;
   font-style: normal;
 }
 
 @font-face {
-  font-family: "Space Grotesk";
-  src: url("{{ shipped_fonts.space_grotesk_bold }}") format("woff2");
+  font-family: "{{ brand.body_font.family }}";
+  src: url("{{ brand.body_font.bold_url }}") format("woff2");
   font-weight: 700;
   font-style: normal;
 }
@@ -29,8 +29,8 @@
 :root {
   --canvas-width: {{ canvas.width }}px;
   --canvas-height: {{ canvas.height }}px;
-  --heading-font: "{{ brand.heading_font }}", "Inter", sans-serif;
-  --body-font: "{{ brand.body_font }}", "Inter", sans-serif;
+  --heading-font: "{{ brand.heading_font.family }}";
+  --body-font: "{{ brand.body_font.family }}";
   --background-color: {{ brand.colors.background_color }};
   --accent-color: {{ brand.colors.accent_color }};
   --text-color: {{ brand.colors.text_color }};
