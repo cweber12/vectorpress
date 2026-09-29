@@ -83,6 +83,7 @@ byte-identical ZIP.
 """
 
 import json
+import re
 import shutil
 import zipfile
 from dataclasses import dataclass
@@ -313,6 +314,24 @@ def _byte_identical_derivative_warnings(
             )
     warnings.sort(key=lambda warning: (warning.asset_id, warning.derivative_types[0].value))
     return warnings
+
+
+#: A preview file's own name (``build.previews.render_previews``):
+#: ``previews/<nn>-<name>[-<page>]-<canvas>.png``. ``<page>`` is only ever
+#: present for a paginated type (``contents``).
+_PREVIEW_FILENAME_RE = re.compile(
+    r"^previews/(?P<number>\d+)-[a-z]+(?:-(?P<page>\d+))?-(?P<canvas>[a-z]+)\.png$"
+)
+
+
+def _preview_upload_order_key(rel_path: str) -> tuple[int, int, str]:
+    """Sort key for the manifest's own preview list: type number, then page
+    number, then canvas name (§16) -- upload order, never a lexicographic
+    sort of the whole file name, which would put ``05-contents-10`` before
+    ``05-contents-2`` once a product's ``contents`` runs past nine pages."""
+    match = _PREVIEW_FILENAME_RE.match(rel_path)
+    assert match is not None  # every entry comes from render_previews's own naming
+    return (int(match["number"]), int(match["page"] or 0), match["canvas"])
 
 
 class BuildOutcome(StrEnum):
@@ -757,7 +776,7 @@ def build_product(
         resolved.eligible_members, included_types_by_asset, assets_by_id, config, reference_size_in
     )
     byte_identical_derivatives = _byte_identical_derivative_warnings(content_by_member)
-    previews = sorted(rel_path for rel_path, _ in preview_files)
+    previews = sorted((rel_path for rel_path, _ in preview_files), key=_preview_upload_order_key)
     manifest = Manifest(
         product_slug=product.slug,
         reference_size_in=reference_size_in,

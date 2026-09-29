@@ -18,10 +18,14 @@ import pytest
 from syrupy.assertion import SnapshotAssertion
 
 from vectorpress.build.previews import (
+    CONTENTS_PAGE_SIZE,
     PREVIEW_TYPES,
     Canvas,
+    PreviewPage,
     PreviewRenderError,
     PreviewType,
+    _pages,  # pyright: ignore[reportPrivateUsage]
+    _renders,  # pyright: ignore[reportPrivateUsage]
     preview_members,
     render_preview_html,
 )
@@ -39,6 +43,8 @@ _PREVIEW_TYPES_BY_NAME: dict[str, PreviewType] = {t.name: t for t in PREVIEW_TYP
 _MAIN = _PREVIEW_TYPES_BY_NAME["main"]
 _INCLUDED = _PREVIEW_TYPES_BY_NAME["included"]
 _FORMATS = _PREVIEW_TYPES_BY_NAME["formats"]
+_VARIANTS = _PREVIEW_TYPES_BY_NAME["variants"]
+_CONTENTS = _PREVIEW_TYPES_BY_NAME["contents"]
 
 
 def _asset(asset_id: str, display_name: str) -> Asset:
@@ -194,6 +200,7 @@ def _render(
     assets_by_id: dict[AssetId, Asset] | None = None,
     content_by_member: dict[AssetId, dict[DerivativeType, bytes]] | None = None,
     files_by_folder: dict[str, list[str]] | None = None,
+    page: PreviewPage | None = None,
 ) -> str:
     (tmp_path / "mark.png").write_bytes(b"MARKBYTES")
     return render_preview_html(
@@ -208,6 +215,7 @@ def _render(
         if content_by_member is not None
         else {"a": {DerivativeType.TRANSPARENT_PNG: b"PNGBYTES"}},
         files_by_folder if files_by_folder is not None else {"PNG": ["ochre-sea-star-color.png"]},
+        page,
     )
 
 
@@ -445,6 +453,181 @@ def test_formats_html_is_locked_by_snapshot(tmp_path: Path, snapshot: SnapshotAs
         )
         html = _render(
             tmp_path, preview_type=_FORMATS, product=product, files_by_folder=files_by_folder
+        )
+
+    assert _DATA_URI_RE.sub("data:<omitted>", html) == snapshot
+
+
+# --- `_renders`: §16's own condition per conditional preview type ----------
+
+
+def test_variants_renders_only_with_two_or_more_derivative_types() -> None:
+    one_type = _product(derivative_types=[DerivativeType.CUT_SVG], formats=[Format.SVG])
+    two_types = _product(
+        derivative_types=[DerivativeType.CUT_SVG, DerivativeType.TRANSPARENT_PNG],
+        formats=[Format.SVG, Format.PNG],
+    )
+
+    assert _renders(_VARIANTS, one_type, member_count=5) is False
+    assert _renders(_VARIANTS, two_types, member_count=5) is True
+
+
+def test_contents_renders_only_past_twelve_members() -> None:
+    product = _product()
+
+    assert _renders(_CONTENTS, product, member_count=12) is False
+    assert _renders(_CONTENTS, product, member_count=13) is True
+
+
+def test_main_included_and_formats_always_render() -> None:
+    product = _product(derivative_types=[DerivativeType.CUT_SVG], formats=[Format.SVG])
+
+    for preview_type in (_MAIN, _INCLUDED, _FORMATS):
+        assert _renders(preview_type, product, member_count=0) is True
+
+
+# --- `_pages`: contents paginates at CONTENTS_PAGE_SIZE per page -----------
+
+
+def test_pages_is_a_single_none_page_for_every_type_but_contents() -> None:
+    assert _pages(_MAIN, member_count=100) == [None]
+    assert _pages(_VARIANTS, member_count=100) == [None]
+
+
+def test_pages_splits_contents_at_the_page_size_with_the_remainder_on_its_own_page() -> None:
+    member_count = CONTENTS_PAGE_SIZE + 1  # 49: one full page, one remainder page
+
+    pages = _pages(_CONTENTS, member_count)
+
+    assert pages == [PreviewPage(number=1, count=2), PreviewPage(number=2, count=2)]
+
+
+def test_pages_is_one_page_at_exactly_the_page_size() -> None:
+    assert _pages(_CONTENTS, CONTENTS_PAGE_SIZE) == [PreviewPage(number=1, count=1)]
+
+
+# --- `variants` (§16 nn=04): the first featured member, once per type ------
+
+
+def test_variants_html_shows_one_card_per_derivative_type_labeled_with_its_label(
+    tmp_path: Path,
+) -> None:
+    product = _product(
+        derivative_types=[DerivativeType.CUT_SVG, DerivativeType.TRANSPARENT_PNG],
+        formats=[Format.SVG, Format.PNG],
+    )
+    content_by_member = {
+        "a": {
+            DerivativeType.CUT_SVG: b"<svg>cut</svg>",
+            DerivativeType.TRANSPARENT_PNG: b"PNGBYTES",
+        }
+    }
+
+    html = _render(
+        tmp_path, preview_type=_VARIANTS, product=product, content_by_member=content_by_member
+    )
+
+    assert "Cut File SVG" in html
+    assert "Transparent PNG" in html
+
+
+def test_variants_html_never_labels_with_the_members_own_display_name(tmp_path: Path) -> None:
+    """§16: labeled with the type's own label -- never the member's display
+    name, unlike every other type's own card labels."""
+    product = _product(
+        derivative_types=[DerivativeType.CUT_SVG, DerivativeType.TRANSPARENT_PNG],
+        formats=[Format.SVG, Format.PNG],
+    )
+    content_by_member = {
+        "a": {
+            DerivativeType.CUT_SVG: b"<svg>cut</svg>",
+            DerivativeType.TRANSPARENT_PNG: b"PNGBYTES",
+        }
+    }
+
+    html = _render(
+        tmp_path, preview_type=_VARIANTS, product=product, content_by_member=content_by_member
+    )
+
+    assert "Ochre Sea Star" not in html
+
+
+def test_variants_html_is_locked_by_snapshot(tmp_path: Path, snapshot: SnapshotAssertion) -> None:
+    product = _product(
+        derivative_types=[DerivativeType.CUT_SVG, DerivativeType.TRANSPARENT_PNG],
+        formats=[Format.SVG, Format.PNG],
+    )
+    content_by_member = {
+        "a": {
+            DerivativeType.CUT_SVG: b"<svg>cut</svg>",
+            DerivativeType.TRANSPARENT_PNG: b"PNGBYTES",
+        }
+    }
+    with pytest.MonkeyPatch.context() as monkeypatch:
+        monkeypatch.setattr(
+            "vectorpress.build.previews._shipped_font_data_uris",
+            lambda: {
+                "inter_regular": "data:font/woff2;base64,AAAA",
+                "inter_bold": "data:font/woff2;base64,AAAA",
+                "space_grotesk_regular": "data:font/woff2;base64,AAAA",
+                "space_grotesk_bold": "data:font/woff2;base64,AAAA",
+            },
+        )
+        html = _render(
+            tmp_path, preview_type=_VARIANTS, product=product, content_by_member=content_by_member
+        )
+
+    assert _DATA_URI_RE.sub("data:<omitted>", html) == snapshot
+
+
+# --- `contents` (§16 nn=05): every member, labeled, 48 per page ------------
+
+
+def test_contents_html_shows_only_this_pages_members(tmp_path: Path) -> None:
+    member_count = CONTENTS_PAGE_SIZE + 1  # 49: page 1 gets 48, page 2 gets the remaining one
+    assets_by_id = {str(i): _asset(str(i), f"Member {i}") for i in range(member_count)}
+    members = [_member(str(i)) for i in range(member_count)]
+
+    page_one_html = _render(
+        tmp_path,
+        preview_type=_CONTENTS,
+        members=members,
+        assets_by_id=assets_by_id,
+        page=PreviewPage(number=1, count=2),
+    )
+    page_two_html = _render(
+        tmp_path,
+        preview_type=_CONTENTS,
+        members=members,
+        assets_by_id=assets_by_id,
+        page=PreviewPage(number=2, count=2),
+    )
+
+    assert sum(f"Member {i}" in page_one_html for i in range(member_count)) == CONTENTS_PAGE_SIZE
+    assert sum(f"Member {i}" in page_two_html for i in range(member_count)) == 1
+    assert "Page 1 of 2" in page_one_html
+    assert "Page 2 of 2" in page_two_html
+
+
+def test_contents_html_is_locked_by_snapshot(tmp_path: Path, snapshot: SnapshotAssertion) -> None:
+    assets_by_id = {str(i): _asset(str(i), f"Member {i}") for i in range(3)}
+    members = [_member(str(i)) for i in range(3)]
+    with pytest.MonkeyPatch.context() as monkeypatch:
+        monkeypatch.setattr(
+            "vectorpress.build.previews._shipped_font_data_uris",
+            lambda: {
+                "inter_regular": "data:font/woff2;base64,AAAA",
+                "inter_bold": "data:font/woff2;base64,AAAA",
+                "space_grotesk_regular": "data:font/woff2;base64,AAAA",
+                "space_grotesk_bold": "data:font/woff2;base64,AAAA",
+            },
+        )
+        html = _render(
+            tmp_path,
+            preview_type=_CONTENTS,
+            members=members,
+            assets_by_id=assets_by_id,
+            page=PreviewPage(number=1, count=1),
         )
 
     assert _DATA_URI_RE.sub("data:<omitted>", html) == snapshot

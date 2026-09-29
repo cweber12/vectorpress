@@ -170,10 +170,12 @@ class Manifest:
 
     ``previews`` is every preview file this build rendered (§16, ADR 0014),
     each path relative to the build directory (e.g.
-    ``"previews/01-main-square.png"``), sorted for a deterministic manifest
-    (§36) -- never an image hash: previews are not held to byte-identical
-    output (ADR 0014), so needs-rebuild compares a separate presentation
-    hash, not these file names, once that slice lands.
+    ``"previews/01-main-square.png"``), in upload order (type number, then
+    page number, then canvas -- never a lexicographic sort of the whole
+    name, which would put a ``contents`` page 10 before page 2) -- never an
+    image hash: previews are not held to byte-identical output (ADR 0014),
+    so needs-rebuild compares a separate presentation hash, not these file
+    names, once that slice lands.
     """
 
     product_slug: ProductSlug

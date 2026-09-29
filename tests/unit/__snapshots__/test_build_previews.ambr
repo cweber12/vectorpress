@@ -1,4 +1,214 @@
 # serializer version: 1
+# name: test_contents_html_is_locked_by_snapshot
+  '''
+  <!doctype html>
+  <html lang="en">
+  <head>
+  <meta charset="utf-8">
+  <style>
+  @font-face {
+    font-family: "Inter";
+    src: url("data:font/woff2;base64,AAAA") format("woff2");
+    font-weight: 400;
+    font-style: normal;
+  }
+  
+  @font-face {
+    font-family: "Inter";
+    src: url("data:font/woff2;base64,AAAA") format("woff2");
+    font-weight: 700;
+    font-style: normal;
+  }
+  
+  @font-face {
+    font-family: "Inter";
+    src: url("data:font/woff2;base64,AAAA") format("woff2");
+    font-weight: 400;
+    font-style: normal;
+  }
+  
+  @font-face {
+    font-family: "Inter";
+    src: url("data:font/woff2;base64,AAAA") format("woff2");
+    font-weight: 700;
+    font-style: normal;
+  }
+  
+  :root {
+    --canvas-width: 2000px;
+    --canvas-height: 2000px;
+    --heading-font: "Inter";
+    --body-font: "Inter";
+    --background-color: #ffffff;
+    --accent-color: #111111;
+    --text-color: #222222;
+  }
+  
+  * {
+    box-sizing: border-box;
+  }
+  
+  html, body {
+    margin: 0;
+    padding: 0;
+    width: var(--canvas-width);
+    height: var(--canvas-height);
+    overflow: hidden;
+    background: var(--background-color);
+    color: var(--text-color);
+    font-family: var(--body-font);
+  }
+  
+  .preview {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    width: 100%;
+    height: 100%;
+    padding: 6% 8%;
+  }
+  
+  .brand-header {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    align-self: flex-start;
+  }
+  
+  .brand-mark {
+    height: 3rem;
+    width: auto;
+  }
+  
+  .brand-name {
+    font-family: var(--heading-font);
+    font-weight: 700;
+    font-size: 1.5rem;
+  }
+  
+  .product-title {
+    font-family: var(--heading-font);
+    font-weight: 700;
+    text-align: center;
+    margin: 1.5rem 0 0.5rem;
+  }
+  
+  .product-meta {
+    margin: 0 0 1rem;
+    opacity: 0.8;
+  }
+  
+  .format-badges {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 0.5rem;
+    list-style: none;
+    margin: 0 0 1.5rem;
+    padding: 0;
+  }
+  
+  .format-badge {
+    border: 2px solid var(--accent-color);
+    border-radius: 999px;
+    padding: 0.25rem 1rem;
+    font-weight: 600;
+  }
+  
+  .featured-members {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 1.5rem;
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    width: 100%;
+  }
+  
+  .featured-member {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.5rem;
+    text-align: center;
+  }
+  
+  .featured-member img {
+    width: 12rem;
+    height: 12rem;
+    object-fit: contain;
+  }
+  
+  .format-cards {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 1.5rem;
+    list-style: none;
+    margin: 1rem 0 0;
+    padding: 0;
+    width: 100%;
+  }
+  
+  .format-card {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    border: 2px solid var(--accent-color);
+    border-radius: 1rem;
+    padding: 1.5rem;
+  }
+  
+  .format-card-label {
+    font-family: var(--heading-font);
+    font-weight: 700;
+    font-size: 1.5rem;
+  }
+  
+  .format-card-count {
+    font-weight: 600;
+    opacity: 0.8;
+  }
+  
+  .format-card-use {
+    margin: 0;
+  }
+  
+  </style>
+  </head>
+  <body>
+  
+  <div class="preview preview-contents">
+    <header class="brand-header">
+      <img class="brand-mark" src="data:<omitted>" alt="Test Brand">
+      <span class="brand-name">Test Brand</span>
+    </header>
+    <h1 class="product-title">Test Product</h1>
+    <p class="product-meta">Page 1 of 1</p>
+    <ul class="featured-members">
+      
+      <li class="featured-member">
+        
+        <span>Member 0</span>
+      </li>
+      
+      <li class="featured-member">
+        
+        <span>Member 1</span>
+      </li>
+      
+      <li class="featured-member">
+        
+        <span>Member 2</span>
+      </li>
+      
+    </ul>
+  </div>
+  
+  </body>
+  </html>
+  
+  '''
+# ---
 # name: test_formats_html_is_locked_by_snapshot
   '''
   <!doctype html>
@@ -612,6 +822,216 @@
         <img src="data:<omitted>" alt="Ochre Sea Star">
         
         <span>Ochre Sea Star</span>
+      </li>
+      
+    </ul>
+  </div>
+  
+  </body>
+  </html>
+  
+  '''
+# ---
+# name: test_variants_html_is_locked_by_snapshot
+  '''
+  <!doctype html>
+  <html lang="en">
+  <head>
+  <meta charset="utf-8">
+  <style>
+  @font-face {
+    font-family: "Inter";
+    src: url("data:font/woff2;base64,AAAA") format("woff2");
+    font-weight: 400;
+    font-style: normal;
+  }
+  
+  @font-face {
+    font-family: "Inter";
+    src: url("data:font/woff2;base64,AAAA") format("woff2");
+    font-weight: 700;
+    font-style: normal;
+  }
+  
+  @font-face {
+    font-family: "Inter";
+    src: url("data:font/woff2;base64,AAAA") format("woff2");
+    font-weight: 400;
+    font-style: normal;
+  }
+  
+  @font-face {
+    font-family: "Inter";
+    src: url("data:font/woff2;base64,AAAA") format("woff2");
+    font-weight: 700;
+    font-style: normal;
+  }
+  
+  :root {
+    --canvas-width: 2000px;
+    --canvas-height: 2000px;
+    --heading-font: "Inter";
+    --body-font: "Inter";
+    --background-color: #ffffff;
+    --accent-color: #111111;
+    --text-color: #222222;
+  }
+  
+  * {
+    box-sizing: border-box;
+  }
+  
+  html, body {
+    margin: 0;
+    padding: 0;
+    width: var(--canvas-width);
+    height: var(--canvas-height);
+    overflow: hidden;
+    background: var(--background-color);
+    color: var(--text-color);
+    font-family: var(--body-font);
+  }
+  
+  .preview {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    width: 100%;
+    height: 100%;
+    padding: 6% 8%;
+  }
+  
+  .brand-header {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    align-self: flex-start;
+  }
+  
+  .brand-mark {
+    height: 3rem;
+    width: auto;
+  }
+  
+  .brand-name {
+    font-family: var(--heading-font);
+    font-weight: 700;
+    font-size: 1.5rem;
+  }
+  
+  .product-title {
+    font-family: var(--heading-font);
+    font-weight: 700;
+    text-align: center;
+    margin: 1.5rem 0 0.5rem;
+  }
+  
+  .product-meta {
+    margin: 0 0 1rem;
+    opacity: 0.8;
+  }
+  
+  .format-badges {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 0.5rem;
+    list-style: none;
+    margin: 0 0 1.5rem;
+    padding: 0;
+  }
+  
+  .format-badge {
+    border: 2px solid var(--accent-color);
+    border-radius: 999px;
+    padding: 0.25rem 1rem;
+    font-weight: 600;
+  }
+  
+  .featured-members {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 1.5rem;
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    width: 100%;
+  }
+  
+  .featured-member {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.5rem;
+    text-align: center;
+  }
+  
+  .featured-member img {
+    width: 12rem;
+    height: 12rem;
+    object-fit: contain;
+  }
+  
+  .format-cards {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 1.5rem;
+    list-style: none;
+    margin: 1rem 0 0;
+    padding: 0;
+    width: 100%;
+  }
+  
+  .format-card {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    border: 2px solid var(--accent-color);
+    border-radius: 1rem;
+    padding: 1.5rem;
+  }
+  
+  .format-card-label {
+    font-family: var(--heading-font);
+    font-weight: 700;
+    font-size: 1.5rem;
+  }
+  
+  .format-card-count {
+    font-weight: 600;
+    opacity: 0.8;
+  }
+  
+  .format-card-use {
+    margin: 0;
+  }
+  
+  </style>
+  </head>
+  <body>
+  
+  <div class="preview preview-variants">
+    <header class="brand-header">
+      <img class="brand-mark" src="data:<omitted>" alt="Test Brand">
+      <span class="brand-name">Test Brand</span>
+    </header>
+    <h1 class="product-title">Test Product</h1>
+    <p class="product-meta">Available as 2 file styles</p>
+    
+    <ul class="featured-members">
+      
+      <li class="featured-member">
+        
+        <img src="data:<omitted>" alt="Cut File SVG">
+        
+        <span>Cut File SVG</span>
+      </li>
+      
+      <li class="featured-member">
+        
+        <img src="data:<omitted>" alt="Transparent PNG">
+        
+        <span>Transparent PNG</span>
       </li>
       
     </ul>
