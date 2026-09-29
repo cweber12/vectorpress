@@ -12,6 +12,9 @@ ${{ "%.2f"|format(price) }}
 
 CATEGORY
 {{ category }}
+{%- if category_note %}
+NOTE: listing category is {{ category_note }}
+{%- endif %}
 
 IMAGES
 {{ images|join("\n") }}
