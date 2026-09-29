@@ -1,4 +1,211 @@
 # serializer version: 1
+# name: test_ai_disclosed_marketplace_bundles_and_listing_json_are_locked_by_snapshot[ai_disclosed_export_listing]
+  dict({
+    'ai_disclosure': dict({
+      'count': 1,
+      'text': '1 of 3 designs in this pack were created with generative AI image tools and converted to vector files.',
+      'total': 3,
+    }),
+    'asset_names': list([
+      'Giant Green Anemone',
+      'Ochre Sea Star',
+      'Owl Limpet',
+    ]),
+    'collection_name': 'Owl Limpet Ai Disclosure Product',
+    'contents_summary': dict({
+      'file_names': list([
+        'SVG/giant-green-anemone-cut.svg',
+        'SVG/ochre-sea-star-cut.svg',
+        'SVG/owl-limpet-cut.svg',
+      ]),
+      'formats': list([
+        'svg',
+      ]),
+      'member_count': 3,
+      'reference_size_in': 3.0,
+    }),
+    'formats': list([
+      'svg',
+    ]),
+    'listing': dict({
+      'category': 'Nature & Wildlife',
+      'description': 'Test fixture with one ai_generated member of three.',
+      'intended_uses': list([
+      ]),
+      'license_type': 'Test License',
+      'marketplace_notes': '',
+      'region': None,
+      'search_terms': list([
+      ]),
+      'short_title': '',
+      'species_names': list([
+      ]),
+      'tags': list([
+      ]),
+      'title': 'Test AI Disclosure Product',
+    }),
+    'member_count': 3,
+    'previews': dict({
+      'landscape': list([
+        'previews/01-main-landscape.png',
+        'previews/02-included-landscape.png',
+        'previews/03-formats-landscape.png',
+      ]),
+      'square': list([
+        'previews/01-main-square.png',
+        'previews/02-included-square.png',
+        'previews/03-formats-square.png',
+      ]),
+    }),
+    'price': 1.0,
+    'zip_name': 'Owl-Limpet-Ai-Disclosure-Product.zip',
+    'zip_size_bytes': '<int>',
+  })
+# ---
+# name: test_ai_disclosed_marketplace_bundles_and_listing_json_are_locked_by_snapshot[ai_disclosed_marketplace_bundles]
+  dict({
+    'creative-fabrica.txt': '''
+      TITLE
+      Test AI Disclosure Product
+      
+      DESCRIPTION
+      Test fixture with one ai_generated member of three.
+      
+      What's included: 3 designs, SVG files, checked to cut cleanly at 3in.
+      
+      Files:
+      - SVG/giant-green-anemone-cut.svg
+      - SVG/ochre-sea-star-cut.svg
+      - SVG/owl-limpet-cut.svg
+      
+      1 of 3 designs in this pack were created with generative AI image tools and converted to vector files.
+      
+      TAGS
+      
+      
+      PRICE
+      $1.00
+      
+      CATEGORY
+      AI-Generated
+      NOTE: listing category is Nature & Wildlife
+      
+      IMAGES
+      01-main-landscape.png
+      02-included-landscape.png
+      03-formats-landscape.png
+      
+      FILES
+      Owl-Limpet-Ai-Disclosure-Product.zip
+  
+    ''',
+    'design-bundles.txt': '''
+      TITLE
+      Test AI Disclosure Product
+      
+      DESCRIPTION
+      Test fixture with one ai_generated member of three.
+      
+      What's included: 3 designs, SVG files, checked to cut cleanly at 3in.
+      
+      Files:
+      - SVG/giant-green-anemone-cut.svg
+      - SVG/ochre-sea-star-cut.svg
+      - SVG/owl-limpet-cut.svg
+      
+      1 of 3 designs in this pack were created with generative AI image tools and converted to vector files.
+      
+      TAGS
+      
+      
+      PRICE
+      $1.00
+      
+      CATEGORY
+      Nature & Wildlife
+      
+      IMAGES
+      01-main-landscape.png
+      02-included-landscape.png
+      03-formats-landscape.png
+      
+      FILES
+      Owl-Limpet-Ai-Disclosure-Product.zip
+  
+    ''',
+    'direct-store.txt': '''
+      TITLE
+      Test AI Disclosure Product
+      
+      DESCRIPTION
+      Test fixture with one ai_generated member of three.
+      
+      What's included: 3 designs, SVG files, checked to cut cleanly at 3in.
+      
+      Files:
+      - SVG/giant-green-anemone-cut.svg
+      - SVG/ochre-sea-star-cut.svg
+      - SVG/owl-limpet-cut.svg
+      
+      1 of 3 designs in this pack were created with generative AI image tools and converted to vector files.
+      
+      TAGS
+      
+      
+      PRICE
+      $1.00
+      
+      CATEGORY
+      Nature & Wildlife
+      
+      IMAGES
+      01-main-square.png
+      02-included-square.png
+      03-formats-square.png
+      
+      FILES
+      Owl-Limpet-Ai-Disclosure-Product.zip
+  
+    ''',
+    'etsy.txt': '''
+      TITLE
+      Test AI Disclosure Product
+      
+      DESCRIPTION
+      Test fixture with one ai_generated member of three.
+      
+      What's included: 3 designs, SVG files, checked to cut cleanly at 3in.
+      
+      Files:
+      - SVG/giant-green-anemone-cut.svg
+      - SVG/ochre-sea-star-cut.svg
+      - SVG/owl-limpet-cut.svg
+      
+      1 of 3 designs in this pack were created with generative AI image tools and converted to vector files.
+      
+      TAGS
+      
+      
+      PRICE
+      $1.00
+      
+      CATEGORY
+      Nature & Wildlife
+      
+      WHO MADE
+      I did (Designed by a seller)
+      
+      IMAGES
+      01-main-square.png
+      02-included-square.png
+      03-formats-square.png
+      
+      FILES
+      Owl-Limpet-Ai-Disclosure-Product.zip
+  
+    ''',
+  })
+# ---
 # name: test_allow_unapproved_admitted_unapproved_members_are_locked_by_snapshot[admitted_unapproved_members]
   list([
     dict({
@@ -18617,7 +18824,7 @@
   
   Hand-illustrated, scientifically accurate cut files.
   
-  What's included: 3 members, PNG files, checked to cut cleanly at 3in.
+  What's included: 3 designs, PNG files, checked to cut cleanly at 3in.
   
   Files:
   - PNG/giant-green-anemone-color.png
@@ -18834,7 +19041,7 @@
       
       Hand-illustrated, scientifically accurate cut files.
       
-      What's included: 3 members, PNG files, checked to cut cleanly at 3in.
+      What's included: 3 designs, PNG files, checked to cut cleanly at 3in.
       
       Files:
       - PNG/giant-green-anemone-color.png
@@ -18869,7 +19076,7 @@
       
       Hand-illustrated, scientifically accurate cut files.
       
-      What's included: 3 members, PNG files, checked to cut cleanly at 3in.
+      What's included: 3 designs, PNG files, checked to cut cleanly at 3in.
       
       Files:
       - PNG/giant-green-anemone-color.png
@@ -18904,7 +19111,7 @@
       
       Hand-illustrated, scientifically accurate cut files.
       
-      What's included: 3 members, PNG files, checked to cut cleanly at 3in.
+      What's included: 3 designs, PNG files, checked to cut cleanly at 3in.
       
       Files:
       - PNG/giant-green-anemone-color.png
@@ -18939,7 +19146,7 @@
       
       Hand-illustrated, scientifically accurate cut files.
       
-      What's included: 3 members, PNG files, checked to cut cleanly at 3in.
+      What's included: 3 designs, PNG files, checked to cut cleanly at 3in.
       
       Files:
       - PNG/giant-green-anemone-color.png

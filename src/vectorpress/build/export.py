@@ -7,9 +7,9 @@ never in the package or the ZIP"). It carries the product's hand-authored
 ``[listing]`` fields, the §18 derived values a build computes from its own
 manifest (member count, formats, asset names, collection name), the
 **contents summary** (:func:`contents_summary`), ``product.price``, the
-ordered preview file names per canvas, and the ZIP's own name and size.
-There is no CSV (ADR 0017); no AI disclosure field either -- a later
-exporter slice adds one, never a placeholder here.
+ordered preview file names per canvas, the ZIP's own name and size, and the
+build's own AI disclosure (:func:`build_ai_disclosure`, ADR 0018) -- absent
+when no included member is ``ai_generated``. There is no CSV (ADR 0017).
 
 :func:`contents_summary` is its own function because it is not only
 ``listing.json``'s: ADR 0016's "assemble the customer-facing description as
@@ -34,8 +34,16 @@ of cited marketplace limits and returns every violation as an
 never enforced: no field is truncated and no build refuses over one.
 :func:`~vectorpress.build.product_build.build_product` records both lists
 in the manifest unchanged; :func:`render_marketplace_bundles` turns them
-into each bundle's own inline flags. No AI disclosure here -- that is later
-exporter work (ADR 0018); this module never writes a placeholder for it.
+into each bundle's own inline flags.
+
+**AI disclosure (§26, ADR 0018).** :func:`build_ai_disclosure` counts
+``manifest.asset_rights_statuses`` for ``ai_generated`` entries and, when
+any exist, renders the counted sentence from ``templates/export/
+ai_disclosure.j2``. Every marketplace bundle's DESCRIPTION ends with it
+(:func:`render_marketplace_bundles`); Etsy's WHO MADE and Creative
+Fabrica's CATEGORY change with it; ``listing.json`` carries it as
+``ai_disclosure`` (absent with no AI member). Licensing notes -- the AI
+tool and its terms -- are never read here and never exported.
 """
 
 from dataclasses import dataclass
@@ -60,7 +68,7 @@ from vectorpress.build.template_lookup import (
     template_name_from_traceback,
     used_overrides,
 )
-from vectorpress.domain.asset import Asset, AssetId
+from vectorpress.domain.asset import Asset, AssetId, RightsStatus
 from vectorpress.domain.collection import Collection
 from vectorpress.domain.listing import Listing
 from vectorpress.domain.manifest import Manifest
@@ -76,6 +84,20 @@ LISTING_EXPORT_FILENAME = "listing.json"
 #: catalog ``templates/export/`` first, then the shipped folder of the same
 #: name.
 EXPORT_KIND = "export"
+
+
+@dataclass(frozen=True)
+class AiDisclosure:
+    """The counted AI-disclosure sentence (§26, ADR 0018): how many of a
+    build's included members carry rights status ``ai_generated``, out of
+    how many the build includes, and the sentence itself -- rendered from
+    ``templates/export/ai_disclosure.j2`` (shipped, overridable). Never
+    names the AI tool and never carries a licensing note: those live only
+    in the catalog (ADR 0018's "licensing notes are never exported")."""
+
+    count: int
+    total: int
+    text: str
 
 
 @dataclass(frozen=True)
@@ -97,8 +119,10 @@ class ListingExport:
     """``export/listing.json``'s own shape: the product's hand-authored
     ``listing``, the §18 derived values (``member_count``, ``formats``,
     ``asset_names``, ``collection_name``), the :class:`ContentsSummary`,
-    ``price``, the ordered preview file names keyed by canvas name, and the
-    ZIP's own ``zip_name``/``zip_size_bytes``."""
+    ``price``, the ordered preview file names keyed by canvas name, the
+    ZIP's own ``zip_name``/``zip_size_bytes``, and the build's own
+    :class:`AiDisclosure` -- ``None`` when no included member is
+    ``ai_generated`` (ADR 0018)."""
 
     listing: Listing
     member_count: int
@@ -110,6 +134,7 @@ class ListingExport:
     previews: dict[str, list[str]]
     zip_name: str
     zip_size_bytes: int
+    ai_disclosure: AiDisclosure | None = None
 
 
 def contents_summary(manifest: Manifest, product: Product) -> ContentsSummary:
@@ -149,6 +174,7 @@ def build_listing_export(
     assets_by_id: dict[AssetId, Asset],
     zip_name: str,
     zip_size_bytes: int,
+    ai_disclosure: AiDisclosure | None = None,
 ) -> ListingExport:
     """Assemble ``export/listing.json``'s own :class:`ListingExport` from
     ``product``'s ``[listing]``, this build's ``manifest``, and the same
@@ -156,8 +182,10 @@ def build_listing_export(
     product_build.build_product` already resolved -- no second resolution
     path. ``known_collections`` is only used to look up the collection
     ``product`` references, the same way :func:`~vectorpress.build.
-    listing_draft.draft_listing_for_product` already does.
-    """
+    listing_draft.draft_listing_for_product` already does. ``ai_disclosure``
+    is this same build's own :func:`build_ai_disclosure` result, threaded in
+    rather than recomputed -- ``listing.json`` and every marketplace bundle
+    carry the identical disclosure (ADR 0018)."""
     assert product.listing is not None  # build_product's own listing gate already refused
     collection = collection_for_product(product, known_collections)
     asset_names = sorted(assets_by_id[member.asset_id].display_name for member in eligible_members)
@@ -168,6 +196,7 @@ def build_listing_export(
         asset_names=asset_names,
         collection_name=collection_name(product, collection),
         contents_summary=contents_summary(manifest, product),
+        ai_disclosure=ai_disclosure,
         price=product.price,
         previews=_preview_names_by_canvas(manifest.previews),
         zip_name=zip_name,
@@ -185,11 +214,15 @@ def render_contents_summary_text(summary: ContentsSummary) -> str:
     checked at. Every marketplace bundle's DESCRIPTION appends this
     verbatim after the listing description -- computed once, here, so no
     bundle ever reassembles the same facts into slightly different wording.
+
+    Says "design(s)", not "member(s)": buyers read this text, and "member"
+    is internal vocabulary (CONTEXT.md), matching the AI disclosure's own
+    "N of M designs" (ADR 0018).
     """
-    member_word = "member" if summary.member_count == 1 else "members"
+    design_word = "design" if summary.member_count == 1 else "designs"
     formats = ", ".join(fmt.upper() for fmt in summary.formats)
     lines = [
-        f"What's included: {summary.member_count} {member_word}, {formats} files, "
+        f"What's included: {summary.member_count} {design_word}, {formats} files, "
         f"checked to cut cleanly at {format_number(summary.reference_size_in)}in.",
         "",
         "Files:",
@@ -198,11 +231,67 @@ def render_contents_summary_text(summary: ContentsSummary) -> str:
     return "\n".join(lines)
 
 
-#: Etsy's own WHO MADE answer for a solo-designed digital pack, with no
-#: included member's rights status yet weighed in (a later exporter slice
-#: adds the AI-generated wording, ADR 0018) -- the value only
-#: ``etsy.txt.j2`` reads.
+#: Etsy's own WHO MADE answer for a solo-designed digital pack -- the value
+#: only ``etsy.txt.j2`` reads.
 _ETSY_WHO_MADE = "I did"
+
+#: Etsy's own WHO MADE answer once any included member is ``ai_generated``
+#: (ADR 0018, Etsy's own "seller-prompted AI art is 'Designed by a
+#: seller'"): still true -- a human chose and converted the design -- and
+#: never names the AI tool.
+_ETSY_WHO_MADE_AI_DISCLOSED = "I did (Designed by a seller)"
+
+#: Creative Fabrica's own category for an AI-generated design (ADR 0018,
+#: "Creative Fabrica requires AI designs to go in its AI category"): its
+#: help center's own top-level browse category, confirmed 2026-09-29
+#: (creativefabrica.com/subscriptions/graphics/ai-generated/). The
+#: listing's own ``category`` is kept as CATEGORY's own note, never lost.
+_CREATIVE_FABRICA_AI_CATEGORY = "AI-Generated"
+
+#: ``templates/export/ai_disclosure.j2``'s own file name (ADR 0015,
+#: overridable), rendered through the same "export" kind lookup as every
+#: marketplace bundle -- a catalog override is named in the build report
+#: the same way (:func:`build_ai_disclosure`).
+AI_DISCLOSURE_TEMPLATE_NAME = "ai_disclosure.j2"
+
+
+@dataclass(frozen=True)
+class AiDisclosureResult:
+    """:func:`build_ai_disclosure`'s own result: the build's
+    :class:`AiDisclosure` (``None`` when no included member is
+    ``ai_generated``), and the catalog ``templates/export/`` override this
+    render used, if any (ADR 0015's build report list)."""
+
+    disclosure: AiDisclosure | None
+    template_overrides: list[str]
+
+
+def build_ai_disclosure(root: Path, manifest: Manifest) -> AiDisclosureResult:
+    """The build's own :class:`AiDisclosure`, or ``None`` (ADR 0018).
+
+    Counts ``manifest.asset_rights_statuses`` -- the *included* members'
+    own rights statuses, read from the manifest and never recomputed from
+    catalog metadata, so a hand-edited override never clears the count and
+    an excluded member never adds to it. With no ``ai_generated`` entry, no
+    template is rendered and no override is recorded: "no AI member means
+    no disclosure section" (ADR 0018).
+    """
+    total = len(manifest.asset_rights_statuses)
+    count = sum(
+        1
+        for entry in manifest.asset_rights_statuses
+        if entry.rights_status is RightsStatus.AI_GENERATED
+    )
+    if count == 0:
+        return AiDisclosureResult(disclosure=None, template_overrides=[])
+    environment = template_environment(root, EXPORT_KIND)
+    text = _render_bundle_text(
+        environment, root, AI_DISCLOSURE_TEMPLATE_NAME, count=count, total=total
+    ).strip("\n")
+    return AiDisclosureResult(
+        disclosure=AiDisclosure(count=count, total=total, text=text),
+        template_overrides=used_overrides(environment),
+    )
 
 
 @dataclass(frozen=True)
@@ -411,21 +500,25 @@ def render_marketplace_bundles(root: Path, export: ListingExport) -> Marketplace
 
     Every bundle renders against the identical fixed context (ADR 0015):
     ``title``, ``description`` (the listing description, then
-    :func:`render_contents_summary_text`'s own text, verbatim -- ADR 0016),
-    ``tags``, ``price``, ``category``, ``who_made`` (``None`` except for
-    Etsy's own shipped template, the only one that reads it -- "WHO MADE
-    where the form asks"), ``images`` (this bundle's own
-    :attr:`MarketplaceBundle.canvas`, upload order, file names only, no
-    ``previews/`` prefix), ``zip_name``, ``warnings`` and ``does_not_fit``.
-    The last two are this bundle's own share of :func:`measure_export_limits`
-    (§19, ADR 0017): ``warnings`` maps a field name (``"title"``, ``"tags"``,
-    ``"zip"``, ``"images"``) to its own combined measure text, present only
-    for a field that is over its cited limit; ``does_not_fit`` maps a field
-    name to the list of its own items past a cited *count* limit (Etsy's
-    14th tag, a direct store's 9th cover image) -- the field's own value
-    (``tags``, ``images``) still carries every item unchanged, never
-    truncated. Reading anything else fails the build naming the template
-    (StrictUndefined), the same as a preview render.
+    :func:`render_contents_summary_text`'s own text, then ``export.
+    ai_disclosure``'s own text when present, verbatim -- ADR 0016, ADR
+    0018), ``tags``, ``price``, ``category`` (Creative Fabrica's own AI
+    category once disclosed, ``category_note`` carrying the listing's own
+    category then), ``who_made`` (``None`` except for Etsy's own shipped
+    template, the only one that reads it -- "WHO MADE where the form
+    asks", "I did (Designed by a seller)" once disclosed), ``images`` (this
+    bundle's own :attr:`MarketplaceBundle.canvas`, upload order, file names
+    only, no ``previews/`` prefix), ``zip_name``, ``warnings`` and
+    ``does_not_fit``. The last two are this bundle's own share of
+    :func:`measure_export_limits` (§19, ADR 0017): ``warnings`` maps a
+    field name (``"title"``, ``"tags"``, ``"zip"``, ``"images"``) to its
+    own combined measure text, present only for a field that is over its
+    cited limit; ``does_not_fit`` maps a field name to the list of its own
+    items past a cited *count* limit (Etsy's 14th tag, a direct store's 9th
+    cover image) -- the field's own value (``tags``, ``images``) still
+    carries every item unchanged, never truncated. Reading anything else
+    fails the build naming the template (StrictUndefined), the same as a
+    preview render.
 
     Raises :class:`ExportRenderError` naming the offending template --
     :func:`~vectorpress.build.product_build.build_product` turns it into a
@@ -433,9 +526,13 @@ def render_marketplace_bundles(root: Path, export: ListingExport) -> Marketplace
     preview render failure does.
     """
     environment = template_environment(root, EXPORT_KIND)
-    description = "\n\n".join(
-        (export.listing.description, render_contents_summary_text(export.contents_summary))
-    )
+    description_parts = [
+        export.listing.description,
+        render_contents_summary_text(export.contents_summary),
+    ]
+    if export.ai_disclosure is not None:
+        description_parts.append(export.ai_disclosure.text)
+    description = "\n\n".join(description_parts)
     limits = measure_export_limits(export)
     files: list[tuple[str, bytes]] = []
     for bundle in MARKETPLACE_BUNDLES:
@@ -453,13 +550,26 @@ def render_marketplace_bundles(root: Path, export: ListingExport) -> Marketplace
         for item in limits.does_not_fit:
             if item.marketplace == bundle.name:
                 does_not_fit.setdefault(item.field, []).append(item.item)
+        if bundle.name == "creative_fabrica" and export.ai_disclosure is not None:
+            category = _CREATIVE_FABRICA_AI_CATEGORY
+            category_note = export.listing.category
+        else:
+            category = export.listing.category
+            category_note = None
+        if bundle.name == "etsy":
+            who_made = (
+                _ETSY_WHO_MADE_AI_DISCLOSED if export.ai_disclosure is not None else _ETSY_WHO_MADE
+            )
+        else:
+            who_made = None
         context: dict[str, object] = {
             "title": export.listing.title,
             "description": description,
             "tags": export.listing.tags,
             "price": export.price,
-            "category": export.listing.category,
-            "who_made": _ETSY_WHO_MADE if bundle.name == "etsy" else None,
+            "category": category,
+            "category_note": category_note,
+            "who_made": who_made,
             "images": images,
             "zip_name": export.zip_name,
             "warnings": warnings,

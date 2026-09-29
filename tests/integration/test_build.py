@@ -565,6 +565,194 @@ def test_manifest_records_ai_generated_for_an_included_asset_and_read_manifest_p
     ]
 
 
+# --- AI disclosure (§26, ADR 0018) -------------------------------------------
+
+_AI_DISCLOSURE_PRODUCT_SLUG = "owl_limpet_ai_disclosure_product"
+#: One ``ai_generated`` member (``owl_limpet``) out of three -- the PRD's
+#: own "1 of 3" acceptance scenario.
+_AI_DISCLOSURE_PRODUCT_MEMBERS = ("owl_limpet", "ochre_sea_star", "giant_green_anemone")
+_AI_DISCLOSURE_TEXT = (
+    "1 of 3 designs in this pack were created with generative AI image "
+    "tools and converted to vector files."
+)
+#: The AI-generated fixture asset's own licensing notes (asset.toml):
+#: never written anywhere under ``builds/`` (ADR 0018).
+_AI_DISCLOSURE_FORBIDDEN_LICENSING_TEXT = "Midjourney"
+
+
+def _add_ai_disclosure_test_product(root: Path) -> None:
+    """A temp-only product (not part of the committed fixture) with three
+    members, only ``owl_limpet`` -- the fixture's own ``ai_generated``
+    asset -- carrying that rights status: the PRD's own "1 of 3"
+    acceptance scenario (§26, ADR 0018)."""
+    product_text = (
+        'derivative_types = ["cut_svg"]\n'
+        'formats = ["svg"]\n'
+        'tier = "individual"\n'
+        "price = 1.00\n\n"
+        "[membership]\n"
+        'asset_ids = ["owl_limpet", "ochre_sea_star", "giant_green_anemone"]\n'
+        "\n[listing]\n"
+        'title = "Test AI Disclosure Product"\n'
+        'short_title = ""\n'
+        'description = "Test fixture with one ai_generated member of three."\n'
+        'category = "Nature & Wildlife"\n'
+        'license_type = "Test License"\n'
+    )
+    (root / "products" / f"{_AI_DISCLOSURE_PRODUCT_SLUG}.toml").write_text(
+        product_text, encoding="utf-8"
+    )
+
+
+def _build_ai_disclosure_product(monkeypatch: pytest.MonkeyPatch, root: Path) -> Path:
+    """Build ``_AI_DISCLOSURE_PRODUCT_SLUG`` (owl_limpet, plus two ordinary
+    fixture members) and return its build directory."""
+    _add_ai_disclosure_test_product(root)
+    monkeypatch.chdir(root)
+    for asset_id in _AI_DISCLOSURE_PRODUCT_MEMBERS:
+        runner.invoke(app, ["generate", asset_id])
+        approve_result = runner.invoke(app, ["approve", asset_id, "--all-types"])
+        assert approve_result.exit_code == 0, approve_result.output
+
+    result = runner.invoke(app, ["build", _AI_DISCLOSURE_PRODUCT_SLUG])
+    assert result.exit_code == 0, result.output
+    return _build_dir(root, _AI_DISCLOSURE_PRODUCT_SLUG)
+
+
+@pytest.mark.integration
+def test_ai_disclosure_appears_in_listing_json_with_the_1_of_3_count(
+    monkeypatch: pytest.MonkeyPatch, temp_catalog_root: Path
+) -> None:
+    build_dir = _build_ai_disclosure_product(monkeypatch, temp_catalog_root)
+    export = json.loads(
+        (build_dir / EXPORT_DIRNAME / LISTING_EXPORT_FILENAME).read_text(encoding="utf-8")
+    )
+    assert export["ai_disclosure"] == {
+        "count": 1,
+        "total": 3,
+        "text": _AI_DISCLOSURE_TEXT,
+    }
+
+
+@pytest.mark.integration
+def test_ai_disclosure_text_ends_every_bundles_description(
+    monkeypatch: pytest.MonkeyPatch, temp_catalog_root: Path
+) -> None:
+    build_dir = _build_ai_disclosure_product(monkeypatch, temp_catalog_root)
+    for filename in ("etsy.txt", "creative-fabrica.txt", "design-bundles.txt", "direct-store.txt"):
+        text = _read_bundle(build_dir, filename)
+        description = text.split("DESCRIPTION\n", 1)[1].split("\n\nTAGS", 1)[0]
+        assert description.endswith(_AI_DISCLOSURE_TEXT)
+
+
+@pytest.mark.integration
+def test_ai_disclosure_gives_etsy_who_made_designed_by_a_seller(
+    monkeypatch: pytest.MonkeyPatch, temp_catalog_root: Path
+) -> None:
+    build_dir = _build_ai_disclosure_product(monkeypatch, temp_catalog_root)
+    text = _read_bundle(build_dir, "etsy.txt")
+    assert "WHO MADE\nI did (Designed by a seller)\n" in text
+
+
+@pytest.mark.integration
+def test_ai_disclosure_gives_creative_fabrica_the_ai_category_with_the_listing_category_as_a_note(
+    monkeypatch: pytest.MonkeyPatch, temp_catalog_root: Path
+) -> None:
+    build_dir = _build_ai_disclosure_product(monkeypatch, temp_catalog_root)
+    text = _read_bundle(build_dir, "creative-fabrica.txt")
+    assert "CATEGORY\nAI-Generated\n" in text
+    assert "NOTE: listing category is Nature & Wildlife" in text
+
+
+@pytest.mark.integration
+def test_ai_disclosure_never_appears_in_readme_license_or_previews(
+    monkeypatch: pytest.MonkeyPatch, temp_catalog_root: Path
+) -> None:
+    """ADR 0018: disclosure is exporter-only text -- never on previews,
+    never in README or LICENSE, even though this same build discloses in
+    every marketplace bundle."""
+    build_dir = _build_ai_disclosure_product(monkeypatch, temp_catalog_root)
+    package_dir = next(
+        p for p in build_dir.iterdir() if p.is_dir() and p.name not in ("previews", EXPORT_DIRNAME)
+    )
+    readme_text = (package_dir / "README.txt").read_text(encoding="utf-8")
+    license_text = (package_dir / "LICENSE.txt").read_text(encoding="utf-8")
+
+    for text in (readme_text, license_text):
+        assert _AI_DISCLOSURE_TEXT not in text
+        assert "generative AI" not in text
+
+
+@pytest.mark.integration
+def test_ai_disclosure_never_writes_the_assets_licensing_notes_anywhere_under_builds(
+    monkeypatch: pytest.MonkeyPatch, temp_catalog_root: Path
+) -> None:
+    """§26, ADR 0018: licensing notes -- naming the AI tool and its
+    commercial-use terms -- never leave the catalog. Checks every file
+    under ``builds/<slug>/``, the package tree included, and the ZIP's own
+    contents, not only the export bundles."""
+    build_dir = _build_ai_disclosure_product(monkeypatch, temp_catalog_root)
+
+    for path in build_dir.rglob("*"):
+        if path.is_file() and path.suffix != ".zip":
+            assert _AI_DISCLOSURE_FORBIDDEN_LICENSING_TEXT not in path.read_text(
+                encoding="utf-8", errors="ignore"
+            ), path
+
+    zip_paths = list(build_dir.glob("*.zip"))
+    assert zip_paths
+    with zipfile.ZipFile(zip_paths[0]) as zip_file:
+        for name in zip_file.namelist():
+            data = zip_file.read(name)
+            assert _AI_DISCLOSURE_FORBIDDEN_LICENSING_TEXT.encode("utf-8") not in data, name
+
+
+@pytest.mark.integration
+def test_a_product_with_no_ai_generated_member_gets_no_disclosure_and_its_normal_category(
+    monkeypatch: pytest.MonkeyPatch, temp_catalog_root: Path
+) -> None:
+    build_dir, export = _build_and_read_export(monkeypatch, temp_catalog_root)
+
+    assert "ai_disclosure" not in export
+
+    for filename in ("etsy.txt", "creative-fabrica.txt", "design-bundles.txt", "direct-store.txt"):
+        text = _read_bundle(build_dir, filename)
+        assert "generative AI" not in text
+        assert "AI-Generated" not in text
+
+    creative_fabrica_text = _read_bundle(build_dir, "creative-fabrica.txt")
+    assert "CATEGORY\nNature & Wildlife\n" in creative_fabrica_text
+    assert "NOTE" not in creative_fabrica_text
+
+    etsy_text = _read_bundle(build_dir, "etsy.txt")
+    assert "WHO MADE\nI did\n" in etsy_text
+    assert "Designed by a seller" not in etsy_text
+
+
+@pytest.mark.integration
+def test_ai_disclosed_marketplace_bundles_and_listing_json_are_locked_by_snapshot(
+    monkeypatch: pytest.MonkeyPatch, temp_catalog_root: Path, snapshot: SnapshotAssertion
+) -> None:
+    build_dir = _build_ai_disclosure_product(monkeypatch, temp_catalog_root)
+
+    export = json.loads(
+        (build_dir / EXPORT_DIRNAME / LISTING_EXPORT_FILENAME).read_text(encoding="utf-8")
+    )
+    normalized = {**export, "zip_size_bytes": "<int>"}
+    assert normalized == snapshot(name="ai_disclosed_export_listing")
+
+    bundles = {
+        filename: _read_bundle(build_dir, filename)
+        for filename in (
+            "etsy.txt",
+            "creative-fabrica.txt",
+            "design-bundles.txt",
+            "direct-store.txt",
+        )
+    }
+    assert bundles == snapshot(name="ai_disclosed_marketplace_bundles")
+
+
 @pytest.mark.integration
 def test_build_refuses_when_membership_does_not_resolve_and_writes_nothing(
     monkeypatch: pytest.MonkeyPatch, temp_catalog_root: Path

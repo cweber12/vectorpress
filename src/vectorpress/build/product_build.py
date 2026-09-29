@@ -93,6 +93,14 @@ package or the ZIP. No CSV. A failure assembling or writing it is not
 caught specially: like every other write in the block below, it aborts the
 whole build and leaves the previous build (if any) untouched (§35).
 
+**AI disclosure (§26, ADR 0018).** :func:`~vectorpress.build.export.
+build_ai_disclosure` reads this same manifest's ``asset_rights_statuses``
+-- never catalog metadata directly -- and, with any ``ai_generated`` entry,
+renders ``templates/export/ai_disclosure.j2`` before ``listing.json`` is
+assembled, so the identical sentence reaches both it and every marketplace
+bundle. Its own catalog override joins :attr:`BuildResult.template_overrides`
+the same way a bundle's does.
+
 **Marketplace bundles (§19, ADR 0015, ADR 0017).** One pasteable text file
 per marketplace (:data:`~vectorpress.build.export.MARKETPLACE_BUNDLES`) is
 rendered from that same :class:`~vectorpress.build.export.ListingExport`
@@ -139,6 +147,7 @@ from vectorpress.build.export import (
     ExportRenderError,
     ExportRenderFailure,
     ListingExport,
+    build_ai_disclosure,
     build_listing_export,
     measure_export_limits,
     render_marketplace_bundles,
@@ -595,8 +604,13 @@ def _listing_export_json_bytes(export: ListingExport) -> bytes:
     """``export`` as deterministic JSON bytes (§36), the same shape
     :func:`_manifest_json_bytes` gives ``manifest.json``: sorted keys, a
     fixed 2-space indent, a trailing newline -- so unchanged inputs
-    serialize identically every time."""
-    payload = {
+    serialize identically every time.
+
+    ``ai_disclosure`` is present only when the build has one (ADR 0018's
+    "no AI member means no disclosure section"): the key itself is left out
+    rather than written as ``null``.
+    """
+    payload: dict[str, object] = {
         "listing": export.listing.model_dump(),
         "member_count": export.member_count,
         "formats": export.formats,
@@ -613,6 +627,12 @@ def _listing_export_json_bytes(export: ListingExport) -> bytes:
         "zip_name": export.zip_name,
         "zip_size_bytes": export.zip_size_bytes,
     }
+    if export.ai_disclosure is not None:
+        payload["ai_disclosure"] = {
+            "count": export.ai_disclosure.count,
+            "total": export.ai_disclosure.total,
+            "text": export.ai_disclosure.text,
+        }
     return json.dumps(payload, indent=2, sort_keys=True).encode("utf-8") + b"\n"
 
 
@@ -926,6 +946,12 @@ def build_product(
         zip_path = tmp_dir / f"{top_level_name}.zip"
         _write_deterministic_zip(zip_path, top_level_name, package_files)
 
+        # §26's counted sentence (ADR 0018), from this same build's own
+        # manifest -- rendered once here so listing.json and every bundle
+        # below carry the identical text.
+        ai_disclosure_result = build_ai_disclosure(root, manifest)
+        template_overrides = sorted({*template_overrides, *ai_disclosure_result.template_overrides})
+
         listing_export = build_listing_export(
             product,
             manifest,
@@ -934,6 +960,7 @@ def build_product(
             assets_by_id,
             zip_name=zip_path.name,
             zip_size_bytes=zip_path.stat().st_size,
+            ai_disclosure=ai_disclosure_result.disclosure,
         )
         export_path = tmp_dir / EXPORT_DIRNAME / LISTING_EXPORT_FILENAME
         export_path.parent.mkdir(parents=True, exist_ok=True)

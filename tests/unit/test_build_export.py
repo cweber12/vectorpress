@@ -1,6 +1,7 @@
 """build.export: the generic marketplace export's own contents summary and
-assembly, and the marketplace text bundles built from it (§18, §19, ADR
-0015, ADR 0016, ADR 0017).
+assembly, the marketplace text bundles built from it, and the AI disclosure
+sentence exporters add (§18, §19, §26, ADR 0015, ADR 0016, ADR 0017, ADR
+0018).
 
 Everything here runs against hand-built domain objects, the same style
 ``test_build_previews.py`` and ``test_build_listing_draft.py`` already use --
@@ -15,10 +16,12 @@ import pytest
 
 from vectorpress.build.export import (
     MARKETPLACE_BUNDLES,
+    AiDisclosure,
     ContentsSummary,
     ExportRenderError,
     ListingExport,
     _preview_names_by_canvas,  # pyright: ignore[reportPrivateUsage]
+    build_ai_disclosure,
     build_listing_export,
     contents_summary,
     measure_export_limits,
@@ -27,13 +30,14 @@ from vectorpress.build.export import (
 )
 from vectorpress.build.marketplace_limits import ETSY_TAG_MAX_COUNT, ETSY_TITLE_MAX_CHARS
 from vectorpress.build.product_resolution import MemberEligibility, ProductMember
-from vectorpress.domain.asset import Asset
+from vectorpress.domain.asset import Asset, RightsStatus
 from vectorpress.domain.collection import Collection
 from vectorpress.domain.derivative_type import DerivativeType
 from vectorpress.domain.format import Format
 from vectorpress.domain.listing import Listing
 from vectorpress.domain.manifest import (
     Manifest,
+    ManifestAssetRightsStatus,
     ManifestDxfMember,
     ManifestMember,
     ManifestMemberSource,
@@ -304,6 +308,106 @@ def test_build_listing_export_contents_summary_is_the_contents_summary_function_
     assert isinstance(export.contents_summary, ContentsSummary)
 
 
+# --- build_ai_disclosure (§26, ADR 0018) ------------------------------------
+
+
+def test_build_ai_disclosure_is_none_with_no_ai_generated_member(tmp_path: Path) -> None:
+    manifest = _manifest(
+        asset_rights_statuses=[
+            ManifestAssetRightsStatus(asset_id="a", rights_status=RightsStatus.ORIGINAL_ARTWORK)
+        ]
+    )
+    result = build_ai_disclosure(tmp_path, manifest)
+    assert result.disclosure is None
+    assert result.template_overrides == []
+
+
+def test_build_ai_disclosure_counts_only_ai_generated_entries_out_of_the_full_total(
+    tmp_path: Path,
+) -> None:
+    manifest = _manifest(
+        asset_rights_statuses=[
+            ManifestAssetRightsStatus(asset_id="a", rights_status=RightsStatus.AI_GENERATED),
+            ManifestAssetRightsStatus(asset_id="b", rights_status=RightsStatus.ORIGINAL_ARTWORK),
+            ManifestAssetRightsStatus(asset_id="c", rights_status=RightsStatus.RIGHTS_VERIFIED),
+        ]
+    )
+    result = build_ai_disclosure(tmp_path, manifest)
+    assert result.disclosure is not None
+    assert result.disclosure.count == 1
+    assert result.disclosure.total == 3
+
+
+def test_build_ai_disclosure_text_states_only_the_count_never_the_tool(tmp_path: Path) -> None:
+    manifest = _manifest(
+        asset_rights_statuses=[
+            ManifestAssetRightsStatus(asset_id="a", rights_status=RightsStatus.AI_GENERATED),
+            ManifestAssetRightsStatus(asset_id="b", rights_status=RightsStatus.ORIGINAL_ARTWORK),
+            ManifestAssetRightsStatus(asset_id="c", rights_status=RightsStatus.RIGHTS_VERIFIED),
+        ]
+    )
+    result = build_ai_disclosure(tmp_path, manifest)
+    assert result.disclosure is not None
+    assert result.disclosure.text == (
+        "1 of 3 designs in this pack were created with generative AI image "
+        "tools and converted to vector files."
+    )
+    # ADR 0018: never names a tool, never claims hand-drawing or review.
+    for word in ("Midjourney", "hand-drawn", "reviewed", "hand drawn"):
+        assert word not in result.disclosure.text
+
+
+def test_build_ai_disclosure_uses_singular_design_and_was_when_total_is_one(
+    tmp_path: Path,
+) -> None:
+    manifest = _manifest(
+        asset_rights_statuses=[
+            ManifestAssetRightsStatus(asset_id="a", rights_status=RightsStatus.AI_GENERATED)
+        ]
+    )
+    result = build_ai_disclosure(tmp_path, manifest)
+    assert result.disclosure is not None
+    assert result.disclosure.text == (
+        "1 of 1 design in this pack was created with generative AI image "
+        "tools and converted to vector files."
+    )
+
+
+def test_build_ai_disclosure_catalog_override_changes_text_and_is_named(tmp_path: Path) -> None:
+    override_dir = tmp_path / "templates" / "export"
+    override_dir.mkdir(parents=True)
+    (override_dir / "ai_disclosure.j2").write_text(
+        "CUSTOM: {{ count }}/{{ total }}\n", encoding="utf-8"
+    )
+    manifest = _manifest(
+        asset_rights_statuses=[
+            ManifestAssetRightsStatus(asset_id="a", rights_status=RightsStatus.AI_GENERATED)
+        ]
+    )
+    result = build_ai_disclosure(tmp_path, manifest)
+    assert result.disclosure is not None
+    assert result.disclosure.text == "CUSTOM: 1/1"
+    assert result.template_overrides == ["templates/export/ai_disclosure.j2"]
+
+
+def test_build_ai_disclosure_catalog_override_reading_an_undefined_variable_fails_naming_the_template(
+    tmp_path: Path,
+) -> None:
+    override_dir = tmp_path / "templates" / "export"
+    override_dir.mkdir(parents=True)
+    (override_dir / "ai_disclosure.j2").write_text(
+        "{{ this_is_not_in_the_context }}\n", encoding="utf-8"
+    )
+    manifest = _manifest(
+        asset_rights_statuses=[
+            ManifestAssetRightsStatus(asset_id="a", rights_status=RightsStatus.AI_GENERATED)
+        ]
+    )
+    with pytest.raises(ExportRenderError) as excinfo:
+        build_ai_disclosure(tmp_path, manifest)
+    assert excinfo.value.template_name == "ai_disclosure.j2"
+
+
 # --- render_contents_summary_text ------------------------------------------
 
 
@@ -318,15 +422,19 @@ def _summary(**overrides: object) -> ContentsSummary:
     return ContentsSummary(**fields)  # type: ignore[arg-type]
 
 
-def test_render_contents_summary_text_uses_singular_member_for_one() -> None:
+def test_render_contents_summary_text_uses_singular_design_for_one() -> None:
+    """Buyer-facing text says "design", not the internal "member"
+    (CONTEXT.md)."""
     text = render_contents_summary_text(_summary(member_count=1))
-    assert "1 member," in text
-    assert "1 members," not in text
+    assert "1 design," in text
+    assert "1 designs," not in text
+    assert "member" not in text
 
 
-def test_render_contents_summary_text_uses_plural_members_for_more_than_one() -> None:
+def test_render_contents_summary_text_uses_plural_designs_for_more_than_one() -> None:
     text = render_contents_summary_text(_summary(member_count=2))
-    assert "2 members," in text
+    assert "2 designs," in text
+    assert "member" not in text
 
 
 def test_render_contents_summary_text_uppercases_every_format() -> None:
@@ -542,6 +650,112 @@ def test_render_marketplace_bundles_with_no_catalog_templates_dir_uses_shipped_o
 ) -> None:
     result = render_marketplace_bundles(tmp_path, _listing_export())
     assert result.template_overrides == []
+
+
+# --- render_marketplace_bundles: AI disclosure (§26, ADR 0018) --------------
+
+
+def _disclosure(**overrides: object) -> AiDisclosure:
+    fields: dict[str, object] = {
+        "count": 1,
+        "total": 3,
+        "text": (
+            "1 of 3 designs in this pack were created with generative AI "
+            "image tools and converted to vector files."
+        ),
+    }
+    fields.update(overrides)
+    return AiDisclosure(**fields)  # type: ignore[arg-type]
+
+
+def test_render_marketplace_bundles_appends_the_disclosure_text_to_every_description(
+    tmp_path: Path,
+) -> None:
+    export = _listing_export(ai_disclosure=_disclosure())
+    assert export.ai_disclosure is not None
+    expected = (
+        f"{export.listing.description}\n\n"
+        f"{render_contents_summary_text(export.contents_summary)}\n\n"
+        f"{export.ai_disclosure.text}"
+    )
+    texts = _bundle_texts(tmp_path, export)
+    for text in texts.values():
+        assert expected in text
+
+
+def test_render_marketplace_bundles_no_disclosure_text_with_no_ai_disclosure(
+    tmp_path: Path,
+) -> None:
+    texts = _bundle_texts(tmp_path)  # default _listing_export() has ai_disclosure=None
+    for text in texts.values():
+        assert "generative AI" not in text
+
+
+def test_render_marketplace_bundles_etsy_who_made_is_designed_by_a_seller_when_disclosed(
+    tmp_path: Path,
+) -> None:
+    export = _listing_export(ai_disclosure=_disclosure())
+    texts = _bundle_texts(tmp_path, export)
+    assert "WHO MADE\nI did (Designed by a seller)\n" in texts["export/etsy.txt"]
+
+
+def test_render_marketplace_bundles_etsy_who_made_is_plain_with_no_disclosure(
+    tmp_path: Path,
+) -> None:
+    texts = _bundle_texts(tmp_path)
+    text = texts["export/etsy.txt"]
+    assert "WHO MADE\nI did\n" in text
+    assert "Designed by a seller" not in text
+
+
+def test_render_marketplace_bundles_creative_fabrica_category_is_ai_category_when_disclosed(
+    tmp_path: Path,
+) -> None:
+    export = _listing_export(ai_disclosure=_disclosure())
+    texts = _bundle_texts(tmp_path, export)
+    text = texts["export/creative-fabrica.txt"]
+    assert "CATEGORY\nAI-Generated\n" in text
+    assert f"NOTE: listing category is {export.listing.category}" in text
+
+
+def test_render_marketplace_bundles_creative_fabrica_category_is_unchanged_with_no_disclosure(
+    tmp_path: Path,
+) -> None:
+    export = _listing_export()
+    texts = _bundle_texts(tmp_path, export)
+    text = texts["export/creative-fabrica.txt"]
+    assert "AI-Generated" not in text
+    assert "NOTE" not in text
+    assert export.listing.category in text
+
+
+def test_render_marketplace_bundles_only_creative_fabrica_category_changes_when_disclosed(
+    tmp_path: Path,
+) -> None:
+    """Etsy, Design Bundles and the direct store keep the listing's own
+    category even when disclosed -- only Creative Fabrica has an AI
+    category rule (ADR 0018)."""
+    export = _listing_export(ai_disclosure=_disclosure())
+    texts = _bundle_texts(tmp_path, export)
+    for path in ("export/etsy.txt", "export/design-bundles.txt", "export/direct-store.txt"):
+        text = texts[path]
+        assert export.listing.category in text
+        assert "AI-Generated" not in text
+
+
+def test_render_marketplace_bundles_ai_disclosure_catalog_override_is_named(
+    tmp_path: Path,
+) -> None:
+    """``ai_disclosure.j2`` renders through the same export-kind lookup as
+    every bundle template, so a catalog override joins the same build
+    report list (ADR 0015, ADR 0018) -- exercised through
+    ``build_ai_disclosure`` directly in ``test_build.py``'s integration
+    coverage; this only pins that an already-rendered disclosure's text
+    flows through unchanged, whatever its source."""
+    export = _listing_export(ai_disclosure=_disclosure(text="CUSTOM DISCLOSURE TEXT"))
+    texts = _bundle_texts(tmp_path, export)
+    for text in texts.values():
+        assert "CUSTOM DISCLOSURE TEXT" in text
 
 
 # --- measure_export_limits (§19, ADR 0017) -----------------------------------
