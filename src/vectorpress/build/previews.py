@@ -28,15 +28,25 @@ through a mechanism StrictUndefined would not catch (Jinja's per-template
 shape's own two existing fields, resolved to a :class:`PreviewFont` rather
 than a plain string (this module's own decision, not a new context field --
 see :class:`PreviewFont`).
+
+The ADR 0014 presentation hash (:func:`current_presentation_hash`,
+:func:`_presentation_hash`) covers every template file a build loaded
+(shipped or catalog override), the brand fields above, the mark and font
+file bytes, and the two listing fields templates print -- never a member
+image, never rights status. It never launches Chromium: the template set a
+render would use is decided entirely by Jinja, so a pure Jinja render
+(sharing :func:`_preview_context` and the same render loop) is enough to
+learn it.
 """
 
 import base64
+import json
 from collections.abc import Callable
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
 
-from jinja2 import Environment, UndefinedError
+from jinja2 import Environment, TemplateError, TemplateNotFound, TemplateSyntaxError, UndefinedError
 from playwright.sync_api import Browser, Playwright, Route, sync_playwright
 from playwright.sync_api import Error as PlaywrightError
 
@@ -45,7 +55,9 @@ from vectorpress.build.template_lookup import (
     template_environment,
     template_name_from_traceback,
     used_overrides,
+    used_template_files,
 )
+from vectorpress.catalog.provenance import sha256_bytes
 from vectorpress.domain.asset import Asset, AssetId
 from vectorpress.domain.brand import Brand
 from vectorpress.domain.derivative_type import DerivativeType
@@ -106,15 +118,33 @@ CANVASES: tuple[Canvas, ...] = (
 
 
 class PreviewRenderError(Exception):
-    """One preview failed to render (ADR 0014): an undefined template
-    variable, a template requesting a remote or otherwise disallowed URL, or
-    Chromium itself failing to launch or render. ``template_name`` is set
-    whenever the failure traces to one template file; ``None`` for a
-    Chromium-level failure (no Chromium installed) that names no template."""
+    """One preview failed to render (ADR 0014): a template syntax error, a
+    missing template (a catalog override's own ``{% extends %}``/
+    ``{% include %}`` naming a file that does not exist), an undefined
+    template variable, a template requesting a remote or otherwise
+    disallowed URL, or Chromium itself failing to launch or render.
+    ``template_name`` is set whenever the failure traces to one template
+    file; ``None`` for a Chromium-level failure (no Chromium installed)
+    that names no template."""
 
     def __init__(self, message: str, template_name: str | None = None) -> None:
         super().__init__(message)
         self.template_name = template_name
+
+
+@dataclass(frozen=True)
+class PreviewRenderFailure:
+    """One preview rendering failure (§16, ADR 0014), as a plain value:
+    the template it traces to, when the failure names one, and the
+    underlying error's own message. ``template_name`` is ``None`` for a
+    Chromium-level failure such as no Chromium being installed. Shared by
+    :func:`~vectorpress.build.product_build.build_product` (a real build's
+    own refusal) and :mod:`~vectorpress.build.needs_rebuild` (a dry
+    render's own "previews out of date" detail) -- the same shape either
+    way, since both trace back to the identical :class:`PreviewRenderError`."""
+
+    template_name: str | None
+    message: str
 
 
 # --- the fixed preview context (ADR 0015) -----------------------------------
@@ -347,6 +377,26 @@ def _preview_font(root: Path, family: str, font_file: str | None) -> PreviewFont
     return _shipped_font(family)
 
 
+def _font_presentation_inputs(root: Path, brand: Brand) -> list[tuple[str, bytes]]:
+    """``(identifier, bytes)`` for the file(s) backing each of ``brand``'s
+    two typography roles (ADR 0014's presentation hash: "the mark and font
+    file bytes"): a catalog font file's own bytes, or the shipped font's
+    regular and bold files when the brand names none -- the same choice
+    :func:`_preview_font` makes for the template context, returning raw
+    file identity here instead of a ``data:`` URI."""
+    inputs: list[tuple[str, bytes]] = []
+    for role, family, font_file in (
+        ("heading", brand.typography.heading_font, brand.typography.heading_font_file),
+        ("body", brand.typography.body_font, brand.typography.body_font_file),
+    ):
+        if font_file is not None:
+            inputs.append((f"font:{role}:{font_file}", (root / font_file).read_bytes()))
+        else:
+            for key in _SHIPPED_FONT_KEYS[family]:
+                inputs.append((f"font:{role}:shipped:{key}", _SHIPPED_FONT_FILES[key].read_bytes()))
+    return inputs
+
+
 def _preview_brand(root: Path, brand: Brand) -> PreviewBrand:
     return PreviewBrand(
         name=brand.name,
@@ -485,10 +535,27 @@ def _render_html(
     # environment's or the template's own globals, which StrictUndefined
     # does not gate: a catalog override reading anything else must still
     # fail, exactly the same as reading an unrelated undefined name.
-    template = environment.get_template(template_name)
+    #
+    # ``get_template`` and ``render`` share one try/except: a literal
+    # ``{% extends %}``/``{% include %}`` target is not always resolved at
+    # the same point (compile time for some Jinja versions/targets, render
+    # time for others), and every failure either can raise -- a syntax
+    # error, a missing file, an undefined variable -- must turn into a
+    # named :class:`PreviewRenderError` the same way, never an uncaught
+    # Jinja exception reaching a caller that never launches Chromium at all
+    # (needs-rebuild's own dry render, :func:`current_presentation_hash`).
     try:
+        template = environment.get_template(template_name)
         return template.render(**context)
+    except TemplateSyntaxError as exc:
+        raise PreviewRenderError(str(exc), template_name=exc.name or template_name) from exc
+    except TemplateNotFound as exc:
+        name = exc.name if isinstance(exc.name, str) else template_name
+        raise PreviewRenderError(str(exc), template_name=name) from exc
     except UndefinedError as exc:
+        name = template_name_from_traceback(exc, root, PREVIEWS_KIND) or template_name
+        raise PreviewRenderError(str(exc), template_name=name) from exc
+    except TemplateError as exc:
         name = template_name_from_traceback(exc, root, PREVIEWS_KIND) or template_name
         raise PreviewRenderError(str(exc), template_name=name) from exc
 
@@ -690,14 +757,90 @@ def _screenshot(html: str, canvas: Canvas, template_name: str) -> bytes:
 @dataclass(frozen=True)
 class PreviewRenderResult:
     """:func:`render_previews`'s own result: the rendered preview files,
-    plus the catalog ``templates/previews/`` overrides this render actually
-    used (ADR 0015's build report list) -- both drawn from the one
-    environment every type/canvas render shares, so the override list
-    reflects exactly this build's own renders, not merely what the
-    catalog's ``templates/previews/`` folder happens to hold."""
+    the catalog ``templates/previews/`` overrides this render actually used
+    (ADR 0015's build report list), and the ADR 0014 presentation hash --
+    all drawn from the one environment every type/canvas render shares, so
+    the override list and the hash reflect exactly this build's own
+    renders, not merely what the catalog's ``templates/previews/`` folder
+    happens to hold."""
 
     files: list[tuple[str, bytes]]
     template_overrides: list[str]
+    presentation_hash: str
+
+
+def _presentation_hash(root: Path, product: Product, brand: Brand, environment: Environment) -> str:
+    """The ADR 0014 presentation hash: every template file ``environment``
+    actually loaded (shipped or catalog override), brand's own ``name``,
+    ``typography`` and ``card_style``, the mark and font file bytes, and
+    the listing fields previews print (``title``, ``short_title``) -- never
+    a member image, never rights status (ADR 0015: rights status is not in
+    the preview context at all). ``environment`` must already have rendered
+    every template a build would use -- :func:`render_previews` calls this
+    once its own render loop is done; :func:`current_presentation_hash`
+    drives an equivalent, Chromium-free render purely to populate one.
+    """
+    assert product.listing is not None  # build_product's own listing gate already refused
+    payload = {
+        "templates": [
+            {"name": name, "content_hash": sha256_bytes(path.read_bytes())}
+            for name, path in used_template_files(environment)
+        ],
+        "brand": {
+            "name": brand.name,
+            "typography": brand.typography.model_dump(),
+            "card_style": brand.card_style.model_dump(),
+        },
+        "mark": sha256_bytes((root / brand.mark_file).read_bytes()),
+        "fonts": [
+            {"name": name, "content_hash": sha256_bytes(content)}
+            for name, content in _font_presentation_inputs(root, brand)
+        ],
+        "listing": {
+            "title": product.listing.title,
+            "short_title": product.listing.short_title,
+        },
+    }
+    return sha256_bytes(json.dumps(payload, sort_keys=True).encode("utf-8"))
+
+
+def current_presentation_hash(
+    root: Path,
+    product: Product,
+    brand: Brand,
+    eligible_members: list[ProductMember],
+    assets_by_id: dict[AssetId, Asset],
+    content_by_member: dict[AssetId, dict[DerivativeType, bytes]],
+    files_by_folder: dict[str, list[str]],
+) -> str:
+    """The presentation hash a build would currently write (ADR 0014),
+    computed with a pure Jinja render of every preview type/page a build
+    would render -- no Chromium -- so needs-rebuild can compare it without
+    paying for a browser. Renders the identical loop
+    :func:`render_previews` does, minus the screenshot step: the set of
+    template files a render touches is decided entirely by Jinja
+    (``{% extends %}``/``{% include %}``), never by Chromium.
+
+    Raises :class:`PreviewRenderError` the same way :func:`render_previews`
+    would, on an undefined template variable or a template naming a file
+    that fails to load -- an actual rebuild would refuse identically.
+    """
+    environment = template_environment(root, PREVIEWS_KIND)
+    context = _preview_context(
+        root, product, brand, eligible_members, assets_by_id, content_by_member, files_by_folder
+    )
+    for preview_type in PREVIEW_TYPES:
+        if not _renders(preview_type, product, len(context.members)):
+            continue
+        for page in _pages(preview_type, len(context.members)):
+            for canvas in CANVASES:
+                _render_html(
+                    environment,
+                    root,
+                    preview_type.template_name,
+                    **_template_context(context, canvas, page),
+                )
+    return _presentation_hash(root, product, brand, environment)
 
 
 def render_previews(
@@ -722,6 +865,9 @@ def render_previews(
     template requesting a disallowed URL, or Chromium itself failing --
     :func:`~vectorpress.build.product_build.build_product` turns any of
     these into a whole-build refusal, per this module's own docstring.
+    The result's own presentation hash (:func:`_presentation_hash`, ADR
+    0014) is computed once, after every render, from the one environment
+    every type/canvas shares.
     """
     environment = template_environment(root, PREVIEWS_KIND)
     context = _preview_context(
@@ -746,7 +892,11 @@ def render_previews(
                 results.append(
                     (f"previews/{preview_type.number}-{name}-{canvas.name}.png", png_bytes)
                 )
-    return PreviewRenderResult(files=results, template_overrides=used_overrides(environment))
+    return PreviewRenderResult(
+        files=results,
+        template_overrides=used_overrides(environment),
+        presentation_hash=_presentation_hash(root, product, brand, environment),
+    )
 
 
 def _renders(preview_type: PreviewType, product: Product, member_count: int) -> bool:

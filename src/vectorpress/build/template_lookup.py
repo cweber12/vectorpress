@@ -29,6 +29,14 @@ loaded, whether by a direct lookup or only reached through
 ``{% extends %}``/``{% include %}`` -- never one merely sitting in the
 folder unread. :func:`used_overrides` reads this back off the environment
 :func:`template_environment` built.
+
+The presentation hash (ADR 0014) needs the same "actually loaded, not
+merely present" tracking for the shipped side too -- a build's presentation
+covers every template file it used, shipped or override. :func:`used_template_files`
+reads both loaders back off the environment, each entry keyed by a
+catalog- or package-relative identifier that never carries the catalog
+root's own absolute path, so the same catalog hashes the same on any
+machine.
 """
 
 from collections.abc import Callable
@@ -83,30 +91,45 @@ def template_name_from_traceback(exc: BaseException, root: Path, kind: str) -> s
     return name
 
 
-class _TrackingCatalogLoader(FileSystemLoader):
-    """The catalog's own ``templates/<kind>/`` loader, recording the
-    catalog-relative path of every file it actually serves (ADR 0015's
-    build report list). ``get_source`` is the one point every lookup
-    against this folder passes through -- a plain top-level request, or one
-    reached only via ``{% extends %}``/``{% include %}`` -- whether or not
-    :class:`~jinja2.Environment` later serves the compiled template from its
-    own cache on a repeat request. A file this loader never finds (missing,
-    so :class:`~jinja2.ChoiceLoader` falls through to the shipped folder) is
-    never recorded: only a name it actually resolved counts as "in use"."""
+class _TrackingLoader(FileSystemLoader):
+    """A :class:`~jinja2.FileSystemLoader` recording the template name and
+    on-disk path of every file it actually serves. ``get_source`` is the
+    one point every lookup against this folder passes through -- a plain
+    top-level request, or one reached only via ``{% extends %}``/
+    ``{% include %}`` -- whether or not :class:`~jinja2.Environment` later
+    serves the compiled template from its own cache on a repeat request. A
+    file this loader never finds (missing, so :class:`~jinja2.ChoiceLoader`
+    falls through to the next one) is never recorded: only a name it
+    actually resolved counts as "in use"."""
 
-    def __init__(self, path: Path, kind: str) -> None:
+    def __init__(self, path: Path) -> None:
         super().__init__(path)
-        self._catalog_relative_prefix = f"{CATALOG_TEMPLATES_DIRNAME}/{kind}"
-        self.used: list[str] = []
+        self.loaded: list[tuple[str, Path]] = []
 
     def get_source(
         self, environment: Environment, template: str
     ) -> tuple[str, str, Callable[[], bool]]:
-        source = super().get_source(environment, template)
-        path = f"{self._catalog_relative_prefix}/{template}"
-        if path not in self.used:
-            self.used.append(path)
-        return source
+        source, filename, uptodate = super().get_source(environment, template)
+        assert filename is not None  # FileSystemLoader always sets its own file path
+        entry = (template, Path(filename))
+        if entry not in self.loaded:
+            self.loaded.append(entry)
+        return source, filename, uptodate
+
+
+class _TrackingCatalogLoader(_TrackingLoader):
+    """The catalog's own ``templates/<kind>/`` loader (ADR 0015's build
+    report list): :attr:`used` names every file this loader actually
+    served, catalog-relative (``templates/<kind>/<file>``)."""
+
+    def __init__(self, path: Path, kind: str) -> None:
+        super().__init__(path)
+        self.kind = kind
+        self._catalog_relative_prefix = f"{CATALOG_TEMPLATES_DIRNAME}/{kind}"
+
+    @property
+    def used(self) -> list[str]:
+        return [f"{self._catalog_relative_prefix}/{name}" for name, _ in self.loaded]
 
 
 def template_environment(root: Path, kind: str) -> Environment:
@@ -122,13 +145,18 @@ def template_environment(root: Path, kind: str) -> Environment:
     every kind so far renders plain text or is escaped by its own markup
     rules, not HTML read back from user data.
 
-    The catalog loader is :class:`_TrackingCatalogLoader`, so every render
-    through the returned environment can later be asked, via
-    :func:`used_overrides`, which catalog files it actually used.
+    Both the catalog and the shipped loader are :class:`_TrackingLoader`s
+    (the catalog one specifically :class:`_TrackingCatalogLoader`, for
+    :func:`used_overrides`'s own catalog-relative naming) -- the *same*
+    shipped loader instance backs both the plain shipped fallback and the
+    ``shipped/`` prefix, so a file reached either way is recorded once.
+    Every render through the returned environment can later be asked, via
+    :func:`used_overrides` or :func:`used_template_files`, which files it
+    actually used.
     """
     catalog_dir = root / CATALOG_TEMPLATES_DIRNAME / kind
     shipped_dir = _SHIPPED_TEMPLATES_ROOT / kind
-    shipped_loader = FileSystemLoader(shipped_dir)
+    shipped_loader = _TrackingLoader(shipped_dir)
     loader = ChoiceLoader(
         [
             _TrackingCatalogLoader(catalog_dir, kind),
@@ -153,3 +181,26 @@ def used_overrides(environment: Environment) -> list[str]:
     catalog_loader = loader.loaders[0]
     assert isinstance(catalog_loader, _TrackingCatalogLoader)
     return sorted(catalog_loader.used)
+
+
+def used_template_files(environment: Environment) -> list[tuple[str, Path]]:
+    """Every template file -- shipped or catalog override -- ``environment``
+    actually loaded (ADR 0014's presentation hash: "every template file the
+    build used, shipped or override"). Each entry pairs a stable identifier
+    (``"catalog:<kind>/<name>"`` or ``"shipped:<kind>/<name>"`` -- never the
+    catalog root's own absolute path, so the same catalog hashes the same on
+    any machine) with the file's own path on disk, to hash its bytes.
+    Sorted by identifier. ``environment`` must be one :func:`template_environment`
+    built -- its first two loaders are always the kind's own
+    :class:`_TrackingCatalogLoader` and shipped :class:`_TrackingLoader`.
+    """
+    loader = environment.loader
+    assert isinstance(loader, ChoiceLoader)
+    catalog_loader = loader.loaders[0]
+    shipped_loader = loader.loaders[1]
+    assert isinstance(catalog_loader, _TrackingCatalogLoader)
+    assert isinstance(shipped_loader, _TrackingLoader)
+    kind = catalog_loader.kind
+    entries = [(f"catalog:{kind}/{name}", path) for name, path in catalog_loader.loaded]
+    entries += [(f"shipped:{kind}/{name}", path) for name, path in shipped_loader.loaded]
+    return sorted(entries, key=lambda entry: entry[0])

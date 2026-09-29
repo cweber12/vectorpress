@@ -174,8 +174,20 @@ class Manifest:
     page number, then canvas -- never a lexicographic sort of the whole
     name, which would put a ``contents`` page 10 before page 2) -- never an
     image hash: previews are not held to byte-identical output (ADR 0014),
-    so needs-rebuild compares a separate presentation hash, not these file
-    names, once that slice lands.
+    so needs-rebuild compares ``presentation_hash`` instead of these file
+    names.
+
+    ``presentation_hash`` is the ADR 0014 presentation hash: every template
+    file the build used (shipped or catalog override), the brand's own
+    ``name``, ``typography`` and ``card_style``, the mark and font file
+    bytes, and the listing fields previews print (``title``,
+    ``short_title``) -- never a member image, never rights status.
+    Needs-rebuild reports **previews out of date** when this differs from
+    the current value (CONTEXT.md "Needs rebuild").
+
+    ``listing_hash`` is the ADR 0017 listing hash: a content hash of the
+    whole ``[listing]`` table. Needs-rebuild reports **listing changed**
+    when this differs from the current value.
     """
 
     product_slug: ProductSlug
@@ -193,3 +205,5 @@ class Manifest:
     cleanup_size_warnings: list[ManifestCleanupSizeWarning]
     byte_identical_derivatives: list[ManifestByteIdenticalDerivatives]
     previews: list[str]
+    presentation_hash: str
+    listing_hash: str

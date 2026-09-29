@@ -66,11 +66,16 @@ derivative type it was converting (§35).
 (:mod:`vectorpress.build.previews`) renders at both fixed canvases from the
 same in-memory data this function has already gathered for the package
 itself -- no second read of any effective derivative. A rendering failure
-(no Chromium, an undefined template variable, a template requesting a
+(no Chromium, a catalog override with a syntax error or naming a missing
+template, an undefined template variable, a template requesting a
 disallowed URL) refuses the whole build the same way a DXF conversion
 failure does, before anything is written; previews are never inside the
 package or the ZIP (§14), and the manifest records their file names, never
-image hashes.
+image hashes -- plus the ADR 0014 presentation hash
+(:attr:`~vectorpress.build.previews.PreviewRenderResult.presentation_hash`)
+and the ADR 0017 listing hash (:func:`_listing_hash`), so
+:mod:`~vectorpress.build.needs_rebuild` can report **previews out of date**
+and **listing changed** without re-rendering anything.
 
 **Catalog template overrides (ADR 0015).** ``BuildResult.template_overrides``
 names every catalog ``templates/<kind>/`` file this build actually loaded --
@@ -101,7 +106,7 @@ from uuid import uuid4
 
 from vectorpress import __version__
 from vectorpress.build._dxf_conversion import DxfConversionError, svg_to_dxf_bytes
-from vectorpress.build.previews import PreviewRenderError, render_previews
+from vectorpress.build.previews import PreviewRenderError, PreviewRenderFailure, render_previews
 from vectorpress.build.product_resolution import ProductMember, resolve_product
 from vectorpress.catalog.assets import asset_dir
 from vectorpress.catalog.brand import load_brand
@@ -116,6 +121,7 @@ from vectorpress.domain.collection import Collection
 from vectorpress.domain.derivative_type import DerivativeType, derivative_filename
 from vectorpress.domain.format import Format
 from vectorpress.domain.format_folder import copied_folder, dxf_filename, dxf_source
+from vectorpress.domain.listing import Listing
 from vectorpress.domain.manifest import (
     Manifest,
     ManifestAdmittedUnapproved,
@@ -369,17 +375,6 @@ class DxfConversionFailure:
 
 
 @dataclass(frozen=True)
-class PreviewRenderFailure:
-    """One preview rendering failure (§16, ADR 0014): the template it traces
-    to, when the failure names one (an undefined variable, a disallowed
-    URL), and the underlying error. ``template_name`` is ``None`` for a
-    Chromium-level failure such as no Chromium being installed."""
-
-    template_name: str | None
-    message: str
-
-
-@dataclass(frozen=True)
 class BuildResult:
     """The outcome of one :func:`build_product` call. Exactly one of
     ``brand_problems``, ``unknown_license_placeholders``,
@@ -441,6 +436,14 @@ def _readme_wording_hash(brand: Brand) -> str:
             brand.readme_text, brand.standard_wording, brand.copyright_wording
         ).encode("utf-8")
     )
+
+
+def _listing_hash(listing: Listing) -> str:
+    """The ADR 0017 listing hash: a content hash of the whole ``[listing]``
+    table (§23, §34), so any field edit -- not only ``title``/``short_title``,
+    the two the previews themselves print -- flags "listing changed",
+    distinct from "previews out of date" (ADR 0014's own, narrower hash)."""
+    return sha256_bytes(json.dumps(listing.model_dump(), sort_keys=True).encode("utf-8"))
 
 
 def _manifest_json_bytes(manifest: Manifest) -> bytes:
@@ -525,6 +528,8 @@ def _manifest_json_bytes(manifest: Manifest) -> bytes:
             for warning in manifest.byte_identical_derivatives
         ],
         "previews": manifest.previews,
+        "presentation_hash": manifest.presentation_hash,
+        "listing_hash": manifest.listing_hash,
     }
     return json.dumps(payload, indent=2, sort_keys=True).encode("utf-8") + b"\n"
 
@@ -790,6 +795,7 @@ def build_product(
     )
     byte_identical_derivatives = _byte_identical_derivative_warnings(content_by_member)
     previews = sorted((rel_path for rel_path, _ in preview_files), key=_preview_upload_order_key)
+    assert product.listing is not None  # build_product's own listing gate already refused
     manifest = Manifest(
         product_slug=product.slug,
         reference_size_in=reference_size_in,
@@ -806,6 +812,8 @@ def build_product(
         cleanup_size_warnings=cleanup_size_warnings,
         byte_identical_derivatives=byte_identical_derivatives,
         previews=previews,
+        presentation_hash=preview_result.presentation_hash,
+        listing_hash=_listing_hash(product.listing),
     )
 
     builds_dir = root / BUILDS_DIRNAME

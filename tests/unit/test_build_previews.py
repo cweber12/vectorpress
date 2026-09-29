@@ -490,6 +490,41 @@ def test_catalog_override_of_an_included_template_names_that_template(tmp_path: 
     assert excinfo.value.template_name == "brand.css"
 
 
+def test_catalog_override_with_a_syntax_error_fails_naming_the_template(tmp_path: Path) -> None:
+    """A catalog override's own Jinja syntax error (an unclosed ``{% if %}``,
+    here) is a build refusal naming the template, never an uncaught
+    ``TemplateSyntaxError`` -- the same :class:`PreviewRenderError` an
+    undefined variable already raises."""
+    override_dir = tmp_path / "templates" / "previews"
+    override_dir.mkdir(parents=True)
+    (override_dir / "main.html.j2").write_text(
+        '{% extends "shipped/_base.html.j2" %}\n{% block content %}{% if %}broken{% endblock %}\n',
+        encoding="utf-8",
+    )
+
+    with pytest.raises(PreviewRenderError) as excinfo:
+        _render(tmp_path)
+
+    assert excinfo.value.template_name == "main.html.j2"
+
+
+def test_catalog_override_extending_a_missing_template_fails_naming_it(tmp_path: Path) -> None:
+    """A catalog override's own ``{% extends %}`` naming a file that does
+    not exist -- neither a catalog override nor a shipped template of that
+    name -- is a build refusal naming the missing file, never an uncaught
+    ``TemplateNotFound``."""
+    override_dir = tmp_path / "templates" / "previews"
+    override_dir.mkdir(parents=True)
+    (override_dir / "main.html.j2").write_text(
+        '{% extends "does-not-exist.html.j2" %}\n', encoding="utf-8"
+    )
+
+    with pytest.raises(PreviewRenderError) as excinfo:
+        _render(tmp_path)
+
+    assert "does-not-exist.html.j2" in str(excinfo.value)
+
+
 #: ``data:`` URIs (the brand mark, every member image) are real but
 #: arbitrary bytes in these tests -- collapsed to a fixed placeholder before
 #: snapshotting so the locked file stays a readable diff of *structure*,
