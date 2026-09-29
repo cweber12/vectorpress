@@ -1783,7 +1783,9 @@ def build(
 ) -> None:
     """Build one product into builds/<slug>/: a customer package (SVG/ and
     PNG/ folders, plus a converted DXF/ folder when the product lists that
-    format, plus README.txt and LICENSE.txt), its ZIP, and a manifest.
+    format, plus README.txt and LICENSE.txt), its ZIP, a manifest, and
+    marketplace preview images under previews/ (never inside the package or
+    the ZIP).
 
     Refuses and writes nothing -- leaving any previous build of this
     product untouched -- for a product with no [listing] yet, naming
@@ -1791,9 +1793,11 @@ def build(
     existing license template (there is no default brand), if that license
     template names an unknown placeholder, if the product's membership does
     not fully resolve, if two members' customer file names collide (naming
-    every asset ID sharing that name), or if a DXF conversion fails (naming
-    the asset). An ineligible member (listing each with its reasons, the
-    same as 'vpress product') refuses the build under this product's
+    every asset ID sharing that name), if a DXF conversion fails (naming the
+    asset), or if a preview fails to render (naming the template, for an
+    undefined variable or a disallowed URL). An ineligible member (listing
+    each with its reasons, the same as 'vpress product') refuses the build
+    under this product's
     default ineligible_members = "refuse"; set to "exclude", it ships the
     eligible members instead, reporting and recording each excluded one --
     and still refuses, reporting that no member was eligible, when none are.
@@ -1888,6 +1892,18 @@ def build(
         )
         raise typer.Exit(code=1)
 
+    if result.outcome is BuildOutcome.REFUSED_PREVIEW_RENDER_FAILURE:
+        preview_failure = result.preview_render_failure
+        assert preview_failure is not None
+        typer.echo(f"build: {slug} refused: preview rendering failed", err=True)
+        named = (
+            f"{preview_failure.template_name}: {preview_failure.message}"
+            if preview_failure.template_name is not None
+            else preview_failure.message
+        )
+        typer.echo(f"  {named}")
+        raise typer.Exit(code=1)
+
     assert result.outcome is BuildOutcome.BUILT
     assert result.manifest is not None  # BUILT always carries the manifest it just wrote
     assert result.package_dir is not None
@@ -1928,6 +1944,9 @@ def build(
             " source for the redundant type in asset.toml to make it impossible"
             " (e.g. no flatcolor source for one-color art)"
         )
+    typer.echo(f"Previews: {len(result.manifest.previews)}")
+    for preview in result.manifest.previews:
+        typer.echo(f"  {preview}")
 
 
 # --- vpress attention: the inbox (§34, §24, CONTEXT.md "Attention report / Inbox") ---
