@@ -110,6 +110,38 @@ def test_build_writes_every_preview_type_at_both_canvases_never_in_the_zip_and_l
     assert manifest.previews == EXPECTED_PREVIEWS
 
 
+# --- acceptance: the build report names every catalog template override in use (ADR 0015, #121) --
+
+
+@pytest.mark.integration
+def test_a_build_with_no_catalog_templates_reports_no_overrides(
+    monkeypatch: pytest.MonkeyPatch, temp_catalog_root: Path
+) -> None:
+    _generate_and_approve_transparent_png(monkeypatch, temp_catalog_root)
+
+    result = runner.invoke(app, ["build", PNG_ONLY_SLUG])
+
+    assert result.exit_code == 0, result.output
+    assert "Catalog template overrides: 0" in result.output
+    assert "templates/previews/" not in result.output
+
+
+@pytest.mark.integration
+def test_a_catalog_brand_css_override_is_named_in_the_build_report(
+    monkeypatch: pytest.MonkeyPatch, temp_catalog_root: Path
+) -> None:
+    _generate_and_approve_transparent_png(monkeypatch, temp_catalog_root)
+    override_dir = temp_catalog_root / "templates" / "previews"
+    override_dir.mkdir(parents=True)
+    (override_dir / "brand.css").write_text("body { background: hotpink; }\n", encoding="utf-8")
+
+    result = runner.invoke(app, ["build", PNG_ONLY_SLUG])
+
+    assert result.exit_code == 0, result.output
+    assert "Catalog template overrides: 1" in result.output
+    assert "  templates/previews/brand.css" in result.output
+
+
 @pytest.mark.integration
 def test_catalog_override_reading_an_undefined_variable_refuses_the_build_naming_it_and_leaves_the_previous_build_intact(
     monkeypatch: pytest.MonkeyPatch, temp_catalog_root: Path

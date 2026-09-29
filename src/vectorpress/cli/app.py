@@ -1154,7 +1154,8 @@ def listing_draft(
     nothing; redraft by deleting the table by hand and running this again.
     Every existing byte of the file, including its own line endings, is
     unchanged; the combined text is re-parsed and validated before the file
-    is replaced.
+    is replaced. Also lists any catalog templates/listing/ override this
+    draft used, by its catalog-relative path.
     \f
     vectorpress.build.listing_draft.draft_listing_for_product computes the
     values (title and description render through templates/listing/, a
@@ -1188,6 +1189,7 @@ def listing_draft(
         raise typer.Exit(code=1)
 
     assert draft_result.listing is not None
+    assert draft_result.template_overrides is not None
     append_result = append_listing(root, config, slug, draft_result.listing)
     if append_result.outcome is not ListingAppendOutcome.APPENDED:
         typer.echo(f"listing draft: {slug} refused: {append_result.outcome.value}", err=True)
@@ -1196,6 +1198,9 @@ def listing_draft(
         raise typer.Exit(code=1)
 
     typer.echo(f"{slug}\tdrafted\t{product_toml_path(config, slug)}")
+    typer.echo(f"Catalog template overrides: {len(draft_result.template_overrides)}")
+    for override in draft_result.template_overrides:
+        typer.echo(f"  {override}")
 
 
 override_app = typer.Typer(
@@ -1814,6 +1819,10 @@ def build(
     have removed detail that would cut cleanly at this size), and a member
     whose included derivatives are byte-identical (both still ship; fix it
     catalog-side by declaring no source for the redundant type).
+
+    Lists every catalog template that overrode a shipped one during this
+    build, by its catalog-relative path, so an override that no longer
+    tracks the shipped template it replaces is never invisible.
     \f
     vectorpress.build.product_build.build_product does the whole build;
     this only renders its BuildResult.
@@ -1908,6 +1917,7 @@ def build(
     assert result.manifest is not None  # BUILT always carries the manifest it just wrote
     assert result.package_dir is not None
     assert result.zip_path is not None
+    assert result.template_overrides is not None
     typer.echo(f"{slug}\tbuilt\t{result.package_dir}")
     typer.echo(f"{slug}\tzip\t{result.zip_path}")
     for member in result.manifest.members:
@@ -1947,6 +1957,9 @@ def build(
     typer.echo(f"Previews: {len(result.manifest.previews)}")
     for preview in result.manifest.previews:
         typer.echo(f"  {preview}")
+    typer.echo(f"Catalog template overrides: {len(result.template_overrides)}")
+    for override in result.template_overrides:
+        typer.echo(f"  {override}")
 
 
 # --- vpress attention: the inbox (§34, §24, CONTEXT.md "Attention report / Inbox") ---

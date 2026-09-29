@@ -190,3 +190,35 @@ def test_catalog_template_override_changes_the_drafted_description(
     assert result.exit_code == 0, result.output
     text = (temp_catalog_root / PNG_ONLY_PATH).read_text(encoding="utf-8")
     assert 'description = "A totally custom pitch."' in text
+
+
+# --- acceptance: the draft names every catalog template override in use (ADR 0015, #121) --
+
+
+@pytest.mark.integration
+def test_a_draft_with_no_catalog_templates_reports_no_overrides(
+    monkeypatch: pytest.MonkeyPatch, temp_catalog_root: Path
+) -> None:
+    monkeypatch.chdir(temp_catalog_root)
+
+    result = runner.invoke(app, ["listing", "draft", PNG_ONLY_SLUG])
+
+    assert result.exit_code == 0, result.output
+    assert "Catalog template overrides: 0" in result.output
+    assert "templates/listing/" not in result.output
+
+
+@pytest.mark.integration
+def test_a_catalog_title_template_override_is_named_in_the_draft_report(
+    monkeypatch: pytest.MonkeyPatch, temp_catalog_root: Path
+) -> None:
+    override_dir = temp_catalog_root / "templates" / "listing"
+    override_dir.mkdir(parents=True)
+    (override_dir / "title.txt.j2").write_text("{{ name }} -- Overridden Title\n", encoding="utf-8")
+
+    monkeypatch.chdir(temp_catalog_root)
+    result = runner.invoke(app, ["listing", "draft", PNG_ONLY_SLUG])
+
+    assert result.exit_code == 0, result.output
+    assert "Catalog template overrides: 1" in result.output
+    assert "  templates/listing/title.txt.j2" in result.output

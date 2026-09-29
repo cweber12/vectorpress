@@ -1,4 +1,47 @@
 # serializer version: 1
+# name: test_catalog_override_of_brand_css_changes_the_rendered_html_locked_by_snapshot
+  '''
+  <!doctype html>
+  <html lang="en">
+  <head>
+  <meta charset="utf-8">
+  <style>
+  body { background: hotpink; }
+  
+  </style>
+  </head>
+  <body>
+  
+  <div class="preview preview-main">
+    <header class="brand-header">
+      <img class="brand-mark" src="data:image/png;base64,TUFSS0JZVEVT" alt="Test Brand">
+      <span class="brand-name">Test Brand</span>
+    </header>
+    <h1 class="product-title">Test Product</h1>
+    <p class="product-meta">1 designs</p>
+    <ul class="format-badges">
+      
+      <li class="format-badge">PNG (1)</li>
+      
+    </ul>
+    
+    <ul class="featured-members">
+      
+      <li class="featured-member">
+        
+        <img src="data:image/png;base64,UE5HQllURVM=" alt="Ochre Sea Star">
+        
+        <span>Ochre Sea Star</span>
+      </li>
+      
+    </ul>
+  </div>
+  
+  </body>
+  </html>
+  
+  '''
+# ---
 # name: test_contents_html_is_locked_by_snapshot
   '''
   <!doctype html>

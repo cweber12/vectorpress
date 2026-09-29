@@ -72,6 +72,13 @@ failure does, before anything is written; previews are never inside the
 package or the ZIP (§14), and the manifest records their file names, never
 image hashes.
 
+**Catalog template overrides (ADR 0015).** ``BuildResult.template_overrides``
+names every catalog ``templates/<kind>/`` file this build actually loaded --
+today only ``previews/`` renders during a build, so it is
+:func:`~vectorpress.build.previews.render_previews`'s own list; a later
+export step adds its overrides to the same list, unchanged here. ``cli``
+only renders it.
+
 **All-or-nothing (§35).** Every file the build produces is written under a
 fresh temporary directory first; only once that succeeds does it replace
 ``builds/<product-slug>/`` in one move, so a failure never leaves that
@@ -380,8 +387,9 @@ class BuildResult:
     ``dxf_conversion_failure`` or ``preview_render_failure`` is set for its
     matching refusal outcome (:attr:`BuildOutcome.REFUSED_NO_LISTING`
     carries none -- the slug the caller already has is enough to name the
-    draft command); ``manifest``/``package_dir``/``zip_path`` are set
-    exactly when ``outcome`` is :attr:`BuildOutcome.BUILT`."""
+    draft command); ``manifest``/``package_dir``/``zip_path``/
+    ``template_overrides`` are set exactly when ``outcome`` is
+    :attr:`BuildOutcome.BUILT`."""
 
     outcome: BuildOutcome
     brand_problems: list[MetadataProblem] | None = None
@@ -394,6 +402,7 @@ class BuildResult:
     manifest: Manifest | None = None
     package_dir: Path | None = None
     zip_path: Path | None = None
+    template_overrides: list[str] | None = None
 
 
 def _current_year() -> int:
@@ -711,7 +720,7 @@ def build_product(
         files_by_folder.setdefault(folder, []).append(filename)
 
     try:
-        preview_files = render_previews(
+        preview_result = render_previews(
             root,
             product,
             brand,
@@ -727,6 +736,10 @@ def build_product(
                 template_name=exc.template_name, message=str(exc)
             ),
         )
+    preview_files = preview_result.files
+    # previews/ is the only kind vpress build renders today (ADR 0015): a
+    # later export step's own overrides join this same list unchanged here.
+    template_overrides = sorted(preview_result.template_overrides)
 
     readme_text = render_readme_text(
         intro=brand.readme_text,
@@ -831,4 +844,5 @@ def build_product(
         manifest=manifest,
         package_dir=final_dir / top_level_name,
         zip_path=final_dir / f"{top_level_name}.zip",
+        template_overrides=template_overrides,
     )

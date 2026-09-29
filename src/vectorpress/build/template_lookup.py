@@ -22,8 +22,16 @@ Every template renders against a fixed, documented context specific to its
 own kind (``build.listing_draft``'s for ``listing``) with strict undefined
 variables: reading anything else fails the render naming the template,
 rather than silently printing an empty string.
+
+The build report names every catalog override actually used (ADR 0015): a
+file under ``templates/<kind>/`` that some render of that environment
+loaded, whether by a direct lookup or only reached through
+``{% extends %}``/``{% include %}`` -- never one merely sitting in the
+folder unread. :func:`used_overrides` reads this back off the environment
+:func:`template_environment` built.
 """
 
+from collections.abc import Callable
 from pathlib import Path
 
 from jinja2 import ChoiceLoader, Environment, FileSystemLoader, PrefixLoader, StrictUndefined
@@ -75,6 +83,32 @@ def template_name_from_traceback(exc: BaseException, root: Path, kind: str) -> s
     return name
 
 
+class _TrackingCatalogLoader(FileSystemLoader):
+    """The catalog's own ``templates/<kind>/`` loader, recording the
+    catalog-relative path of every file it actually serves (ADR 0015's
+    build report list). ``get_source`` is the one point every lookup
+    against this folder passes through -- a plain top-level request, or one
+    reached only via ``{% extends %}``/``{% include %}`` -- whether or not
+    :class:`~jinja2.Environment` later serves the compiled template from its
+    own cache on a repeat request. A file this loader never finds (missing,
+    so :class:`~jinja2.ChoiceLoader` falls through to the shipped folder) is
+    never recorded: only a name it actually resolved counts as "in use"."""
+
+    def __init__(self, path: Path, kind: str) -> None:
+        super().__init__(path)
+        self._catalog_relative_prefix = f"{CATALOG_TEMPLATES_DIRNAME}/{kind}"
+        self.used: list[str] = []
+
+    def get_source(
+        self, environment: Environment, template: str
+    ) -> tuple[str, str, Callable[[], bool]]:
+        source = super().get_source(environment, template)
+        path = f"{self._catalog_relative_prefix}/{template}"
+        if path not in self.used:
+            self.used.append(path)
+        return source
+
+
 def template_environment(root: Path, kind: str) -> Environment:
     """A Jinja environment rendering ``kind`` templates: the catalog's own
     ``templates/<kind>/`` first, then the shipped ``<kind>/`` folder, so a
@@ -87,13 +121,17 @@ def template_environment(root: Path, kind: str) -> Environment:
     of rendering blank (``StrictUndefined``); autoescaping is off, since
     every kind so far renders plain text or is escaped by its own markup
     rules, not HTML read back from user data.
+
+    The catalog loader is :class:`_TrackingCatalogLoader`, so every render
+    through the returned environment can later be asked, via
+    :func:`used_overrides`, which catalog files it actually used.
     """
     catalog_dir = root / CATALOG_TEMPLATES_DIRNAME / kind
     shipped_dir = _SHIPPED_TEMPLATES_ROOT / kind
     shipped_loader = FileSystemLoader(shipped_dir)
     loader = ChoiceLoader(
         [
-            FileSystemLoader(catalog_dir),
+            _TrackingCatalogLoader(catalog_dir, kind),
             shipped_loader,
             PrefixLoader({SHIPPED_TEMPLATE_PREFIX: shipped_loader}),
         ]
@@ -101,3 +139,17 @@ def template_environment(root: Path, kind: str) -> Environment:
     return Environment(
         loader=loader, undefined=StrictUndefined, autoescape=False, keep_trailing_newline=True
     )
+
+
+def used_overrides(environment: Environment) -> list[str]:
+    """The catalog-relative paths (``templates/<kind>/<file>``) of every
+    catalog override ``environment`` actually used, sorted for a stable
+    build report (ADR 0015: "the build report lists every catalog override
+    in use"). ``environment`` must be one :func:`template_environment`
+    built -- its first loader is always the kind's own
+    :class:`_TrackingCatalogLoader`."""
+    loader = environment.loader
+    assert isinstance(loader, ChoiceLoader)
+    catalog_loader = loader.loaders[0]
+    assert isinstance(catalog_loader, _TrackingCatalogLoader)
+    return sorted(catalog_loader.used)
