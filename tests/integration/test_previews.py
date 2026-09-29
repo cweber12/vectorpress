@@ -29,10 +29,18 @@ PNG_ONLY_TOP_LEVEL = "Pacific-Coast-Tide-Pool"
 EXPECTED_PREVIEWS = [
     "previews/01-main-landscape.png",
     "previews/01-main-square.png",
+    "previews/02-included-landscape.png",
+    "previews/02-included-square.png",
+    "previews/03-formats-landscape.png",
+    "previews/03-formats-square.png",
 ]
 EXPECTED_SIZES = {
     "previews/01-main-square.png": (2000, 2000),
     "previews/01-main-landscape.png": (2400, 1600),
+    "previews/02-included-square.png": (2000, 2000),
+    "previews/02-included-landscape.png": (2400, 1600),
+    "previews/03-formats-square.png": (2000, 2000),
+    "previews/03-formats-landscape.png": (2400, 1600),
 }
 
 
@@ -64,7 +72,7 @@ def _preview_files(build_dir: Path) -> dict[str, bytes]:
 
 
 @pytest.mark.integration
-def test_build_writes_main_previews_at_both_canvases_never_in_the_zip_and_lists_them_in_the_manifest(
+def test_build_writes_every_preview_type_at_both_canvases_never_in_the_zip_and_lists_them_in_the_manifest(
     monkeypatch: pytest.MonkeyPatch, temp_catalog_root: Path
 ) -> None:
     _generate_and_approve_transparent_png(monkeypatch, temp_catalog_root)
@@ -77,7 +85,7 @@ def test_build_writes_main_previews_at_both_canvases_never_in_the_zip_and_lists_
     assert previews_dir.is_dir()
 
     preview_names = sorted(p.name for p in previews_dir.iterdir() if p.is_file())
-    assert preview_names == ["01-main-landscape.png", "01-main-square.png"]
+    assert preview_names == sorted(Path(rel_path).name for rel_path in EXPECTED_PREVIEWS)
 
     for rel_path, (expected_width, expected_height) in EXPECTED_SIZES.items():
         with Image.open(previews_dir / Path(rel_path).name) as image:

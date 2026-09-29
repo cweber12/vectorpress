@@ -1,0 +1,32 @@
+{% extends "_base.html.j2" %}
+
+{# §16: a badge per format folder with its file count and a one-line use.
+   The use text is fixed per format -- not asset- or brand-specific -- so it
+   lives here rather than as a context field ADR 0015 does not document. #}
+{% set format_uses = {
+  "svg": "Vector artwork for cutting machines and design software.",
+  "png": "Transparent, ready-to-use images for print and digital use.",
+  "dxf": "Cut files for laser cutters and CNC machines.",
+  "pdf": "Print-ready vector pages for professional printing.",
+  "eps": "Vector files for professional design software.",
+} %}
+
+{% block content %}
+<div class="preview preview-formats">
+  <header class="brand-header">
+    <img class="brand-mark" src="{{ brand.mark_url }}" alt="{{ brand.name }}">
+    <span class="brand-name">{{ brand.name }}</span>
+  </header>
+  <h1 class="product-title">{{ product.title }}</h1>
+  <p class="product-meta">Included file formats</p>
+  <ul class="format-cards">
+    {% for format in product.formats %}
+    <li class="format-card">
+      <span class="format-card-label">{{ format.label }}</span>
+      <span class="format-card-count">{{ format.file_count }} files</span>
+      <p class="format-card-use">{{ format_uses[format.value] }}</p>
+    </li>
+    {% endfor %}
+  </ul>
+</div>
+{% endblock %}

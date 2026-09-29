@@ -62,14 +62,15 @@ conversion failure (malformed path data, or the DXF writer itself failing)
 refuses the whole build -- nothing written yet -- naming the asset and the
 derivative type it was converting (§35).
 
-**Preview rendering (§16, ADR 0014, ADR 0015).** ``main`` renders at both
-fixed canvases (:mod:`vectorpress.build.previews`) from the same in-memory
-data this function has already gathered for the package itself -- no second
-read of any effective derivative. A rendering failure (no Chromium, an
-undefined template variable, a template requesting a disallowed URL) refuses
-the whole build the same way a DXF conversion failure does, before anything
-is written; previews are never inside the package or the ZIP (§14), and the
-manifest records their file names, never image hashes.
+**Preview rendering (§16, ADR 0014, ADR 0015).** Every preview type
+(:mod:`vectorpress.build.previews`) renders at both fixed canvases from the
+same in-memory data this function has already gathered for the package
+itself -- no second read of any effective derivative. A rendering failure
+(no Chromium, an undefined template variable, a template requesting a
+disallowed URL) refuses the whole build the same way a DXF conversion
+failure does, before anything is written; previews are never inside the
+package or the ZIP (§14), and the manifest records their file names, never
+image hashes.
 
 **All-or-nothing (§35).** Every file the build produces is written under a
 fresh temporary directory first; only once that succeeds does it replace
@@ -92,7 +93,7 @@ from uuid import uuid4
 
 from vectorpress import __version__
 from vectorpress.build._dxf_conversion import DxfConversionError, svg_to_dxf_bytes
-from vectorpress.build.previews import PreviewRenderError, render_main_previews
+from vectorpress.build.previews import PreviewRenderError, render_previews
 from vectorpress.build.product_resolution import ProductMember, resolve_product
 from vectorpress.catalog.assets import asset_dir
 from vectorpress.catalog.brand import load_brand
@@ -691,7 +692,7 @@ def build_product(
         files_by_folder.setdefault(folder, []).append(filename)
 
     try:
-        preview_files = render_main_previews(
+        preview_files = render_previews(
             root,
             product,
             brand,

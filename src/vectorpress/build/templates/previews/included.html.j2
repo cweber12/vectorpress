@@ -1,0 +1,23 @@
+{% extends "_base.html.j2" %}
+
+{% block content %}
+<div class="preview preview-included">
+  <header class="brand-header">
+    <img class="brand-mark" src="{{ brand.mark_url }}" alt="{{ brand.name }}">
+    <span class="brand-name">{{ brand.name }}</span>
+  </header>
+  <h1 class="product-title">{{ product.title }}</h1>
+  <p class="product-meta">{{ product.member_count }} designs</p>
+  {# §16: up to 12 members, each labeled with its display name. #}
+  <ul class="featured-members">
+    {% for member in members[:12] %}
+    <li class="featured-member">
+      {% if member.image_url %}
+      <img src="{{ member.image_url }}" alt="{{ member.display_name }}">
+      {% endif %}
+      <span>{{ member.display_name }}</span>
+    </li>
+    {% endfor %}
+  </ul>
+</div>
+{% endblock %}
