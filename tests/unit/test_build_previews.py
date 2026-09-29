@@ -15,6 +15,7 @@ import re
 from pathlib import Path
 
 import pytest
+from playwright.sync_api import Error as PlaywrightError
 from syrupy.assertion import SnapshotAssertion
 
 from vectorpress.build.previews import (
@@ -24,9 +25,11 @@ from vectorpress.build.previews import (
     PreviewPage,
     PreviewRenderError,
     PreviewType,
+    _DisallowedRequestError,  # pyright: ignore[reportPrivateUsage]
     _featured_asset_ids,  # pyright: ignore[reportPrivateUsage]
     _pages,  # pyright: ignore[reportPrivateUsage]
     _renders,  # pyright: ignore[reportPrivateUsage]
+    _screenshot,  # pyright: ignore[reportPrivateUsage]
     preview_members,
     render_preview_html,
 )
@@ -799,3 +802,86 @@ def test_contents_html_is_locked_by_snapshot(tmp_path: Path, snapshot: SnapshotA
         )
 
     assert _DATA_URI_RE.sub("data:<omitted>", html) == snapshot
+
+
+# --- `_screenshot`: retries one transient Chromium failure, nothing else ---
+
+
+def test_screenshot_retries_once_after_a_transient_chromium_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """CI has hit ``Page.screenshot: Protocol error (Page.captureScreenshot):
+    Unable to capture screenshot`` once, with nothing wrong in the rendered
+    page -- a dropped DevTools connection or killed render target, not a
+    reason to refuse a real build. One retry on a fresh page recovers it."""
+    attempts: list[int] = []
+
+    def flaky_render_screenshot(html: str, canvas: Canvas) -> bytes:
+        attempts.append(1)
+        if len(attempts) == 1:
+            raise PlaywrightError(
+                "Page.screenshot: Protocol error (Page.captureScreenshot): "
+                "Unable to capture screenshot"
+            )
+        return b"PNGBYTES"
+
+    monkeypatch.setattr("vectorpress.build.previews._render_screenshot", flaky_render_screenshot)
+
+    result = _screenshot("<html></html>", _SQUARE, "main.html.j2")
+
+    assert result == b"PNGBYTES"
+    assert len(attempts) == 2
+
+
+def test_screenshot_surfaces_a_second_transient_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+    attempts: list[int] = []
+
+    def always_transient(html: str, canvas: Canvas) -> bytes:
+        attempts.append(1)
+        raise PlaywrightError("Protocol error (Page.captureScreenshot): still broken")
+
+    monkeypatch.setattr("vectorpress.build.previews._render_screenshot", always_transient)
+
+    with pytest.raises(PreviewRenderError) as excinfo:
+        _screenshot("<html></html>", _SQUARE, "main.html.j2")
+
+    assert len(attempts) == 2  # the one retry, then it gave up
+    assert excinfo.value.template_name == "main.html.j2"
+
+
+def test_screenshot_never_retries_a_route_guard_violation(monkeypatch: pytest.MonkeyPatch) -> None:
+    attempts: list[int] = []
+
+    def disallowed(html: str, canvas: Canvas) -> bytes:
+        attempts.append(1)
+        raise _DisallowedRequestError("https://example.invalid/remote.png")
+
+    monkeypatch.setattr("vectorpress.build.previews._render_screenshot", disallowed)
+
+    with pytest.raises(PreviewRenderError) as excinfo:
+        _screenshot("<html></html>", _SQUARE, "main.html.j2")
+
+    assert len(attempts) == 1  # never retried
+    assert "disallowed URL" in str(excinfo.value)
+    assert "https://example.invalid/remote.png" in str(excinfo.value)
+
+
+def test_screenshot_never_retries_a_non_transient_chromium_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A Chromium failure that does not look transient (no Chromium
+    installed, say) fails the render on its first attempt -- retrying it
+    would only double the time a real, non-transient failure takes to
+    report."""
+    attempts: list[int] = []
+
+    def unrelated_failure(html: str, canvas: Canvas) -> bytes:
+        attempts.append(1)
+        raise PlaywrightError("Executable doesn't exist, run playwright install")
+
+    monkeypatch.setattr("vectorpress.build.previews._render_screenshot", unrelated_failure)
+
+    with pytest.raises(PreviewRenderError):
+        _screenshot("<html></html>", _SQUARE, "main.html.j2")
+
+    assert len(attempts) == 1

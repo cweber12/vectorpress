@@ -582,14 +582,17 @@ def _browser_instance() -> Browser:
     """The one Chromium instance every preview render reuses -- launched on
     first use and kept for the life of the process (many builds render
     previews in one ``vpress`` invocation or test run; a fresh browser per
-    build would dominate the cost). Never explicitly closed: process exit
-    tears it down, the same lifetime Playwright's own examples use for a
-    long-lived host process."""
+    build would dominate the cost). Relaunched whenever the cached one is no
+    longer connected (a crashed or killed browser process), so a retry after
+    a transient failure (:func:`_screenshot`) always gets a live browser.
+    Never explicitly closed otherwise: process exit tears it down, the same
+    lifetime Playwright's own examples use for a long-lived host process."""
     global _playwright, _browser
-    if _browser is not None:
+    if _browser is not None and _browser.is_connected():
         return _browser
     try:
-        _playwright = sync_playwright().start()
+        if _playwright is None:
+            _playwright = sync_playwright().start()
         _browser = _playwright.chromium.launch()
     except PlaywrightError as exc:
         raise PreviewRenderError(f"Chromium is unavailable: {exc}") from exc
@@ -611,10 +614,23 @@ def _guard_disallowed_requests(violations: list[str]) -> Callable[[Route], None]
     return handle
 
 
-def _screenshot(html: str, canvas: Canvas, template_name: str) -> bytes:
-    """One canvas's PNG bytes for already-rendered ``html`` (ADR 0014: no
-    network, no system fonts -- every request but the shipped templates'
-    own ``data:`` URIs is aborted and fails the render, naming the URL)."""
+class _DisallowedRequestError(Exception):
+    """One render requested a URL the Chromium route guard does not allow
+    (ADR 0014). Its own exception, never a :class:`PlaywrightError`
+    subclass, so :func:`_screenshot` can never mistake a route-guard
+    violation for a transient Chromium failure worth retrying."""
+
+    def __init__(self, url: str) -> None:
+        super().__init__(url)
+        self.url = url
+
+
+def _render_screenshot(html: str, canvas: Canvas) -> bytes:
+    """One attempt at screenshotting already-rendered ``html`` on a fresh
+    page (ADR 0014: no network, no system fonts). Raises
+    :class:`_DisallowedRequestError` for a route-guard violation, or lets a
+    Chromium :class:`PlaywrightError` propagate -- :func:`_screenshot` is
+    the one that decides whether either is worth a retry."""
     browser = _browser_instance()
     page = browser.new_page(viewport={"width": canvas.width, "height": canvas.height})
     violations: list[str] = []
@@ -622,19 +638,53 @@ def _screenshot(html: str, canvas: Canvas, template_name: str) -> bytes:
         page.route("**/*", _guard_disallowed_requests(violations))
         page.set_content(html, wait_until="load")
         png_bytes = page.screenshot(type="png")
-    except PlaywrightError as exc:
-        raise PreviewRenderError(
-            f"Chromium failed to render {template_name}: {exc}", template_name=template_name
-        ) from exc
     finally:
         page.close()
 
     if violations:
-        raise PreviewRenderError(
-            f"{template_name} requested a disallowed URL: {violations[0]}",
-            template_name=template_name,
-        )
+        raise _DisallowedRequestError(violations[0])
     return png_bytes
+
+
+#: Substrings of a Chromium :class:`PlaywrightError` that mark it as a
+#: transient renderer hiccup -- a dropped DevTools connection or a killed
+#: render target -- rather than a real problem with the page: worth one
+#: retry on a fresh page (and, if the browser itself is no longer connected,
+#: a fresh browser) instead of refusing a real build over it. CI has hit
+#: ``Page.screenshot: Protocol error (Page.captureScreenshot): Unable to
+#: capture screenshot`` this way, with nothing wrong in the rendered page.
+_TRANSIENT_CHROMIUM_ERROR_MARKERS = ("Protocol error", "Target closed", "has been closed")
+
+
+def _is_transient_chromium_error(exc: PlaywrightError) -> bool:
+    message = str(exc)
+    return any(marker in message for marker in _TRANSIENT_CHROMIUM_ERROR_MARKERS)
+
+
+def _screenshot(html: str, canvas: Canvas, template_name: str) -> bytes:
+    """One canvas's PNG bytes for already-rendered ``html``. A transient
+    Chromium failure (:func:`_is_transient_chromium_error`) is retried once,
+    on a fresh page and, if the browser itself dropped, a fresh browser
+    (:func:`_browser_instance`) -- a route-guard violation or a second
+    failure still fails the render, naming the template."""
+    attempts_left = 2
+    while True:
+        attempts_left -= 1
+        try:
+            return _render_screenshot(html, canvas)
+        except _DisallowedRequestError as exc:
+            raise PreviewRenderError(
+                f"{template_name} requested a disallowed URL: {exc.url}",
+                template_name=template_name,
+            ) from exc
+        except PlaywrightError as exc:
+            if attempts_left <= 0 or not _is_transient_chromium_error(exc):
+                raise PreviewRenderError(
+                    f"Chromium failed to render {template_name}: {exc}",
+                    template_name=template_name,
+                ) from exc
+            # One transient failure, one retry left: loop back for a fresh
+            # page (and, via _browser_instance, a fresh browser if needed).
 
 
 @dataclass(frozen=True)
