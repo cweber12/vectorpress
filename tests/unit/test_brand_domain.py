@@ -83,3 +83,24 @@ def test_typography_requires_both_fonts() -> None:
 def test_card_style_requires_all_colors() -> None:
     with pytest.raises(ValidationError):
         BrandCardStyle.model_validate({"background_color": "#F4F1EC"})
+
+
+def test_typography_font_files_default_to_none() -> None:
+    typography = BrandTypography.model_validate({"heading_font": "Inter", "body_font": "Inter"})
+
+    assert typography.heading_font_file is None
+    assert typography.body_font_file is None
+
+
+def test_typography_accepts_a_catalog_font_file_per_role() -> None:
+    typography = BrandTypography.model_validate(
+        {
+            "heading_font": "Brand Sans",
+            "body_font": "Brand Sans",
+            "heading_font_file": "fonts/brand-sans.woff2",
+            "body_font_file": "fonts/brand-sans.woff2",
+        }
+    )
+
+    assert typography.heading_font_file == "fonts/brand-sans.woff2"
+    assert typography.body_font_file == "fonts/brand-sans.woff2"

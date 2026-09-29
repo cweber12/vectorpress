@@ -7,18 +7,36 @@ is the ``catalog`` layer's job.
 
 from pydantic import BaseModel, ConfigDict
 
+#: Font family names this tool ships its own font files for (ADR 0014):
+#: allowed as ``heading_font`` / ``body_font`` without a matching
+#: ``*_font_file``.
+SHIPPED_FONT_FAMILIES = frozenset({"Inter", "Space Grotesk"})
+
+#: The only extensions ADR 0014 allows a brand's own ``heading_font_file`` /
+#: ``body_font_file`` to name.
+FONT_FILE_EXTENSIONS = frozenset({".ttf", ".otf", ".woff2"})
+
 
 class BrandTypography(BaseModel):
-    """Preview typography settings (§27).
+    """Preview typography settings (§27, ADR 0014).
 
-    PRD 7 maps these to CSS custom properties for the HTML preview templates
-    (ADR 0008); nothing is rendered here.
+    ``heading_font`` and ``body_font`` name a font family; without a
+    matching ``*_font_file``, the name must be one of
+    :data:`SHIPPED_FONT_FAMILIES`, else it is a brand metadata problem
+    naming the field. ``heading_font_file`` and ``body_font_file`` each name
+    a font file relative to the catalog root -- one file serving both
+    weights. Checking a font file's existence and extension, and a
+    fileless family name against :data:`SHIPPED_FONT_FAMILIES`, needs the
+    catalog root, so the ``catalog`` layer does it, not this pure model
+    (ADR 0006).
     """
 
     model_config = ConfigDict(strict=True, extra="forbid", frozen=True)
 
     heading_font: str
     body_font: str
+    heading_font_file: str | None = None
+    body_font_file: str | None = None
 
 
 class BrandCardStyle(BaseModel):

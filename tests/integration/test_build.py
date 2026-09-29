@@ -347,6 +347,31 @@ def test_build_refuses_when_license_file_names_a_path_that_does_not_exist(
 
 
 @pytest.mark.integration
+def test_build_refuses_when_brand_names_an_unshipped_font_with_no_font_file_and_writes_nothing(
+    monkeypatch: pytest.MonkeyPatch, temp_catalog_root: Path
+) -> None:
+    """ADR 0014: "a font never silently falls back" -- naming a family this
+    tool does not ship, with no ``heading_font_file`` of its own, is a
+    brand metadata problem naming the field, and the build refuses before
+    writing anything (§27, the same gate ``license_file`` already exercises
+    above)."""
+    _generate_and_approve_transparent_png(monkeypatch, temp_catalog_root)
+    brand_path = temp_catalog_root / "brand.toml"
+    before = 'heading_font = "Space Grotesk"'
+    text = brand_path.read_text(encoding="utf-8")
+    assert before in text
+    brand_path.write_text(text.replace(before, 'heading_font = "Comic Sans MS"'), encoding="utf-8")
+
+    result = runner.invoke(app, ["build", PNG_ONLY_SLUG])
+
+    assert result.exit_code == 1
+    assert "brand.toml" in result.output
+    assert "typography.heading_font" in result.output
+    assert "Comic Sans MS" in result.output
+    assert not (temp_catalog_root / "builds").exists()
+
+
+@pytest.mark.integration
 def test_build_refuses_on_an_unknown_license_placeholder_and_writes_nothing(
     monkeypatch: pytest.MonkeyPatch, temp_catalog_root: Path
 ) -> None:

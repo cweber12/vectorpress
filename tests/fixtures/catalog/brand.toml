@@ -15,8 +15,8 @@ for cut-file quality before release. See LICENSE.txt for usage terms.
 """
 
 [typography]
-heading_font = "Quicksand"
-body_font = "Nunito Sans"
+heading_font = "Space Grotesk"
+body_font = "Inter"
 
 [card_style]
 background_color = "#F4F1EC"

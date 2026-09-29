@@ -110,6 +110,39 @@ def test_build_writes_every_preview_type_at_both_canvases_never_in_the_zip_and_l
     assert manifest.previews == EXPECTED_PREVIEWS
 
 
+# --- acceptance: an SVG mark_file renders in main (ADR 0014) ---------------
+
+
+@pytest.mark.integration
+def test_an_svg_mark_file_renders_through_chromium(
+    monkeypatch: pytest.MonkeyPatch, temp_catalog_root: Path
+) -> None:
+    """ADR 0014: "the mark (mark_file) may be PNG or SVG" -- Chromium draws
+    an SVG mark natively, the same as it does an SVG derivative, so
+    swapping ``mark.png`` for an SVG file of the same name is still a
+    successful build with the same preview files and sizes."""
+    _generate_and_approve_transparent_png(monkeypatch, temp_catalog_root)
+    brand_path = temp_catalog_root / "brand.toml"
+    (temp_catalog_root / "mark.svg").write_text(
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">'
+        '<circle cx="50" cy="50" r="40" fill="#C45D26"/></svg>',
+        encoding="utf-8",
+    )
+    brand_path.write_text(
+        brand_path.read_text(encoding="utf-8").replace(
+            'mark_file = "mark.png"', 'mark_file = "mark.svg"'
+        ),
+        encoding="utf-8",
+    )
+
+    result = runner.invoke(app, ["build", PNG_ONLY_SLUG])
+
+    assert result.exit_code == 0, result.output
+    build_dir = _build_dir(temp_catalog_root, PNG_ONLY_SLUG)
+    with Image.open(build_dir / "previews" / "01-main-square.png") as image:
+        assert image.size == (2000, 2000)
+
+
 # --- acceptance: the build report names every catalog template override in use (ADR 0015, #121) --
 
 

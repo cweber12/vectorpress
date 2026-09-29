@@ -1,27 +1,27 @@
 @font-face {
   font-family: "{{ brand.heading_font.family }}";
-  src: url("{{ brand.heading_font.regular_url }}") format("woff2");
+  src: url("{{ brand.heading_font.regular_url }}") format("{{ brand.heading_font.format }}");
   font-weight: 400;
   font-style: normal;
 }
 
 @font-face {
   font-family: "{{ brand.heading_font.family }}";
-  src: url("{{ brand.heading_font.bold_url }}") format("woff2");
+  src: url("{{ brand.heading_font.bold_url }}") format("{{ brand.heading_font.format }}");
   font-weight: 700;
   font-style: normal;
 }
 
 @font-face {
   font-family: "{{ brand.body_font.family }}";
-  src: url("{{ brand.body_font.regular_url }}") format("woff2");
+  src: url("{{ brand.body_font.regular_url }}") format("{{ brand.body_font.format }}");
   font-weight: 400;
   font-style: normal;
 }
 
 @font-face {
   font-family: "{{ brand.body_font.family }}";
-  src: url("{{ brand.body_font.bold_url }}") format("woff2");
+  src: url("{{ brand.body_font.bold_url }}") format("{{ brand.body_font.format }}");
   font-weight: 700;
   font-style: normal;
 }

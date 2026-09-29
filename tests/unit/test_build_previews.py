@@ -328,27 +328,6 @@ def test_render_main_html_with_featured_order_is_locked_by_snapshot(
 # --- brand.css names only shipped fonts, never a system font (ADR 0014) ----
 
 
-def test_unshipped_brand_fonts_fall_back_to_inter_with_no_generic_fallback(
-    tmp_path: Path,
-) -> None:
-    """A brand naming a font this tool does not ship (the fixture catalog's
-    own ``brand.toml`` names "Quicksand"/"Nunito Sans") never reaches
-    ``brand.css`` as a CSS family name, and the rendered page never carries
-    a generic fallback either -- both would risk a same-named or generic
-    font already installed on the render machine (ADR 0014: "no system
-    fonts"). It falls back to Inter, the one font this tool always ships."""
-    brand = _brand(typography=BrandTypography(heading_font="Quicksand", body_font="Nunito Sans"))
-
-    html = _render(tmp_path, brand=brand)
-
-    assert "sans-serif" not in html
-    assert "Quicksand" not in html
-    assert "Nunito Sans" not in html
-    assert html.count('font-family: "Inter"') >= 2  # heading_font's and body_font's own @font-face
-    assert '--heading-font: "Inter"' in html
-    assert '--body-font: "Inter"' in html
-
-
 def test_brand_naming_space_grotesk_uses_it_verbatim(tmp_path: Path) -> None:
     brand = _brand(
         typography=BrandTypography(heading_font="Space Grotesk", body_font="Space Grotesk")
@@ -359,6 +338,97 @@ def test_brand_naming_space_grotesk_uses_it_verbatim(tmp_path: Path) -> None:
     assert "sans-serif" not in html
     assert '--heading-font: "Space Grotesk"' in html
     assert '--body-font: "Space Grotesk"' in html
+
+
+# --- a catalog font file (ADR 0014): its own @font-face rule ---------------
+
+
+def test_a_catalog_heading_font_file_renders_an_at_font_face_rule_pointing_at_it_locked_by_snapshot(
+    tmp_path: Path, snapshot: SnapshotAssertion
+) -> None:
+    (tmp_path / "fonts").mkdir()
+    (tmp_path / "fonts" / "brand-heading.woff2").write_bytes(b"CUSTOMFONTBYTES")
+    brand = _brand(
+        typography=BrandTypography(
+            heading_font="Brand Display",
+            body_font="Inter",
+            heading_font_file="fonts/brand-heading.woff2",
+        )
+    )
+
+    with pytest.MonkeyPatch.context() as monkeypatch:
+        monkeypatch.setattr(
+            "vectorpress.build.previews._shipped_font_data_uris",
+            lambda: {
+                "inter_regular": "data:font/woff2;base64,AAAA",
+                "inter_bold": "data:font/woff2;base64,AAAA",
+                "space_grotesk_regular": "data:font/woff2;base64,AAAA",
+                "space_grotesk_bold": "data:font/woff2;base64,AAAA",
+            },
+        )
+        html = _render(tmp_path, brand=brand)
+
+    assert 'font-family: "Brand Display"' in html
+    assert '--heading-font: "Brand Display"' in html
+    assert "data:font/woff2;base64,Q1VTVE9NRk9OVEJZVEVT" in html  # brand-heading.woff2's own bytes
+    assert _DATA_URI_RE.sub("data:<omitted>", html) == snapshot
+
+
+def test_a_catalog_font_file_serves_both_weights_from_the_one_file(tmp_path: Path) -> None:
+    (tmp_path / "fonts").mkdir()
+    (tmp_path / "fonts" / "brand-heading.otf").write_bytes(b"ONEFILEBYTES")
+    brand = _brand(
+        typography=BrandTypography(
+            heading_font="Brand Display",
+            body_font="Inter",
+            heading_font_file="fonts/brand-heading.otf",
+        )
+    )
+
+    html = _render(tmp_path, brand=brand)
+
+    # Both the regular and bold @font-face rules for the heading role embed
+    # the same one file's bytes (a brand supplies only one file per role).
+    heading_uri = "data:font/otf;base64,T05FRklMRUJZVEVT"
+    assert html.count(heading_uri) == 2
+    assert 'format("opentype")' in html
+
+
+def test_each_allowed_font_file_extension_resolves_its_own_css_format_keyword(
+    tmp_path: Path,
+) -> None:
+    """A rejected extension is ``load_brand`` (catalog layer)'s own job,
+    before a build ever reaches this module -- this only proves every
+    allowed extension resolves to its own correct CSS ``format()`` keyword,
+    never a hardcoded one."""
+    for extension, css_format in (("ttf", "truetype"), ("otf", "opentype"), ("woff2", "woff2")):
+        (tmp_path / "fonts").mkdir(exist_ok=True)
+        (tmp_path / "fonts" / f"brand.{extension}").write_bytes(b"BYTES")
+        brand = _brand(
+            typography=BrandTypography(
+                heading_font="Brand Display",
+                body_font="Inter",
+                heading_font_file=f"fonts/brand.{extension}",
+            )
+        )
+
+        html = _render(tmp_path, brand=brand)
+
+        assert f'format("{css_format}")' in html
+
+
+# --- an SVG mark_file renders the same way a PNG one does (ADR 0014) -------
+
+
+def test_an_svg_mark_file_embeds_as_an_svg_data_uri_in_main(tmp_path: Path) -> None:
+    (tmp_path / "mark.svg").write_bytes(b"<svg>MARK</svg>")
+    brand = _brand(mark_file="mark.svg")
+
+    html = _render(tmp_path, brand=brand)
+
+    match = re.search(r'<img class="brand-mark" src="([^"]+)"', html)
+    assert match is not None
+    assert match.group(1).startswith("data:image/svg+xml;base64,")
 
 
 def test_catalog_override_cannot_read_anything_outside_the_documented_context(

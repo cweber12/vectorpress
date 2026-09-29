@@ -14,7 +14,12 @@ from pathlib import Path
 from pydantic import ValidationError
 
 from vectorpress.catalog.metadata_problem import MetadataProblem, problems_from_validation_error
-from vectorpress.domain.brand import Brand
+from vectorpress.domain.brand import (
+    FONT_FILE_EXTENSIONS,
+    SHIPPED_FONT_FAMILIES,
+    Brand,
+    BrandTypography,
+)
 
 BRAND_CONFIG_FILENAME = "brand.toml"
 
@@ -24,9 +29,12 @@ class BrandResult:
     """The catalog's brand, plus every problem found loading it.
 
     ``brand`` is ``None`` when ``brand.toml`` is missing, malformed, fails
-    schema validation, or names a mark file or license file that does not
-    exist under the catalog root; in every such case ``problems`` names the
-    file and, where the problem traces to one, the field.
+    schema validation, names a mark file or license file that does not
+    exist under the catalog root, or has a typography problem (a font file
+    that does not exist or has the wrong extension, or -- with no font file
+    -- a family name this tool does not ship, ADR 0014); in every such case
+    ``problems`` names the file and, where the problem traces to one, the
+    field.
     """
 
     brand: Brand | None
@@ -90,4 +98,46 @@ def load_brand(root: Path) -> BrandResult:
             ],
         )
 
+    typography_problem = _typography_problem(root, rel_path, brand.typography)
+    if typography_problem is not None:
+        return BrandResult(brand=None, problems=[typography_problem])
+
     return BrandResult(brand=brand, problems=[])
+
+
+def _font_field_problem(
+    root: Path, rel_path: Path, role: str, family: str, font_file: str | None
+) -> MetadataProblem | None:
+    """One typography role's own brand metadata problem, if any (ADR 0014:
+    "a font never silently falls back"): a font file with the wrong
+    extension or that does not exist under the catalog root, or -- with no
+    font file at all -- a family name this tool does not ship."""
+    if font_file is not None:
+        field = f"typography.{role}_font_file"
+        if Path(font_file).suffix.lower() not in FONT_FILE_EXTENSIONS:
+            return MetadataProblem(
+                rel_path, field, f"font file must be .ttf, .otf or .woff2: {font_file}"
+            )
+        if not (root / font_file).is_file():
+            return MetadataProblem(rel_path, field, f"font file not found: {font_file}")
+        return None
+
+    if family not in SHIPPED_FONT_FAMILIES:
+        shipped = " or ".join(sorted(SHIPPED_FONT_FAMILIES))
+        return MetadataProblem(
+            rel_path,
+            f"typography.{role}_font",
+            f"{family!r} is not a font this tool ships ({shipped}); "
+            f"set typography.{role}_font_file to a font file instead",
+        )
+    return None
+
+
+def _typography_problem(
+    root: Path, rel_path: Path, typography: BrandTypography
+) -> MetadataProblem | None:
+    return _font_field_problem(
+        root, rel_path, "heading", typography.heading_font, typography.heading_font_file
+    ) or _font_field_problem(
+        root, rel_path, "body", typography.body_font, typography.body_font_file
+    )
