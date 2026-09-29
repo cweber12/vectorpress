@@ -155,6 +155,7 @@ def read_manifest(root: Path, slug: ProductSlug) -> Manifest | None:
                 )
                 for entry in data["byte_identical_derivatives"]
             ],
+            previews=data["previews"],
         )
     except (json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
         raise ManifestFormatError(f"{path}: {exc}") from exc

@@ -62,6 +62,15 @@ conversion failure (malformed path data, or the DXF writer itself failing)
 refuses the whole build -- nothing written yet -- naming the asset and the
 derivative type it was converting (§35).
 
+**Preview rendering (§16, ADR 0014, ADR 0015).** ``main`` renders at both
+fixed canvases (:mod:`vectorpress.build.previews`) from the same in-memory
+data this function has already gathered for the package itself -- no second
+read of any effective derivative. A rendering failure (no Chromium, an
+undefined template variable, a template requesting a disallowed URL) refuses
+the whole build the same way a DXF conversion failure does, before anything
+is written; previews are never inside the package or the ZIP (§14), and the
+manifest records their file names, never image hashes.
+
 **All-or-nothing (§35).** Every file the build produces is written under a
 fresh temporary directory first; only once that succeeds does it replace
 ``builds/<product-slug>/`` in one move, so a failure never leaves that
@@ -83,6 +92,7 @@ from uuid import uuid4
 
 from vectorpress import __version__
 from vectorpress.build._dxf_conversion import DxfConversionError, svg_to_dxf_bytes
+from vectorpress.build.previews import PreviewRenderError, render_main_previews
 from vectorpress.build.product_resolution import ProductMember, resolve_product
 from vectorpress.catalog.assets import asset_dir
 from vectorpress.catalog.brand import load_brand
@@ -306,7 +316,7 @@ def _byte_identical_derivative_warnings(
 
 class BuildOutcome(StrEnum):
     """One ``vpress build`` outcome (§14, §35): built, or refused for one of
-    seven reasons, each leaving the previous build (if any) untouched and
+    eight reasons, each leaving the previous build (if any) untouched and
     writing nothing new."""
 
     BUILT = "built"
@@ -317,6 +327,7 @@ class BuildOutcome(StrEnum):
     REFUSED_INELIGIBLE_MEMBERS = "refused_ineligible_members"
     REFUSED_NAME_COLLISION = "refused_name_collision"
     REFUSED_DXF_CONVERSION_FAILURE = "refused_dxf_conversion_failure"
+    REFUSED_PREVIEW_RENDER_FAILURE = "refused_preview_render_failure"
 
 
 @dataclass(frozen=True)
@@ -331,15 +342,26 @@ class DxfConversionFailure:
 
 
 @dataclass(frozen=True)
+class PreviewRenderFailure:
+    """One preview rendering failure (§16, ADR 0014): the template it traces
+    to, when the failure names one (an undefined variable, a disallowed
+    URL), and the underlying error. ``template_name`` is ``None`` for a
+    Chromium-level failure such as no Chromium being installed."""
+
+    template_name: str | None
+    message: str
+
+
+@dataclass(frozen=True)
 class BuildResult:
     """The outcome of one :func:`build_product` call. Exactly one of
     ``brand_problems``, ``unknown_license_placeholders``,
-    ``reference_problems``, ``ineligible_members``, ``name_collisions`` or
-    ``dxf_conversion_failure`` is set for its matching refusal outcome
-    (:attr:`BuildOutcome.REFUSED_NO_LISTING` carries none -- the slug the
-    caller already has is enough to name the draft command);
-    ``manifest``/``package_dir``/``zip_path`` are set exactly when
-    ``outcome`` is :attr:`BuildOutcome.BUILT`."""
+    ``reference_problems``, ``ineligible_members``, ``name_collisions``,
+    ``dxf_conversion_failure`` or ``preview_render_failure`` is set for its
+    matching refusal outcome (:attr:`BuildOutcome.REFUSED_NO_LISTING`
+    carries none -- the slug the caller already has is enough to name the
+    draft command); ``manifest``/``package_dir``/``zip_path`` are set
+    exactly when ``outcome`` is :attr:`BuildOutcome.BUILT`."""
 
     outcome: BuildOutcome
     brand_problems: list[MetadataProblem] | None = None
@@ -348,6 +370,7 @@ class BuildResult:
     ineligible_members: list[ProductMember] | None = None
     name_collisions: list[NameCollision] | None = None
     dxf_conversion_failure: DxfConversionFailure | None = None
+    preview_render_failure: PreviewRenderFailure | None = None
     manifest: Manifest | None = None
     package_dir: Path | None = None
     zip_path: Path | None = None
@@ -472,6 +495,7 @@ def _manifest_json_bytes(manifest: Manifest) -> bytes:
             }
             for warning in manifest.byte_identical_derivatives
         ],
+        "previews": manifest.previews,
     }
     return json.dumps(payload, indent=2, sort_keys=True).encode("utf-8") + b"\n"
 
@@ -666,6 +690,24 @@ def build_product(
         folder, _, filename = rel_path.partition("/")
         files_by_folder.setdefault(folder, []).append(filename)
 
+    try:
+        preview_files = render_main_previews(
+            root,
+            product,
+            brand,
+            resolved.eligible_members,
+            assets_by_id,
+            content_by_member,
+            files_by_folder,
+        )
+    except PreviewRenderError as exc:
+        return BuildResult(
+            BuildOutcome.REFUSED_PREVIEW_RENDER_FAILURE,
+            preview_render_failure=PreviewRenderFailure(
+                template_name=exc.template_name, message=str(exc)
+            ),
+        )
+
     readme_text = render_readme_text(
         intro=brand.readme_text,
         standard_wording=brand.standard_wording,
@@ -714,6 +756,7 @@ def build_product(
         resolved.eligible_members, included_types_by_asset, assets_by_id, config, reference_size_in
     )
     byte_identical_derivatives = _byte_identical_derivative_warnings(content_by_member)
+    previews = sorted(rel_path for rel_path, _ in preview_files)
     manifest = Manifest(
         product_slug=product.slug,
         reference_size_in=reference_size_in,
@@ -729,6 +772,7 @@ def build_product(
         asset_rights_statuses=asset_rights_statuses,
         cleanup_size_warnings=cleanup_size_warnings,
         byte_identical_derivatives=byte_identical_derivatives,
+        previews=previews,
     )
 
     builds_dir = root / BUILDS_DIRNAME
@@ -739,6 +783,14 @@ def build_product(
         package_dir = tmp_dir / top_level_name
         for rel_path, data in package_files:
             file_path = package_dir / rel_path
+            file_path.parent.mkdir(parents=True, exist_ok=True)
+            file_path.write_bytes(data)
+
+        # Previews live beside the package, never inside it (§14, ADR 0014):
+        # written straight under tmp_dir, not package_dir, so they are never
+        # part of package_files and never enter the ZIP below.
+        for rel_path, data in preview_files:
+            file_path = tmp_dir / rel_path
             file_path.parent.mkdir(parents=True, exist_ok=True)
             file_path.write_bytes(data)
 

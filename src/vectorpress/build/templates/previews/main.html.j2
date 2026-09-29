@@ -1,0 +1,27 @@
+{% extends "_base.html.j2" %}
+
+{% block content %}
+<div class="preview preview-main">
+  <header class="brand-header">
+    <img class="brand-mark" src="{{ brand.mark_url }}" alt="{{ brand.name }}">
+    <span class="brand-name">{{ brand.name }}</span>
+  </header>
+  <h1 class="product-title">{{ product.title }}</h1>
+  <p class="product-meta">{{ product.member_count }} designs</p>
+  <ul class="format-badges">
+    {% for format in product.formats %}
+    <li class="format-badge">{{ format.label }} ({{ format.file_count }})</li>
+    {% endfor %}
+  </ul>
+  <ul class="featured-members">
+    {% for member in featured %}
+    <li class="featured-member">
+      {% if member.image_url %}
+      <img src="{{ member.image_url }}" alt="{{ member.display_name }}">
+      {% endif %}
+      <span>{{ member.display_name }}</span>
+    </li>
+    {% endfor %}
+  </ul>
+</div>
+{% endblock %}

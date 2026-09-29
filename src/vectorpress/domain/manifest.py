@@ -167,6 +167,13 @@ class Manifest:
     than its cut file's own cleanup size, and a member whose included
     derivatives duplicate each other's bytes. Neither excludes or drops a
     file -- both are reported for a human to act on, or not.
+
+    ``previews`` is every preview file this build rendered (§16, ADR 0014),
+    each path relative to the build directory (e.g.
+    ``"previews/01-main-square.png"``), sorted for a deterministic manifest
+    (§36) -- never an image hash: previews are not held to byte-identical
+    output (ADR 0014), so needs-rebuild compares a separate presentation
+    hash, not these file names, once that slice lands.
     """
 
     product_slug: ProductSlug
@@ -183,3 +190,4 @@ class Manifest:
     asset_rights_statuses: list[ManifestAssetRightsStatus]
     cleanup_size_warnings: list[ManifestCleanupSizeWarning]
     byte_identical_derivatives: list[ManifestByteIdenticalDerivatives]
+    previews: list[str]

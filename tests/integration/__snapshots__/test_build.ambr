@@ -18657,6 +18657,10 @@
         'source': 'generated',
       }),
     ]),
+    'previews': list([
+      'previews/01-main-landscape.png',
+      'previews/01-main-square.png',
+    ]),
     'product_slug': 'pacific_coast_tide_pool_png_only',
     'readme_wording_hash': 'e02c5c6b690a8aa685805dfb7fdace6ddf0bc8520108d1fd5517770cbc2d1408',
     'reference_size_in': 3.0,

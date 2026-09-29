@@ -42,6 +42,39 @@ CATALOG_TEMPLATES_DIRNAME = "templates"
 SHIPPED_TEMPLATE_PREFIX = "shipped"
 
 
+def template_name_from_traceback(exc: BaseException, root: Path, kind: str) -> str | None:
+    """The catalog- or shipped-relative template file name responsible for a
+    Jinja render-time error (typically ``jinja2.UndefinedError`` under
+    ``StrictUndefined``): the deepest frame in ``exc``'s own traceback whose
+    source file sits under the catalog's ``templates/<kind>/`` or the
+    shipped ``<kind>/`` folder, named the same way a catalog override's own
+    file is named -- relative to whichever folder it came from. ``None``
+    when no frame in the traceback belongs to either folder (the error did
+    not originate inside a template render at all).
+
+    A plain traceback walk, not a Jinja API: :class:`~jinja2.loaders.
+    FileSystemLoader` compiles each template with its real file path as the
+    frame's ``co_filename`` (unlike, say, a ``DictLoader``'s templates,
+    which have none), so every frame already carries the name this needs.
+    Works for a failure inside ``{% extends %}``/``{% include %}`` chain
+    too: the last matching frame is the innermost template actually being
+    evaluated when the error was raised, not the top-level one requested.
+    """
+    catalog_dir = root / CATALOG_TEMPLATES_DIRNAME / kind
+    shipped_dir = _SHIPPED_TEMPLATES_ROOT / kind
+    name: str | None = None
+    traceback = exc.__traceback__
+    while traceback is not None:
+        filename = Path(traceback.tb_frame.f_code.co_filename)
+        for template_dir in (catalog_dir, shipped_dir):
+            try:
+                name = filename.relative_to(template_dir).as_posix()
+            except ValueError:
+                continue
+        traceback = traceback.tb_next
+    return name
+
+
 def template_environment(root: Path, kind: str) -> Environment:
     """A Jinja environment rendering ``kind`` templates: the catalog's own
     ``templates/<kind>/`` first, then the shipped ``<kind>/`` folder, so a
