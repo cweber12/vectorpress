@@ -8,6 +8,12 @@ package also carries a brand-supplied ``README.txt`` and ``LICENSE.txt`` at
 its top level (§27). One function, :func:`build_product`, does the whole
 thing -- ``cli`` (and later ``ui``) only render its :class:`BuildResult`.
 
+**Listing gate (ADR 0016).** A build refuses -- writes nothing -- for a
+product with no ``[listing]``: a product can load and resolve without one,
+but the package name and LICENSE.txt's ``{product}`` both come from it, and
+``vpress build`` never drafts or writes one itself. Checked first, since it
+needs neither brand nor membership to decide.
+
 **Brand gate.** A build refuses -- writes nothing -- without a valid
 ``brand.toml`` naming an existing ``license_file`` (there is no default
 brand, since a default would ship as the customer's license terms), and
@@ -300,10 +306,11 @@ def _byte_identical_derivative_warnings(
 
 class BuildOutcome(StrEnum):
     """One ``vpress build`` outcome (§14, §35): built, or refused for one of
-    six reasons, each leaving the previous build (if any) untouched and
+    seven reasons, each leaving the previous build (if any) untouched and
     writing nothing new."""
 
     BUILT = "built"
+    REFUSED_NO_LISTING = "refused_no_listing"
     REFUSED_BRAND_PROBLEMS = "refused_brand_problems"
     REFUSED_LICENSE_TEMPLATE_PROBLEM = "refused_license_template_problem"
     REFUSED_REFERENCE_PROBLEMS = "refused_reference_problems"
@@ -328,7 +335,9 @@ class BuildResult:
     """The outcome of one :func:`build_product` call. Exactly one of
     ``brand_problems``, ``unknown_license_placeholders``,
     ``reference_problems``, ``ineligible_members``, ``name_collisions`` or
-    ``dxf_conversion_failure`` is set for its matching refusal outcome;
+    ``dxf_conversion_failure`` is set for its matching refusal outcome
+    (:attr:`BuildOutcome.REFUSED_NO_LISTING` carries none -- the slug the
+    caller already has is enough to name the draft command);
     ``manifest``/``package_dir``/``zip_path`` are set exactly when
     ``outcome`` is :attr:`BuildOutcome.BUILT`."""
 
@@ -355,9 +364,10 @@ def _current_year() -> int:
 
 def _product_title(product: Product) -> str:
     """LICENSE.txt's ``{product}`` placeholder (§27): the product's listing
-    title, else its slug -- the same fallback ``vpress product`` already
-    uses for a product with no ``[listing]`` drafted yet."""
-    return product.listing.title if product.listing is not None else product.slug
+    title -- always set here, since :func:`build_product`'s own listing gate
+    already refused a product with no ``[listing]`` before this is called."""
+    assert product.listing is not None  # build_product's listing gate already refused
+    return product.listing.title
 
 
 def _license_template_hash(license_template: str) -> str:
@@ -525,6 +535,9 @@ def build_product(
     build's ``--allow-unapproved`` override, passed straight through to it
     and never persisted.
     """
+    if product.listing is None:
+        return BuildResult(BuildOutcome.REFUSED_NO_LISTING)
+
     brand_result = load_brand(root)
     if brand_result.brand is None:
         return BuildResult(
@@ -583,9 +596,8 @@ def build_product(
         return BuildResult(BuildOutcome.REFUSED_NAME_COLLISION, name_collisions=collisions)
 
     reference_size_in = resolve_reference_size_in(config, product)
-    top_level_name = package_name(
-        product.listing.short_title if product.listing is not None else None, product.slug
-    )
+    assert product.listing is not None  # build_product's listing gate already refused
+    top_level_name = package_name(product.listing.short_title, product.slug)
 
     package_files: list[tuple[str, bytes]] = []
     manifest_members: list[ManifestMember] = []

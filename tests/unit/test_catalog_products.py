@@ -61,7 +61,10 @@ def test_product_over_a_collection_slug_has_its_reference_and_full_listing() -> 
     assert over_collection.listing.title == "Pacific Coast Tide Pool Cut File Collection"
 
 
-def test_product_with_inline_membership_has_no_listing() -> None:
+def test_product_with_inline_membership_loads_its_own_drafted_listing() -> None:
+    """``kelp_forest_mini_pack`` declares an inline membership (no
+    ``collection_slug``) and, like every fixture product, carries its own
+    already-drafted ``[listing]`` (ADR 0016) -- both load together."""
     config = load_catalog_config(FIXTURE_CATALOG_ROOT)
 
     inventory = load_products(FIXTURE_CATALOG_ROOT, config)
@@ -71,7 +74,8 @@ def test_product_with_inline_membership_has_no_listing() -> None:
     assert inline.collection_slug is None
     assert inline.membership is not None
     assert inline.membership.form is MembershipForm.RULE
-    assert inline.listing is None
+    assert inline.listing is not None
+    assert inline.listing.short_title == "Kelp Forest Mini Pack"
 
 
 def test_missing_products_dir_is_empty_not_an_error(tmp_path: Path) -> None:

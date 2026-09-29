@@ -18665,18 +18665,18 @@
 # ---
 # name: test_manifest_and_zip_listing_are_locked_by_snapshot[zip_listing]
   list([
-    'Pacific-Coast-Tide-Pool-Png-Only/LICENSE.txt',
-    'Pacific-Coast-Tide-Pool-Png-Only/PNG/giant-green-anemone-color.png',
-    'Pacific-Coast-Tide-Pool-Png-Only/PNG/ochre-sea-star-color.png',
-    'Pacific-Coast-Tide-Pool-Png-Only/PNG/purple-sea-urchin-color.png',
-    'Pacific-Coast-Tide-Pool-Png-Only/README.txt',
+    'Pacific-Coast-Tide-Pool/LICENSE.txt',
+    'Pacific-Coast-Tide-Pool/PNG/giant-green-anemone-color.png',
+    'Pacific-Coast-Tide-Pool/PNG/ochre-sea-star-color.png',
+    'Pacific-Coast-Tide-Pool/PNG/purple-sea-urchin-color.png',
+    'Pacific-Coast-Tide-Pool/README.txt',
   ])
 # ---
 # name: test_readme_and_license_text_are_locked_by_snapshot[license]
   '''
   Tide Pool Studio Personal & Small Business Use License
   
-  This license covers pacific_coast_tide_pool_png_only.
+  This license covers Pacific Coast Tide Pool – PNG Cut Files.
   
   You may use these cut files for personal projects and for small-batch
   products you make and sell yourself. You may not resell, redistribute or

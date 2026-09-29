@@ -228,17 +228,19 @@ Three valid collections (§11, §13, ADR 0008), resolved live by
 Three valid products (§7, §18, ADR 0008):
 
 - `pacific_coast_tide_pool_standard_pack` — references the
-  `pacific_coast_tide_pool` collection by slug and carries a full
-  `[listing]`.
+  `pacific_coast_tide_pool` collection by slug and carries a full,
+  hand-authored `[listing]`.
 - `pacific_coast_tide_pool_png_only` — references the *same*
   `pacific_coast_tide_pool` collection by slug, but with `derivative_types
   = ["transparent_png"]` and `formats = ["png"]` instead of the standard
   pack's three types: the same membership resolving to a different
   eligible/excluded breakdown depending which product asks (§10, `vpress
-  product`). No `[listing]` yet.
+  product`). Its `[listing]` is drafted by `vpress listing draft` (ADR
+  0016), not hand-authored.
 - `kelp_forest_mini_pack` — an inline collection (the same `Membership`
   shape a collection file uses) instead of a collection slug reference,
-  and no `[listing]` yet, since PRD 7 drafts that on first build. Carries
+  with its own `[listing]` drafted by `vpress listing draft` too (ADR
+  0016). Carries
   a `reference_size_in = 1.0` override, smaller than the catalog's own
   3.0 in default (§9.1, ADR 0008, issue #38): `vpress validate <asset_id>
   --product kelp_forest_mini_pack` validates at this size instead, and its
