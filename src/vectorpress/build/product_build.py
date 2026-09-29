@@ -102,6 +102,15 @@ template or an undefined variable refuses the whole build the same way a
 preview render failure does, naming the template; their own catalog
 overrides join :attr:`BuildResult.template_overrides`.
 
+**Cited marketplace limits (§19, ADR 0017).** Once the listing export
+exists, :func:`~vectorpress.build.export.measure_export_limits` measures it
+against every cited limit and the manifest built above is replaced with the
+result in ``export_limit_warnings``/``export_does_not_fit`` before anything
+is written -- warn, never truncate or refuse: no field is ever shortened
+and no build ever fails over a limit. The same measurement drives each
+bundle's own inline flags (:func:`~vectorpress.build.export.
+render_marketplace_bundles`).
+
 **All-or-nothing (§35).** Every file the build produces is written under a
 fresh temporary directory first; only once that succeeds does it replace
 ``builds/<product-slug>/`` in one move, so a failure never leaves that
@@ -116,7 +125,7 @@ import json
 import re
 import shutil
 import zipfile
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date
 from enum import StrEnum
 from pathlib import Path
@@ -131,6 +140,7 @@ from vectorpress.build.export import (
     ExportRenderFailure,
     ListingExport,
     build_listing_export,
+    measure_export_limits,
     render_marketplace_bundles,
 )
 from vectorpress.build.previews import PreviewRenderError, PreviewRenderFailure, render_previews
@@ -157,6 +167,8 @@ from vectorpress.domain.manifest import (
     ManifestCleanupSizeWarning,
     ManifestDxfMember,
     ManifestExcludedMember,
+    ManifestExportDoesNotFit,
+    ManifestExportLimitWarning,
     ManifestMember,
     ManifestMemberSource,
 )
@@ -559,6 +571,22 @@ def _manifest_json_bytes(manifest: Manifest) -> bytes:
         "previews": manifest.previews,
         "presentation_hash": manifest.presentation_hash,
         "listing_hash": manifest.listing_hash,
+        "export_limit_warnings": [
+            {
+                "marketplace": warning.marketplace,
+                "field": warning.field,
+                "measure": warning.measure,
+            }
+            for warning in manifest.export_limit_warnings
+        ],
+        "export_does_not_fit": [
+            {
+                "marketplace": item.marketplace,
+                "field": item.field,
+                "item": item.item,
+            }
+            for item in manifest.export_does_not_fit
+        ],
     }
     return json.dumps(payload, indent=2, sort_keys=True).encode("utf-8") + b"\n"
 
@@ -868,6 +896,12 @@ def build_product(
         previews=previews,
         presentation_hash=preview_result.presentation_hash,
         listing_hash=_listing_hash(product.listing),
+        # Measured from this same build's own export, once it exists below
+        # (needs the ZIP's size and name) -- replaced in place before
+        # anything is written, never left empty just because it was
+        # computed second.
+        export_limit_warnings=[],
+        export_does_not_fit=[],
     )
 
     builds_dir = root / BUILDS_DIRNAME
@@ -904,6 +938,26 @@ def build_product(
         export_path = tmp_dir / EXPORT_DIRNAME / LISTING_EXPORT_FILENAME
         export_path.parent.mkdir(parents=True, exist_ok=True)
         export_path.write_bytes(_listing_export_json_bytes(listing_export))
+
+        # §19's cited marketplace limits (ADR 0017), measured against this
+        # same export -- folded into the manifest built above before it is
+        # ever written, never left at its empty placeholder.
+        limits = measure_export_limits(listing_export)
+        manifest = replace(
+            manifest,
+            export_limit_warnings=[
+                ManifestExportLimitWarning(
+                    marketplace=warning.marketplace, field=warning.field, measure=warning.measure
+                )
+                for warning in limits.warnings
+            ],
+            export_does_not_fit=[
+                ManifestExportDoesNotFit(
+                    marketplace=item.marketplace, field=item.field, item=item.item
+                )
+                for item in limits.does_not_fit
+            ],
+        )
 
         # One pasteable text file per marketplace, beside listing.json --
         # never in the package or the ZIP (this module's own docstring).

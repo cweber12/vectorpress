@@ -30,6 +30,8 @@ from vectorpress.domain.manifest import (
     ManifestCleanupSizeWarning,
     ManifestDxfMember,
     ManifestExcludedMember,
+    ManifestExportDoesNotFit,
+    ManifestExportLimitWarning,
     ManifestMember,
     ManifestMemberSource,
 )
@@ -158,6 +160,22 @@ def read_manifest(root: Path, slug: ProductSlug) -> Manifest | None:
             previews=data["previews"],
             presentation_hash=data["presentation_hash"],
             listing_hash=data["listing_hash"],
+            export_limit_warnings=[
+                ManifestExportLimitWarning(
+                    marketplace=entry["marketplace"],
+                    field=entry["field"],
+                    measure=entry["measure"],
+                )
+                for entry in data["export_limit_warnings"]
+            ],
+            export_does_not_fit=[
+                ManifestExportDoesNotFit(
+                    marketplace=entry["marketplace"],
+                    field=entry["field"],
+                    item=entry["item"],
+                )
+                for entry in data["export_does_not_fit"]
+            ],
         )
     except (json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
         raise ManifestFormatError(f"{path}: {exc}") from exc

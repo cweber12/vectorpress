@@ -132,6 +132,31 @@ class ManifestByteIdenticalDerivatives:
 
 
 @dataclass(frozen=True)
+class ManifestExportLimitWarning:
+    """One field over a cited marketplace limit (§19, ADR 0017): the
+    marketplace, the field, and the measure found -- the field itself still
+    shipped unchanged in that marketplace's own bundle; this only records
+    that it is over."""
+
+    marketplace: str
+    field: str
+    measure: str
+
+
+@dataclass(frozen=True)
+class ManifestExportDoesNotFit:
+    """One item past a cited marketplace *count* limit (§19, ADR 0017,
+    CONTEXT.md's "warn, never truncate"): the marketplace, the field, and
+    the item itself -- still present in that field's own value, never
+    dropped; this only names the item that would not fit that
+    marketplace's own form."""
+
+    marketplace: str
+    field: str
+    item: str
+
+
+@dataclass(frozen=True)
 class Manifest:
     """One build's complete record (§14, §23, ADR 0004): the product it
     built, the reference size it was built at, the LICENSE.txt build year,
@@ -188,6 +213,15 @@ class Manifest:
     ``listing_hash`` is the ADR 0017 listing hash: a content hash of the
     whole ``[listing]`` table. Needs-rebuild reports **listing changed**
     when this differs from the current value.
+
+    ``export_limit_warnings`` and ``export_does_not_fit`` are §19's cited
+    marketplace limits (ADR 0017), measured by
+    :func:`~vectorpress.build.export.measure_export_limits` against this
+    same build's own export: every field over its own cited limit, and
+    every item past a cited *count* limit. Neither ever excludes or
+    truncates anything -- a marketplace's own bundle still carries every
+    field and every item unchanged; these two lists are only the record of
+    what was found over a limit, sorted by (marketplace, field).
     """
 
     product_slug: ProductSlug
@@ -207,3 +241,5 @@ class Manifest:
     previews: list[str]
     presentation_hash: str
     listing_hash: str
+    export_limit_warnings: list[ManifestExportLimitWarning]
+    export_does_not_fit: list[ManifestExportDoesNotFit]

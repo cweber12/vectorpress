@@ -25,9 +25,17 @@ each bundle's own listing description.
 labeled section per form field, in that marketplace's own form order. Their
 layout comes from shipped ``templates/export/*.txt.j2`` (ADR 0015,
 overridable by file name); the fixed context every bundle template renders
-against is documented on :func:`render_marketplace_bundles`. No limits
-enforcement and no AI disclosure here -- both are later exporter work
-(ADR 0017, ADR 0018); this module never writes a placeholder for either.
+against is documented on :func:`render_marketplace_bundles`.
+
+**Cited limits (§19, ADR 0017).** :func:`measure_export_limits` measures
+``export`` against :mod:`vectorpress.build.marketplace_limits`'s one table
+of cited marketplace limits and returns every violation as an
+:class:`ExportLimitWarning` or :class:`ExportDoesNotFitItem` -- reported,
+never enforced: no field is truncated and no build refuses over one.
+:func:`~vectorpress.build.product_build.build_product` records both lists
+in the manifest unchanged; :func:`render_marketplace_bundles` turns them
+into each bundle's own inline flags. No AI disclosure here -- that is later
+exporter work (ADR 0018); this module never writes a placeholder for it.
 """
 
 from dataclasses import dataclass
@@ -36,6 +44,15 @@ from pathlib import Path
 from jinja2 import Environment, TemplateError, TemplateNotFound, TemplateSyntaxError, UndefinedError
 
 from vectorpress.build.listing_draft import collection_for_product, collection_name
+from vectorpress.build.marketplace_limits import (
+    CountOverflow,
+    FieldViolation,
+    creative_fabrica_violations,
+    design_bundles_violations,
+    direct_store_violations,
+    etsy_violations,
+    has_nested_zip,
+)
 from vectorpress.build.previews import CANVASES
 from vectorpress.build.product_resolution import ProductMember
 from vectorpress.build.template_lookup import (
@@ -218,6 +235,111 @@ MARKETPLACE_BUNDLES: tuple[MarketplaceBundle, ...] = (
 )
 
 
+@dataclass(frozen=True)
+class ExportLimitWarning:
+    """One field over a cited marketplace limit (§19, ADR 0017's
+    "marketplace, field, measure"): the field still ships with its own text
+    unchanged -- this only reports by how much it is over."""
+
+    marketplace: str
+    field: str
+    measure: str
+
+
+@dataclass(frozen=True)
+class ExportDoesNotFitItem:
+    """One item past a cited count limit (§19, ADR 0017's "listed under
+    'does not fit', not dropped"): still present in the field's own value,
+    unchanged -- this only names the item that would not fit that
+    marketplace's own form."""
+
+    marketplace: str
+    field: str
+    item: str
+
+
+@dataclass(frozen=True)
+class ExportLimitsResult:
+    """Every :data:`~vectorpress.build.marketplace_limits.MARKETPLACE_LIMITS`
+    violation one build's own :class:`ListingExport` trips (§19, ADR 0017):
+    :func:`~vectorpress.build.product_build.build_product` records both
+    lists in the manifest unchanged, and :func:`render_marketplace_bundles`
+    turns them into each bundle's own inline flags -- nothing here ever
+    truncates a field or refuses a build."""
+
+    warnings: list[ExportLimitWarning]
+    does_not_fit: list[ExportDoesNotFitItem]
+
+
+def _canvas_dimensions(canvas_name: str) -> tuple[int, int]:
+    """One :data:`~vectorpress.build.previews.CANVASES` entry's own
+    ``(width, height)``, looked up by name."""
+    for canvas in CANVASES:
+        if canvas.name == canvas_name:
+            return canvas.width, canvas.height
+    raise ValueError(f"unknown canvas: {canvas_name}")  # pragma: no cover - CANVASES is fixed
+
+
+def measure_export_limits(export: ListingExport) -> ExportLimitsResult:
+    """Every cited marketplace limit (§19, ADR 0017) measured against one
+    build's own ``export`` -- its listing text, its ZIP's size, its own
+    customer file names (for "no ZIP inside it"), and each bundle's own
+    preview images at its own canvas. Pure with respect to the filesystem:
+    everything it reads was already gathered building ``export`` itself.
+
+    Warnings and does-not-fit items are sorted by (marketplace, field) --
+    ``does_not_fit`` items keep their original order within one field
+    (:func:`list.sort` is stable), so overflow tags or images stay in the
+    order the listing itself declares them.
+    """
+    warnings: list[ExportLimitWarning] = []
+    does_not_fit: list[ExportDoesNotFitItem] = []
+
+    def _record(
+        marketplace: str,
+        field_warnings: list[FieldViolation],
+        overflow: list[CountOverflow],
+    ) -> None:
+        for violation in field_warnings:
+            warnings.append(ExportLimitWarning(marketplace, violation.field, violation.measure))
+        for group in overflow:
+            for item in group.items:
+                does_not_fit.append(ExportDoesNotFitItem(marketplace, group.field, item))
+
+    images_by_canvas = {
+        bundle.canvas: [Path(name).name for name in export.previews.get(bundle.canvas, [])]
+        for bundle in MARKETPLACE_BUNDLES
+    }
+    nested_zip = has_nested_zip(export.contents_summary.file_names)
+
+    etsy_warnings, etsy_overflow = etsy_violations(
+        title=export.listing.title,
+        tags=export.listing.tags,
+        zip_size_bytes=export.zip_size_bytes,
+        images=images_by_canvas["square"],
+    )
+    _record("etsy", etsy_warnings, etsy_overflow)
+
+    cf_width, cf_height = _canvas_dimensions("landscape")
+    _record("creative_fabrica", creative_fabrica_violations(nested_zip, cf_width, cf_height), [])
+
+    _record(
+        "design_bundles",
+        design_bundles_violations(nested_zip, export.zip_size_bytes),
+        [],
+    )
+
+    direct_store_warnings, direct_store_overflow = direct_store_violations(
+        tags=export.listing.tags,
+        images=images_by_canvas["square"],
+    )
+    _record("direct_store", direct_store_warnings, direct_store_overflow)
+
+    warnings.sort(key=lambda warning: (warning.marketplace, warning.field))
+    does_not_fit.sort(key=lambda item: (item.marketplace, item.field))
+    return ExportLimitsResult(warnings=warnings, does_not_fit=does_not_fit)
+
+
 class ExportRenderError(Exception):
     """One marketplace bundle failed to render (ADR 0017): a template
     syntax error, a missing template (a catalog override's own
@@ -294,9 +416,16 @@ def render_marketplace_bundles(root: Path, export: ListingExport) -> Marketplace
     Etsy's own shipped template, the only one that reads it -- "WHO MADE
     where the form asks"), ``images`` (this bundle's own
     :attr:`MarketplaceBundle.canvas`, upload order, file names only, no
-    ``previews/`` prefix) and ``zip_name``. Reading anything else fails the
-    build naming the template (StrictUndefined), the same as a preview
-    render.
+    ``previews/`` prefix), ``zip_name``, ``warnings`` and ``does_not_fit``.
+    The last two are this bundle's own share of :func:`measure_export_limits`
+    (§19, ADR 0017): ``warnings`` maps a field name (``"title"``, ``"tags"``,
+    ``"zip"``, ``"images"``) to its own combined measure text, present only
+    for a field that is over its cited limit; ``does_not_fit`` maps a field
+    name to the list of its own items past a cited *count* limit (Etsy's
+    14th tag, a direct store's 9th cover image) -- the field's own value
+    (``tags``, ``images``) still carries every item unchanged, never
+    truncated. Reading anything else fails the build naming the template
+    (StrictUndefined), the same as a preview render.
 
     Raises :class:`ExportRenderError` naming the offending template --
     :func:`~vectorpress.build.product_build.build_product` turns it into a
@@ -307,9 +436,23 @@ def render_marketplace_bundles(root: Path, export: ListingExport) -> Marketplace
     description = "\n\n".join(
         (export.listing.description, render_contents_summary_text(export.contents_summary))
     )
+    limits = measure_export_limits(export)
     files: list[tuple[str, bytes]] = []
     for bundle in MARKETPLACE_BUNDLES:
         images = [Path(name).name for name in export.previews.get(bundle.canvas, [])]
+        warnings: dict[str, str] = {}
+        for warning in limits.warnings:
+            if warning.marketplace != bundle.name:
+                continue
+            warnings[warning.field] = (
+                f"{warnings[warning.field]}; {warning.measure}"
+                if warning.field in warnings
+                else warning.measure
+            )
+        does_not_fit: dict[str, list[str]] = {}
+        for item in limits.does_not_fit:
+            if item.marketplace == bundle.name:
+                does_not_fit.setdefault(item.field, []).append(item.item)
         context: dict[str, object] = {
             "title": export.listing.title,
             "description": description,
@@ -319,6 +462,8 @@ def render_marketplace_bundles(root: Path, export: ListingExport) -> Marketplace
             "who_made": _ETSY_WHO_MADE if bundle.name == "etsy" else None,
             "images": images,
             "zip_name": export.zip_name,
+            "warnings": warnings,
+            "does_not_fit": does_not_fit,
         }
         text = _render_bundle_text(environment, root, bundle.template_name, **context)
         files.append((f"{EXPORT_DIRNAME}/{bundle.filename}", text.encode("utf-8")))
