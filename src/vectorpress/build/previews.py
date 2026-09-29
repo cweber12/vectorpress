@@ -129,22 +129,25 @@ class PreviewBrandColors:
 
 @dataclass(frozen=True)
 class PreviewFont:
-    """One of ``brand``'s two existing ADR 0015 font fields (``heading_font``,
-    ``body_font``), resolved to a font this module actually ships (ADR
-    0014): ``family`` is the CSS family name ``brand.css``'s own
+    """One of ``brand``'s two ADR 0015 font fields (``heading_font``,
+    ``body_font``), resolved to the font this module actually embeds: a
+    catalog font file when the brand names one, else one of the two fonts
+    this tool ships (ADR 0014). ``load_brand`` has already refused a brand
+    naming neither, so this module never falls back to a font of its own
+    choosing. ``family`` is the CSS family name ``brand.css``'s own
     ``@font-face`` rules declare and the *only* one the CSS ever references
-    -- never the brand's own raw, unvalidated font name (a brand naming a
-    font this tool does not ship is a later slice's metadata problem to
-    catch; until then it silently maps to Inter here rather than ever
-    reaching a template). ``regular_url`` and ``bold_url`` are that shipped
-    family's own two weights, each a ``data:`` URI. No generic CSS fallback
-    is ever paired with ``family``: pairing one (``sans-serif``, or the raw
-    brand name itself) risks matching a same-named font already installed
-    on the machine, exactly what ADR 0014's "no system fonts" forbids."""
+    -- never a generic fallback (``sans-serif``): pairing one risks matching
+    a same-named font already installed on the machine, exactly what ADR
+    0014's "no system fonts" forbids. ``regular_url`` and ``bold_url`` are
+    each a ``data:`` URI -- a catalog font file's one file serves both,
+    since a brand supplies only one file per role. ``format`` is the CSS
+    ``@font-face`` format keyword matching that file (``woff2``,
+    ``truetype``, ``opentype``)."""
 
     family: str
     regular_url: str
     bold_url: str
+    format: str
 
 
 @dataclass(frozen=True)
@@ -289,32 +292,69 @@ def _shipped_font_data_uris() -> dict[str, str]:
     }
 
 
-def _shipped_font(requested_family: str) -> PreviewFont:
-    """The :class:`PreviewFont` for one ADR 0015 ``brand.heading_font`` /
-    ``body_font`` value: ``requested_family`` as shipped, when it names one
-    of the two this tool ships; Inter otherwise. Brand-font validation
-    (ADR 0014: "else it is a brand metadata problem") is a later slice, so
-    an unshipped or misspelled name is never a build failure here -- but it
-    is never passed through to ``brand.css`` either, since that would let
-    a same-named system font render instead (this module's own point)."""
+#: The shipped-font data-URI keys (:func:`_shipped_font_data_uris`) for each
+#: :data:`~vectorpress.domain.brand.SHIPPED_FONT_FAMILIES` name.
+_SHIPPED_FONT_KEYS: dict[str, tuple[str, str]] = {
+    "Inter": ("inter_regular", "inter_bold"),
+    "Space Grotesk": ("space_grotesk_regular", "space_grotesk_bold"),
+}
+
+#: A catalog font file's ``(data: URI mime type, CSS @font-face format
+#: keyword)`` by its extension -- the three ADR 0014 allows
+#: (:data:`~vectorpress.domain.brand.FONT_FILE_EXTENSIONS`).
+_FONT_FILE_FORMATS: dict[str, tuple[str, str]] = {
+    ".ttf": ("font/ttf", "truetype"),
+    ".otf": ("font/otf", "opentype"),
+    ".woff2": ("font/woff2", "woff2"),
+}
+
+
+def _shipped_font(family: str) -> PreviewFont:
+    """The :class:`PreviewFont` for a family this tool ships. ``load_brand``
+    has already refused any brand naming a family that is neither this nor
+    backed by its own font file (ADR 0014), so ``family`` is always one of
+    :data:`~vectorpress.domain.brand.SHIPPED_FONT_FAMILIES` by the time a
+    build reaches here."""
     data_uris = _shipped_font_data_uris()
-    if requested_family == "Space Grotesk":
-        return PreviewFont(
-            family="Space Grotesk",
-            regular_url=data_uris["space_grotesk_regular"],
-            bold_url=data_uris["space_grotesk_bold"],
-        )
+    regular_key, bold_key = _SHIPPED_FONT_KEYS[family]
     return PreviewFont(
-        family="Inter", regular_url=data_uris["inter_regular"], bold_url=data_uris["inter_bold"]
+        family=family,
+        regular_url=data_uris[regular_key],
+        bold_url=data_uris[bold_key],
+        format="woff2",
     )
+
+
+def _catalog_font(root: Path, family: str, font_file: str) -> PreviewFont:
+    """A brand's own font file as a :class:`PreviewFont` (ADR 0014): the one
+    file it names serves both weights, since a brand supplies only one file
+    per role. ``load_brand`` has already confirmed the file exists under the
+    catalog root and has one of the three allowed extensions before a build
+    ever reaches here."""
+    path = root / font_file
+    mime, css_format = _FONT_FILE_FORMATS[path.suffix.lower()]
+    data_uri = _data_uri(mime, path.read_bytes())
+    return PreviewFont(family=family, regular_url=data_uri, bold_url=data_uri, format=css_format)
+
+
+def _preview_font(root: Path, family: str, font_file: str | None) -> PreviewFont:
+    """One ADR 0015 typography role's :class:`PreviewFont`: its own catalog
+    font file when the brand names one, else the shipped font of that name
+    -- ``load_brand`` guarantees one or the other holds before a build ever
+    reaches here (ADR 0014: "a font never silently falls back")."""
+    if font_file is not None:
+        return _catalog_font(root, family, font_file)
+    return _shipped_font(family)
 
 
 def _preview_brand(root: Path, brand: Brand) -> PreviewBrand:
     return PreviewBrand(
         name=brand.name,
         mark_url=_mark_data_uri(root, brand),
-        heading_font=_shipped_font(brand.typography.heading_font),
-        body_font=_shipped_font(brand.typography.body_font),
+        heading_font=_preview_font(
+            root, brand.typography.heading_font, brand.typography.heading_font_file
+        ),
+        body_font=_preview_font(root, brand.typography.body_font, brand.typography.body_font_file),
         colors=PreviewBrandColors(
             background_color=brand.card_style.background_color,
             accent_color=brand.card_style.accent_color,
@@ -542,14 +582,17 @@ def _browser_instance() -> Browser:
     """The one Chromium instance every preview render reuses -- launched on
     first use and kept for the life of the process (many builds render
     previews in one ``vpress`` invocation or test run; a fresh browser per
-    build would dominate the cost). Never explicitly closed: process exit
-    tears it down, the same lifetime Playwright's own examples use for a
-    long-lived host process."""
+    build would dominate the cost). Relaunched whenever the cached one is no
+    longer connected (a crashed or killed browser process), so a retry after
+    a transient failure (:func:`_screenshot`) always gets a live browser.
+    Never explicitly closed otherwise: process exit tears it down, the same
+    lifetime Playwright's own examples use for a long-lived host process."""
     global _playwright, _browser
-    if _browser is not None:
+    if _browser is not None and _browser.is_connected():
         return _browser
     try:
-        _playwright = sync_playwright().start()
+        if _playwright is None:
+            _playwright = sync_playwright().start()
         _browser = _playwright.chromium.launch()
     except PlaywrightError as exc:
         raise PreviewRenderError(f"Chromium is unavailable: {exc}") from exc
@@ -571,10 +614,23 @@ def _guard_disallowed_requests(violations: list[str]) -> Callable[[Route], None]
     return handle
 
 
-def _screenshot(html: str, canvas: Canvas, template_name: str) -> bytes:
-    """One canvas's PNG bytes for already-rendered ``html`` (ADR 0014: no
-    network, no system fonts -- every request but the shipped templates'
-    own ``data:`` URIs is aborted and fails the render, naming the URL)."""
+class _DisallowedRequestError(Exception):
+    """One render requested a URL the Chromium route guard does not allow
+    (ADR 0014). Its own exception, never a :class:`PlaywrightError`
+    subclass, so :func:`_screenshot` can never mistake a route-guard
+    violation for a transient Chromium failure worth retrying."""
+
+    def __init__(self, url: str) -> None:
+        super().__init__(url)
+        self.url = url
+
+
+def _render_screenshot(html: str, canvas: Canvas) -> bytes:
+    """One attempt at screenshotting already-rendered ``html`` on a fresh
+    page (ADR 0014: no network, no system fonts). Raises
+    :class:`_DisallowedRequestError` for a route-guard violation, or lets a
+    Chromium :class:`PlaywrightError` propagate -- :func:`_screenshot` is
+    the one that decides whether either is worth a retry."""
     browser = _browser_instance()
     page = browser.new_page(viewport={"width": canvas.width, "height": canvas.height})
     violations: list[str] = []
@@ -582,19 +638,53 @@ def _screenshot(html: str, canvas: Canvas, template_name: str) -> bytes:
         page.route("**/*", _guard_disallowed_requests(violations))
         page.set_content(html, wait_until="load")
         png_bytes = page.screenshot(type="png")
-    except PlaywrightError as exc:
-        raise PreviewRenderError(
-            f"Chromium failed to render {template_name}: {exc}", template_name=template_name
-        ) from exc
     finally:
         page.close()
 
     if violations:
-        raise PreviewRenderError(
-            f"{template_name} requested a disallowed URL: {violations[0]}",
-            template_name=template_name,
-        )
+        raise _DisallowedRequestError(violations[0])
     return png_bytes
+
+
+#: Substrings of a Chromium :class:`PlaywrightError` that mark it as a
+#: transient renderer hiccup -- a dropped DevTools connection or a killed
+#: render target -- rather than a real problem with the page: worth one
+#: retry on a fresh page (and, if the browser itself is no longer connected,
+#: a fresh browser) instead of refusing a real build over it. CI has hit
+#: ``Page.screenshot: Protocol error (Page.captureScreenshot): Unable to
+#: capture screenshot`` this way, with nothing wrong in the rendered page.
+_TRANSIENT_CHROMIUM_ERROR_MARKERS = ("Protocol error", "Target closed", "has been closed")
+
+
+def _is_transient_chromium_error(exc: PlaywrightError) -> bool:
+    message = str(exc)
+    return any(marker in message for marker in _TRANSIENT_CHROMIUM_ERROR_MARKERS)
+
+
+def _screenshot(html: str, canvas: Canvas, template_name: str) -> bytes:
+    """One canvas's PNG bytes for already-rendered ``html``. A transient
+    Chromium failure (:func:`_is_transient_chromium_error`) is retried once,
+    on a fresh page and, if the browser itself dropped, a fresh browser
+    (:func:`_browser_instance`) -- a route-guard violation or a second
+    failure still fails the render, naming the template."""
+    attempts_left = 2
+    while True:
+        attempts_left -= 1
+        try:
+            return _render_screenshot(html, canvas)
+        except _DisallowedRequestError as exc:
+            raise PreviewRenderError(
+                f"{template_name} requested a disallowed URL: {exc.url}",
+                template_name=template_name,
+            ) from exc
+        except PlaywrightError as exc:
+            if attempts_left <= 0 or not _is_transient_chromium_error(exc):
+                raise PreviewRenderError(
+                    f"Chromium failed to render {template_name}: {exc}",
+                    template_name=template_name,
+                ) from exc
+            # One transient failure, one retry left: loop back for a fresh
+            # page (and, via _browser_instance, a fresh browser if needed).
 
 
 @dataclass(frozen=True)

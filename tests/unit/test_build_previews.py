@@ -15,6 +15,7 @@ import re
 from pathlib import Path
 
 import pytest
+from playwright.sync_api import Error as PlaywrightError
 from syrupy.assertion import SnapshotAssertion
 
 from vectorpress.build.previews import (
@@ -24,9 +25,11 @@ from vectorpress.build.previews import (
     PreviewPage,
     PreviewRenderError,
     PreviewType,
+    _DisallowedRequestError,  # pyright: ignore[reportPrivateUsage]
     _featured_asset_ids,  # pyright: ignore[reportPrivateUsage]
     _pages,  # pyright: ignore[reportPrivateUsage]
     _renders,  # pyright: ignore[reportPrivateUsage]
+    _screenshot,  # pyright: ignore[reportPrivateUsage]
     preview_members,
     render_preview_html,
 )
@@ -328,27 +331,6 @@ def test_render_main_html_with_featured_order_is_locked_by_snapshot(
 # --- brand.css names only shipped fonts, never a system font (ADR 0014) ----
 
 
-def test_unshipped_brand_fonts_fall_back_to_inter_with_no_generic_fallback(
-    tmp_path: Path,
-) -> None:
-    """A brand naming a font this tool does not ship (the fixture catalog's
-    own ``brand.toml`` names "Quicksand"/"Nunito Sans") never reaches
-    ``brand.css`` as a CSS family name, and the rendered page never carries
-    a generic fallback either -- both would risk a same-named or generic
-    font already installed on the render machine (ADR 0014: "no system
-    fonts"). It falls back to Inter, the one font this tool always ships."""
-    brand = _brand(typography=BrandTypography(heading_font="Quicksand", body_font="Nunito Sans"))
-
-    html = _render(tmp_path, brand=brand)
-
-    assert "sans-serif" not in html
-    assert "Quicksand" not in html
-    assert "Nunito Sans" not in html
-    assert html.count('font-family: "Inter"') >= 2  # heading_font's and body_font's own @font-face
-    assert '--heading-font: "Inter"' in html
-    assert '--body-font: "Inter"' in html
-
-
 def test_brand_naming_space_grotesk_uses_it_verbatim(tmp_path: Path) -> None:
     brand = _brand(
         typography=BrandTypography(heading_font="Space Grotesk", body_font="Space Grotesk")
@@ -359,6 +341,97 @@ def test_brand_naming_space_grotesk_uses_it_verbatim(tmp_path: Path) -> None:
     assert "sans-serif" not in html
     assert '--heading-font: "Space Grotesk"' in html
     assert '--body-font: "Space Grotesk"' in html
+
+
+# --- a catalog font file (ADR 0014): its own @font-face rule ---------------
+
+
+def test_a_catalog_heading_font_file_renders_an_at_font_face_rule_pointing_at_it_locked_by_snapshot(
+    tmp_path: Path, snapshot: SnapshotAssertion
+) -> None:
+    (tmp_path / "fonts").mkdir()
+    (tmp_path / "fonts" / "brand-heading.woff2").write_bytes(b"CUSTOMFONTBYTES")
+    brand = _brand(
+        typography=BrandTypography(
+            heading_font="Brand Display",
+            body_font="Inter",
+            heading_font_file="fonts/brand-heading.woff2",
+        )
+    )
+
+    with pytest.MonkeyPatch.context() as monkeypatch:
+        monkeypatch.setattr(
+            "vectorpress.build.previews._shipped_font_data_uris",
+            lambda: {
+                "inter_regular": "data:font/woff2;base64,AAAA",
+                "inter_bold": "data:font/woff2;base64,AAAA",
+                "space_grotesk_regular": "data:font/woff2;base64,AAAA",
+                "space_grotesk_bold": "data:font/woff2;base64,AAAA",
+            },
+        )
+        html = _render(tmp_path, brand=brand)
+
+    assert 'font-family: "Brand Display"' in html
+    assert '--heading-font: "Brand Display"' in html
+    assert "data:font/woff2;base64,Q1VTVE9NRk9OVEJZVEVT" in html  # brand-heading.woff2's own bytes
+    assert _DATA_URI_RE.sub("data:<omitted>", html) == snapshot
+
+
+def test_a_catalog_font_file_serves_both_weights_from_the_one_file(tmp_path: Path) -> None:
+    (tmp_path / "fonts").mkdir()
+    (tmp_path / "fonts" / "brand-heading.otf").write_bytes(b"ONEFILEBYTES")
+    brand = _brand(
+        typography=BrandTypography(
+            heading_font="Brand Display",
+            body_font="Inter",
+            heading_font_file="fonts/brand-heading.otf",
+        )
+    )
+
+    html = _render(tmp_path, brand=brand)
+
+    # Both the regular and bold @font-face rules for the heading role embed
+    # the same one file's bytes (a brand supplies only one file per role).
+    heading_uri = "data:font/otf;base64,T05FRklMRUJZVEVT"
+    assert html.count(heading_uri) == 2
+    assert 'format("opentype")' in html
+
+
+def test_each_allowed_font_file_extension_resolves_its_own_css_format_keyword(
+    tmp_path: Path,
+) -> None:
+    """A rejected extension is ``load_brand`` (catalog layer)'s own job,
+    before a build ever reaches this module -- this only proves every
+    allowed extension resolves to its own correct CSS ``format()`` keyword,
+    never a hardcoded one."""
+    for extension, css_format in (("ttf", "truetype"), ("otf", "opentype"), ("woff2", "woff2")):
+        (tmp_path / "fonts").mkdir(exist_ok=True)
+        (tmp_path / "fonts" / f"brand.{extension}").write_bytes(b"BYTES")
+        brand = _brand(
+            typography=BrandTypography(
+                heading_font="Brand Display",
+                body_font="Inter",
+                heading_font_file=f"fonts/brand.{extension}",
+            )
+        )
+
+        html = _render(tmp_path, brand=brand)
+
+        assert f'format("{css_format}")' in html
+
+
+# --- an SVG mark_file renders the same way a PNG one does (ADR 0014) -------
+
+
+def test_an_svg_mark_file_embeds_as_an_svg_data_uri_in_main(tmp_path: Path) -> None:
+    (tmp_path / "mark.svg").write_bytes(b"<svg>MARK</svg>")
+    brand = _brand(mark_file="mark.svg")
+
+    html = _render(tmp_path, brand=brand)
+
+    match = re.search(r'<img class="brand-mark" src="([^"]+)"', html)
+    assert match is not None
+    assert match.group(1).startswith("data:image/svg+xml;base64,")
 
 
 def test_catalog_override_cannot_read_anything_outside_the_documented_context(
@@ -729,3 +802,86 @@ def test_contents_html_is_locked_by_snapshot(tmp_path: Path, snapshot: SnapshotA
         )
 
     assert _DATA_URI_RE.sub("data:<omitted>", html) == snapshot
+
+
+# --- `_screenshot`: retries one transient Chromium failure, nothing else ---
+
+
+def test_screenshot_retries_once_after_a_transient_chromium_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """CI has hit ``Page.screenshot: Protocol error (Page.captureScreenshot):
+    Unable to capture screenshot`` once, with nothing wrong in the rendered
+    page -- a dropped DevTools connection or killed render target, not a
+    reason to refuse a real build. One retry on a fresh page recovers it."""
+    attempts: list[int] = []
+
+    def flaky_render_screenshot(html: str, canvas: Canvas) -> bytes:
+        attempts.append(1)
+        if len(attempts) == 1:
+            raise PlaywrightError(
+                "Page.screenshot: Protocol error (Page.captureScreenshot): "
+                "Unable to capture screenshot"
+            )
+        return b"PNGBYTES"
+
+    monkeypatch.setattr("vectorpress.build.previews._render_screenshot", flaky_render_screenshot)
+
+    result = _screenshot("<html></html>", _SQUARE, "main.html.j2")
+
+    assert result == b"PNGBYTES"
+    assert len(attempts) == 2
+
+
+def test_screenshot_surfaces_a_second_transient_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+    attempts: list[int] = []
+
+    def always_transient(html: str, canvas: Canvas) -> bytes:
+        attempts.append(1)
+        raise PlaywrightError("Protocol error (Page.captureScreenshot): still broken")
+
+    monkeypatch.setattr("vectorpress.build.previews._render_screenshot", always_transient)
+
+    with pytest.raises(PreviewRenderError) as excinfo:
+        _screenshot("<html></html>", _SQUARE, "main.html.j2")
+
+    assert len(attempts) == 2  # the one retry, then it gave up
+    assert excinfo.value.template_name == "main.html.j2"
+
+
+def test_screenshot_never_retries_a_route_guard_violation(monkeypatch: pytest.MonkeyPatch) -> None:
+    attempts: list[int] = []
+
+    def disallowed(html: str, canvas: Canvas) -> bytes:
+        attempts.append(1)
+        raise _DisallowedRequestError("https://example.invalid/remote.png")
+
+    monkeypatch.setattr("vectorpress.build.previews._render_screenshot", disallowed)
+
+    with pytest.raises(PreviewRenderError) as excinfo:
+        _screenshot("<html></html>", _SQUARE, "main.html.j2")
+
+    assert len(attempts) == 1  # never retried
+    assert "disallowed URL" in str(excinfo.value)
+    assert "https://example.invalid/remote.png" in str(excinfo.value)
+
+
+def test_screenshot_never_retries_a_non_transient_chromium_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A Chromium failure that does not look transient (no Chromium
+    installed, say) fails the render on its first attempt -- retrying it
+    would only double the time a real, non-transient failure takes to
+    report."""
+    attempts: list[int] = []
+
+    def unrelated_failure(html: str, canvas: Canvas) -> bytes:
+        attempts.append(1)
+        raise PlaywrightError("Executable doesn't exist, run playwright install")
+
+    monkeypatch.setattr("vectorpress.build.previews._render_screenshot", unrelated_failure)
+
+    with pytest.raises(PreviewRenderError):
+        _screenshot("<html></html>", _SQUARE, "main.html.j2")
+
+    assert len(attempts) == 1
