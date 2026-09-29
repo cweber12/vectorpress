@@ -13,8 +13,9 @@
     <li class="format-badge">{{ format.label }} ({{ format.file_count }})</li>
     {% endfor %}
   </ul>
+  {# §16: up to 9 featured members, in this product's own featured order. #}
   <ul class="featured-members">
-    {% for member in featured %}
+    {% for member in featured[:9] %}
     <li class="featured-member">
       {% if member.image_url %}
       <img src="{{ member.image_url }}" alt="{{ member.display_name }}">

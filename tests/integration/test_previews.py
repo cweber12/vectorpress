@@ -162,6 +162,29 @@ def test_catalog_override_referencing_a_remote_url_refuses_the_build(
     assert not (temp_catalog_root / "builds" / PNG_ONLY_SLUG).exists()
 
 
+# --- `[previews] featured` (§16): an unresolved ID refuses the build -------
+
+
+@pytest.mark.integration
+def test_an_unresolved_featured_id_refuses_the_build_naming_it(
+    monkeypatch: pytest.MonkeyPatch, temp_catalog_root: Path
+) -> None:
+    """A hand-authored ``[previews] featured`` naming an asset ID that is
+    not one of the product's own resolved members is a product metadata
+    problem, reported the same way ``vpress build`` already reports every
+    other reference problem (§16, CONTEXT.md "Featured member")."""
+    _generate_and_approve_transparent_png(monkeypatch, temp_catalog_root)
+    product_toml = temp_catalog_root / "products" / f"{PNG_ONLY_SLUG}.toml"
+    with product_toml.open("a", encoding="utf-8") as f:
+        f.write('\n[previews]\nfeatured = ["not_a_real_asset"]\n')
+
+    result = runner.invoke(app, ["build", PNG_ONLY_SLUG])
+
+    assert result.exit_code == 1
+    assert "not_a_real_asset" in result.output
+    assert not (temp_catalog_root / "builds" / PNG_ONLY_SLUG).exists()
+
+
 # --- Conditional previews (§16): `04 variants` and `05 contents` -----------
 
 MINI_PACK_SLUG = "kelp_forest_mini_pack"

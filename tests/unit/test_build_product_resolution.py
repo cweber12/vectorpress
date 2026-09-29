@@ -19,6 +19,7 @@ catalog copy.
 from pathlib import Path
 
 from vectorpress.build.product_resolution import (
+    FEATURED_FIELD,
     MemberEligibility,
     MissingRequiredDerivative,
     ValidationScopeOutcome,
@@ -35,7 +36,7 @@ from vectorpress.domain.derivative_state import DerivativeState
 from vectorpress.domain.derivative_type import DerivativeType
 from vectorpress.domain.eligibility import BlockingReasonKind
 from vectorpress.domain.membership import ClassificationField, Membership, MembershipRule
-from vectorpress.domain.product import Product
+from vectorpress.domain.product import Previews, Product
 
 FIXTURE_CATALOG_ROOT = Path(__file__).parents[1] / "fixtures" / "catalog"
 
@@ -158,6 +159,78 @@ def test_an_unknown_collection_slug_resolves_to_no_members_with_a_reference_prob
     problem = resolved.reference_problems[0]
     assert problem.field == PRODUCT_COLLECTION_SLUG_FIELD
     assert "not_a_real_collection" in problem.message
+
+
+# --- [previews] featured: a reference problem naming an unresolved ID ---------------
+
+
+def test_a_featured_id_that_is_not_a_resolved_member_is_a_reference_problem_naming_it() -> None:
+    config = load_catalog_config(FIXTURE_CATALOG_ROOT)
+    known_assets = load_assets(FIXTURE_CATALOG_ROOT, config).assets
+    product = _product(
+        membership=Membership(asset_ids=["ochre_sea_star"]),
+        previews=Previews(featured=["ochre_sea_star", "not_a_real_asset"]),
+    )
+
+    resolved = resolve_product(
+        product, FIXTURE_CATALOG_ROOT, config, known_assets, known_collections=[]
+    )
+
+    assert len(resolved.reference_problems) == 1
+    problem = resolved.reference_problems[0]
+    assert problem.field == FEATURED_FIELD
+    assert "not_a_real_asset" in problem.message
+
+
+def test_a_featured_id_that_names_a_resolved_member_has_no_reference_problem() -> None:
+    config = load_catalog_config(FIXTURE_CATALOG_ROOT)
+    known_assets = load_assets(FIXTURE_CATALOG_ROOT, config).assets
+    product = _product(
+        membership=Membership(asset_ids=["ochre_sea_star"]),
+        previews=Previews(featured=["ochre_sea_star"]),
+    )
+
+    resolved = resolve_product(
+        product, FIXTURE_CATALOG_ROOT, config, known_assets, known_collections=[]
+    )
+
+    assert resolved.reference_problems == []
+
+
+def test_a_featured_id_resolved_but_excluded_from_the_build_has_no_reference_problem() -> None:
+    """``gumboot_chiton`` is a real, resolved member (§10.1's rights-status
+    block excludes it, it does not make it unknown): featuring it is not a
+    reference problem, only skipped in this build's own previews
+    (``build.previews._featured_asset_ids``)."""
+    config = load_catalog_config(FIXTURE_CATALOG_ROOT)
+    known_assets = load_assets(FIXTURE_CATALOG_ROOT, config).assets
+    product = _product(
+        membership=Membership(asset_ids=["gumboot_chiton"]),
+        previews=Previews(featured=["gumboot_chiton"]),
+    )
+
+    resolved = resolve_product(
+        product, FIXTURE_CATALOG_ROOT, config, known_assets, known_collections=[]
+    )
+
+    assert len(resolved.members) == 1
+    assert resolved.members[0].eligibility is MemberEligibility.EXCLUDED
+    assert resolved.reference_problems == []
+
+
+def test_a_product_with_no_previews_table_has_no_featured_reference_problems() -> None:
+    """A product without ``[previews]`` behaves as before: ``previews`` is
+    ``None`` by default, so no featured-ID check ever runs."""
+    config = load_catalog_config(FIXTURE_CATALOG_ROOT)
+    known_assets = load_assets(FIXTURE_CATALOG_ROOT, config).assets
+    product = _product(membership=Membership(asset_ids=["ochre_sea_star"]))
+    assert product.previews is None
+
+    resolved = resolve_product(
+        product, FIXTURE_CATALOG_ROOT, config, known_assets, known_collections=[]
+    )
+
+    assert resolved.reference_problems == []
 
 
 # --- an asset-level block excludes regardless of derivative state -------------------
