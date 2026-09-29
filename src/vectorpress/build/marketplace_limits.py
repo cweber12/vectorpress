@@ -30,7 +30,7 @@ same split the PRD draws:
   silently truncated to make the count.
 """
 
-import re
+import unicodedata
 from dataclasses import dataclass
 
 #: The date every :data:`MARKETPLACE_LIMITS` entry was checked against its
@@ -84,9 +84,10 @@ ETSY_TITLE_RESTRICTED_SYMBOLS = ("%", ":", "&", "+")
 ETSY_TITLE_SYMBOL_MAX_COUNT = 1
 ETSY_TAG_MAX_COUNT = 13
 ETSY_TAG_MAX_CHARS = 20
-#: Letters, digits, space, hyphen, apostrophe, and the trademark/copyright/
-#: registered marks -- Etsy's own allowed tag character set.
-ETSY_TAG_ALLOWED_CHARS = re.compile(r"^[A-Za-z0-9 '\-™©®]+$")
+#: The hyphen, apostrophe, and the trademark/copyright/registered marks --
+#: Etsy's own allowed tag punctuation, on top of any Unicode letter, decimal
+#: digit or space separator (below).
+ETSY_TAG_ALLOWED_PUNCTUATION = "-'™©®"
 ETSY_ZIP_MAX_BYTES = 20 * 1024 * 1024
 ETSY_MAX_IMAGES = 20
 
@@ -191,6 +192,29 @@ def _format_bytes_gb(size_bytes: int) -> str:
     return f"{size_bytes / 1024**3:.2f} GB"
 
 
+def _etsy_tag_allowed(tag: str) -> bool:
+    """Whether every character of ``tag`` is one Etsy's own tag rule allows:
+    the cited OAS pattern (``/[^\\p{L}\\p{Nd}\\p{Zs}\\-'™©®]/u``)
+    is "any Unicode letter, decimal digit or space separator, plus a fixed
+    punctuation set" -- not only ASCII, so ``"café"`` and a non-Latin
+    script both pass. Checked per character with
+    :func:`unicodedata.category` (``L*`` covers every Unicode letter
+    category, ``Nd`` decimal digit, ``Zs`` space separator) rather than a
+    regex, since the standard library's ``re`` has no ``\\p{...}`` Unicode
+    property classes."""
+    return all(_etsy_tag_char_allowed(char) for char in tag)
+
+
+def _etsy_tag_char_allowed(char: str) -> bool:
+    """One tag character, checked against the same three Unicode general
+    categories the cited OAS pattern names (``\\p{L}``, ``\\p{Nd}``,
+    ``\\p{Zs}``) plus the fixed punctuation set."""
+    if char in ETSY_TAG_ALLOWED_PUNCTUATION:
+        return True
+    category = unicodedata.category(char)
+    return category.startswith("L") or category in {"Nd", "Zs"}
+
+
 def etsy_violations(
     title: str, tags: list[str], zip_size_bytes: int, images: list[str]
 ) -> tuple[list[FieldViolation], list[CountOverflow]]:
@@ -225,7 +249,7 @@ def etsy_violations(
     tag_problems += [
         f"'{tag}' has a character Etsy tags don't allow"
         for tag in kept_tags
-        if len(tag) <= ETSY_TAG_MAX_CHARS and not ETSY_TAG_ALLOWED_CHARS.match(tag)
+        if len(tag) <= ETSY_TAG_MAX_CHARS and not _etsy_tag_allowed(tag)
     ]
     if tag_problems:
         warnings.append(FieldViolation("tags", "; ".join(tag_problems)))

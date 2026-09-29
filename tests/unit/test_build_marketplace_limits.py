@@ -105,6 +105,35 @@ def test_etsy_violations_allows_the_trademark_copyright_and_registered_marks() -
     assert warnings == []
 
 
+def test_etsy_violations_allows_non_ascii_letters() -> None:
+    """The cited Etsy OAS pattern (``\\p{L}\\p{Nd}\\p{Zs}-'™©®``) allows any
+    Unicode letter, not only ASCII -- "café" and "naïve" are both clean
+    tags, so flagging them would warn on a rule stricter than the one
+    cited (ADR 0017)."""
+    warnings, _ = etsy_violations(title="", tags=["café", "naïve"], zip_size_bytes=0, images=[])
+    assert warnings == []
+
+
+def test_etsy_violations_allows_a_non_latin_script_tag() -> None:
+    warnings, _ = etsy_violations(title="", tags=["日本語"], zip_size_bytes=0, images=[])
+    assert warnings == []
+
+
+def test_etsy_violations_allows_a_unicode_space_separator() -> None:
+    """``\\p{Zs}`` (Etsy's own cited category) covers every Unicode space
+    separator, not only the ASCII space -- e.g. U+00A0 NO-BREAK SPACE."""
+    nbsp_tag = "tag" + "\u00a0" + "two"  # a real Unicode space separator, not ASCII
+    warnings, _ = etsy_violations(title="", tags=[nbsp_tag], zip_size_bytes=0, images=[])
+    assert warnings == []
+
+
+def test_etsy_violations_still_flags_punctuation_outside_the_allowed_set() -> None:
+    warnings, _ = etsy_violations(title="", tags=["#tag", "tag!"], zip_size_bytes=0, images=[])
+    (tag_warning,) = [w for w in warnings if w.field == "tags"]
+    assert "#tag" in tag_warning.measure
+    assert "tag!" in tag_warning.measure
+
+
 def test_etsy_violations_flags_a_zip_over_the_size_limit() -> None:
     warnings, _ = etsy_violations(
         title="", tags=[], zip_size_bytes=ETSY_ZIP_MAX_BYTES + 1, images=[]
