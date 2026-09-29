@@ -139,7 +139,7 @@ Dependency graph:
       └─ 4 Review, approval & overrides
          └─ 5 Collections & products   (complete)
             └─ 6 Product build & packaging   (complete)
-               ├─ 7 Previews, listing & marketplace export
+               ├─ 7 Previews, listing & marketplace export   (complete, #129 pending)
                └─ 8 Publication lifecycle
                   └─ 9 Review UI
    └─ 10 Remaining derivative types   (needs 2 and 4; independent of 5–9)

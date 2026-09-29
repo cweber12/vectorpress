@@ -139,8 +139,18 @@ effective derivatives. Writes a **manifest**.
 hashes a build contained, plus reference size and tool version.
 
 **Needs rebuild** — A product whose last manifest no longer matches current effective
-derivatives, brand wording, or what its previews are drawn from (**previews out of
-date**).
+derivatives, its **presentation hash** (**previews out of date**), or its **listing
+hash** (**listing changed**).
+
+**Presentation hash** — The manifest's content hash of everything a build's previews
+render from: every template file used (shipped or catalog override), the brand's
+`name`, `typography` and `card_style`, the mark and font file bytes, and the listing
+fields templates print. Never image bytes. A mismatch against the current inputs is
+**previews out of date**.
+
+**Listing hash** — The manifest's content hash of a product's whole `[listing]`
+table. A mismatch against the product's current listing is **listing changed**; a
+build carries the edit into every export without ever rewriting the listing itself.
 
 **Package** — The customer-facing directory structure (§14). **ZIP** is the package
 archived.
