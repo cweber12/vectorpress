@@ -1531,3 +1531,130 @@ def test_export_listing_json_is_locked_by_snapshot(
     assert export["zip_size_bytes"] > 0
     normalized = {**export, "zip_size_bytes": "<int>"}
     assert normalized == snapshot(name="export_listing")
+
+
+# --- marketplace bundles (§19, ADR 0015, ADR 0017) --------------------------
+
+
+def _read_bundle(build_dir: Path, filename: str) -> str:
+    return (build_dir / EXPORT_DIRNAME / filename).read_text(encoding="utf-8")
+
+
+@pytest.mark.integration
+def test_build_writes_all_four_marketplace_bundles(
+    monkeypatch: pytest.MonkeyPatch, temp_catalog_root: Path
+) -> None:
+    build_dir, _ = _build_and_read_export(monkeypatch, temp_catalog_root)
+
+    for filename in ("etsy.txt", "creative-fabrica.txt", "design-bundles.txt", "direct-store.txt"):
+        text = _read_bundle(build_dir, filename)
+        assert "TITLE" in text
+        assert PNG_ONLY_LISTING_TITLE in text
+
+
+@pytest.mark.integration
+def test_etsy_and_direct_store_bundles_list_square_previews(
+    monkeypatch: pytest.MonkeyPatch, temp_catalog_root: Path
+) -> None:
+    build_dir, export = _build_and_read_export(monkeypatch, temp_catalog_root)
+
+    for filename in ("etsy.txt", "direct-store.txt"):
+        text = _read_bundle(build_dir, filename)
+        for rel_path in export["previews"]["square"]:
+            assert Path(rel_path).name in text
+        for rel_path in export["previews"]["landscape"]:
+            assert Path(rel_path).name not in text
+
+
+@pytest.mark.integration
+def test_creative_fabrica_and_design_bundles_bundles_list_landscape_previews(
+    monkeypatch: pytest.MonkeyPatch, temp_catalog_root: Path
+) -> None:
+    build_dir, export = _build_and_read_export(monkeypatch, temp_catalog_root)
+
+    for filename in ("creative-fabrica.txt", "design-bundles.txt"):
+        text = _read_bundle(build_dir, filename)
+        for rel_path in export["previews"]["landscape"]:
+            assert Path(rel_path).name in text
+        for rel_path in export["previews"]["square"]:
+            assert Path(rel_path).name not in text
+
+
+@pytest.mark.integration
+def test_no_marketplace_bundle_is_in_the_zip(
+    monkeypatch: pytest.MonkeyPatch, temp_catalog_root: Path
+) -> None:
+    build_dir, _ = _build_and_read_export(monkeypatch, temp_catalog_root)
+
+    with zipfile.ZipFile(build_dir / f"{PNG_ONLY_TOP_LEVEL}.zip") as zip_file:
+        names = zip_file.namelist()
+    for filename in ("etsy.txt", "creative-fabrica.txt", "design-bundles.txt", "direct-store.txt"):
+        assert not any(filename in name for name in names)
+
+
+@pytest.mark.integration
+def test_editing_listing_text_and_rebuilding_carries_the_edit_into_every_bundle(
+    monkeypatch: pytest.MonkeyPatch, temp_catalog_root: Path
+) -> None:
+    build_dir, _ = _build_and_read_export(monkeypatch, temp_catalog_root)
+
+    product_path = temp_catalog_root / "products" / f"{PNG_ONLY_SLUG}.toml"
+    text = product_path.read_text(encoding="utf-8")
+    before = 'description = "The tide pool subjects in this catalog, hand-picked rather than grouped by a\\nrule.\\n\\nHand-illustrated, scientifically accurate cut files."'
+    assert before in text
+    sentinel = "EDITED PITCH SENTINEL"
+    product_path.write_text(text.replace(before, f'description = "{sentinel}"'), encoding="utf-8")
+
+    result = runner.invoke(app, ["build", PNG_ONLY_SLUG])
+    assert result.exit_code == 0, result.output
+
+    for filename in ("etsy.txt", "creative-fabrica.txt", "design-bundles.txt", "direct-store.txt"):
+        assert sentinel in _read_bundle(build_dir, filename)
+
+
+@pytest.mark.integration
+def test_marketplace_bundles_are_locked_by_snapshot(
+    monkeypatch: pytest.MonkeyPatch, temp_catalog_root: Path, snapshot: SnapshotAssertion
+) -> None:
+    build_dir, _ = _build_and_read_export(monkeypatch, temp_catalog_root)
+
+    bundles = {
+        filename: _read_bundle(build_dir, filename)
+        for filename in (
+            "etsy.txt",
+            "creative-fabrica.txt",
+            "design-bundles.txt",
+            "direct-store.txt",
+        )
+    }
+    assert bundles == snapshot(name="marketplace_bundles")
+
+
+@pytest.mark.integration
+def test_build_refuses_when_a_catalog_export_template_reads_an_undefined_variable(
+    monkeypatch: pytest.MonkeyPatch, temp_catalog_root: Path
+) -> None:
+    """A broken ``templates/export/`` override refuses the whole build,
+    naming the template, the same way a broken preview override does --
+    never an uncaught ``UndefinedError`` reaching the CLI (§35, ADR 0017)."""
+    _generate_and_approve_transparent_png(monkeypatch, temp_catalog_root)
+    override_dir = temp_catalog_root / "templates" / "export"
+    override_dir.mkdir(parents=True)
+    (override_dir / "etsy.txt.j2").write_text(
+        "{{ this_is_not_in_the_context }}\n", encoding="utf-8"
+    )
+
+    result = runner.invoke(app, ["build", PNG_ONLY_SLUG])
+
+    assert result.exit_code == 1
+    # A named refusal exits through typer.Exit (SystemExit), never an
+    # uncaught UndefinedError -- any other exception type here would mean
+    # the render failure reached the CLI as a traceback instead.
+    assert isinstance(result.exception, SystemExit)
+    assert "etsy.txt.j2" in result.output
+    assert "this_is_not_in_the_context" in result.output
+    # The bundle render happens after builds/ itself is created (it needs
+    # the already-written ZIP's own name and size) but before this
+    # product's own build directory is ever written -- the refusal removes
+    # its temporary directory, leaving no builds/<slug>/ at all (§35).
+    assert not _build_dir(temp_catalog_root, PNG_ONLY_SLUG).exists()

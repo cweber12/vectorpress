@@ -1,0 +1,20 @@
+TITLE
+{{ title }}
+
+DESCRIPTION
+{{ description }}
+
+TAGS
+{{ tags|join(", ") }}
+
+PRICE
+${{ "%.2f"|format(price) }}
+
+CATEGORY
+{{ category }}
+
+IMAGES
+{{ images|join("\n") }}
+
+FILES
+{{ zip_name }}
