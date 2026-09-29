@@ -28,9 +28,26 @@ from PIL import Image, ImageDraw
 from syrupy.assertion import SnapshotAssertion
 from typer.testing import CliRunner
 
+from vectorpress.build.previews import CANVASES, PREVIEW_TYPES, render_preview_html
+from vectorpress.build.product_resolution import resolve_product
+from vectorpress.catalog.assets import asset_dir, load_assets
+from vectorpress.catalog.brand import load_brand
+from vectorpress.catalog.collections import load_collections
+from vectorpress.catalog.load import load_catalog_config
+from vectorpress.catalog.overrides import effective_derivative
+from vectorpress.catalog.products import load_products, lookup_product
 from vectorpress.cli.app import app
+from vectorpress.domain.derivative_type import DerivativeType, derivative_filename
+from vectorpress.domain.format_folder import copied_folder
 
 runner = CliRunner()
+
+#: The dry-rendered "main" preview's own type/canvas (§16) -- picked once
+#: here, the same objects :func:`render_preview_html` itself iterates in
+#: :mod:`vectorpress.build.previews`, since one canvas is enough to prove a
+#: brand edit reaches the rendered markup.
+_MAIN_PREVIEW_TYPE = next(t for t in PREVIEW_TYPES if t.name == "main")
+_SQUARE_CANVAS = next(c for c in CANVASES if c.name == "square")
 
 FIXTURE_CATALOG_ROOT = Path(__file__).parents[1] / "fixtures" / "catalog"
 
@@ -89,6 +106,53 @@ def _product_output(root: Path, slug: str) -> str:
     result = runner.invoke(app, ["--catalog", str(root), "product", slug])
     assert result.exit_code == 0, result.output
     return result.stdout
+
+
+def _render_main_html(root: Path, slug: str) -> str:
+    """``slug``'s real "main" preview HTML, rendered purely via Jinja
+    (:func:`~vectorpress.build.previews.render_preview_html`, no Chromium)
+    against the catalog's own *current* brand/product/membership on disk --
+    gathered the same way :func:`~vectorpress.build.product_build.build_product`
+    itself would, so a brand edit's effect on the actual rendered markup can
+    be asserted directly, never inferred from a PNG's bytes (previews are
+    not held to byte-identical output, ADR 0014, so PNG bytes alone can
+    differ -- or fail to -- for reasons having nothing to do with what
+    changed)."""
+    config = load_catalog_config(root)
+    product = lookup_product(load_products(root, config), config, slug).product
+    assert product is not None
+    brand = load_brand(root).brand
+    assert brand is not None
+    known_assets = load_assets(root, config).assets
+    known_collections = load_collections(root, config).collections
+    resolved = resolve_product(product, root, config, known_assets, known_collections)
+    assets_by_id = {asset.id: asset for asset in known_assets}
+
+    content_by_member: dict[str, dict[DerivativeType, bytes]] = {}
+    files_by_folder: dict[str, list[str]] = {}
+    for member in resolved.eligible_members:
+        asset = assets_by_id[member.asset_id]
+        asset_dir_path = asset_dir(root, config, asset.id)
+        for derivative_type in product.derivative_types:
+            filename = derivative_filename(asset.display_name, derivative_type)
+            effective = effective_derivative(asset_dir_path, filename)
+            assert effective is not None
+            content_by_member.setdefault(asset.id, {})[derivative_type] = effective.bytes
+            folder = copied_folder(derivative_type)
+            assert folder is not None
+            files_by_folder.setdefault(folder.value.upper(), []).append(filename)
+
+    return render_preview_html(
+        root,
+        _MAIN_PREVIEW_TYPE,
+        _SQUARE_CANVAS,
+        product,
+        brand,
+        resolved.eligible_members,
+        assets_by_id,
+        content_by_member,
+        files_by_folder,
+    )
 
 
 # --- acceptance: every fixture product is current once built ----------------
@@ -484,26 +548,39 @@ def test_card_style_change_flags_previews_out_of_date_for_every_built_product(
     """ADR 0014's own worked example: ``card_style`` is one of the
     presentation hash's brand fields, so editing it reaches every already
     built product as "previews out of date" -- naming no product.toml
-    change -- and rebuilding both clears the reason and changes the
-    previews' own rendered bytes (ADR 0014: previews are not held to
-    byte-identical output, but a real style edit must still show up in the
-    pixels)."""
+    change -- and rebuilding clears the reason. Previews are not held to
+    byte-identical output (ADR 0014), so this asserts the actual effect --
+    the dry-rendered HTML text before and after (:func:`_render_main_html`,
+    via ``render_preview_html``) and the manifest's own recorded
+    ``presentation_hash`` before and after the rebuild -- never PNG bytes,
+    which Chromium/OS nondeterminism could differ (or fail to differ) on
+    for reasons having nothing to do with ``card_style`` actually reaching
+    the template."""
     _build_every_fixture_product(monkeypatch, temp_catalog_root)
 
     product_bytes_before = {
         slug: (temp_catalog_root / "products" / f"{slug}.toml").read_bytes()
         for slug in (PNG_ONLY_SLUG, STANDARD_PACK_SLUG, MINI_PACK_SLUG)
     }
-    main_preview_path = (
-        temp_catalog_root / "builds" / PNG_ONLY_SLUG / "previews" / "01-main-square.png"
-    )
-    preview_before = main_preview_path.read_bytes()
+    manifest_path = temp_catalog_root / "builds" / PNG_ONLY_SLUG / "manifest.json"
+    presentation_hash_before = json.loads(manifest_path.read_text(encoding="utf-8"))[
+        "presentation_hash"
+    ]
+    html_before = _render_main_html(temp_catalog_root, PNG_ONLY_SLUG)
 
     brand_path = temp_catalog_root / "brand.toml"
     text = brand_path.read_text(encoding="utf-8")
     before = 'accent_color = "#C45D26"'
     assert before in text
-    brand_path.write_text(text.replace(before, 'accent_color = "#2244FF"'), encoding="utf-8")
+    new_accent_color = "#2244ff"
+    brand_path.write_text(
+        text.replace(before, f'accent_color = "{new_accent_color}"'), encoding="utf-8"
+    )
+
+    html_after = _render_main_html(temp_catalog_root, PNG_ONLY_SLUG)
+    assert html_after != html_before
+    assert new_accent_color not in html_before.lower()
+    assert new_accent_color in html_after.lower()
 
     for slug in (PNG_ONLY_SLUG, STANDARD_PACK_SLUG, MINI_PACK_SLUG):
         output = _product_output(temp_catalog_root, slug)
@@ -520,7 +597,10 @@ def test_card_style_change_flags_previews_out_of_date_for_every_built_product(
         assert build_result.exit_code == 0, build_result.output
         assert "Build: current" in _product_output(temp_catalog_root, slug)
 
-    assert main_preview_path.read_bytes() != preview_before
+    presentation_hash_after = json.loads(manifest_path.read_text(encoding="utf-8"))[
+        "presentation_hash"
+    ]
+    assert presentation_hash_after != presentation_hash_before
 
 
 # --- acceptance: a catalog template override reports previews out of date ---
@@ -660,3 +740,66 @@ def test_changing_an_assets_rights_status_does_not_report_previews_out_of_date(
     output = _product_output(temp_catalog_root, PNG_ONLY_SLUG)
     assert "Build: current" in output
     assert "previews out of date" not in output
+
+
+# --- acceptance: a broken catalog override never crashes a read-only command ---
+
+
+@pytest.mark.integration
+def test_a_catalog_override_syntax_error_reports_previews_out_of_date_without_crashing(
+    monkeypatch: pytest.MonkeyPatch, temp_catalog_root: Path
+) -> None:
+    """A broken catalog override must never crash ``vpress product`` or
+    ``vpress status`` (§34): needs-rebuild's own dry render (ADR 0014)
+    catches the identical :class:`~vectorpress.build.previews.
+    PreviewRenderError` an actual rebuild would refuse on, here a Jinja
+    syntax error, and reports it as "previews out of date" naming the
+    template, instead of letting the exception propagate."""
+    _build_every_fixture_product(monkeypatch, temp_catalog_root)
+
+    override_path = temp_catalog_root / "templates" / "previews" / "main.html.j2"
+    override_path.parent.mkdir(parents=True, exist_ok=True)
+    override_path.write_text(
+        '{% extends "shipped/main.html.j2" %}\n{% block content %}{% if %}broken{% endblock %}\n',
+        encoding="utf-8",
+    )
+
+    output = _product_output(temp_catalog_root, PNG_ONLY_SLUG)
+    assert "Build: needs rebuild" in output
+    assert "previews out of date" in output
+    assert "cannot render" in output
+    assert "main.html.j2" in output
+
+    status_result = runner.invoke(app, ["--catalog", str(temp_catalog_root), "status"])
+    assert status_result.exit_code == 0, status_result.output
+    assert "Products needing rebuild: 3" in status_result.stdout
+
+
+@pytest.mark.integration
+def test_a_catalog_override_undefined_variable_reports_previews_out_of_date_without_crashing(
+    monkeypatch: pytest.MonkeyPatch, temp_catalog_root: Path
+) -> None:
+    """The undefined-variable half of the same broken-override guarantee:
+    ``vpress product`` and ``vpress status`` both still exit cleanly,
+    reporting "previews out of date" rather than an uncaught
+    ``UndefinedError``."""
+    _build_every_fixture_product(monkeypatch, temp_catalog_root)
+
+    override_path = temp_catalog_root / "templates" / "previews" / "main.html.j2"
+    override_path.parent.mkdir(parents=True, exist_ok=True)
+    override_path.write_text(
+        '{% extends "shipped/main.html.j2" %}\n'
+        "{% block content %}{{ this_is_not_in_the_context }}{% endblock %}\n",
+        encoding="utf-8",
+    )
+
+    output = _product_output(temp_catalog_root, PNG_ONLY_SLUG)
+    assert "Build: needs rebuild" in output
+    assert "previews out of date" in output
+    assert "cannot render" in output
+    assert "main.html.j2" in output
+    assert "this_is_not_in_the_context" in output
+
+    status_result = runner.invoke(app, ["--catalog", str(temp_catalog_root), "status"])
+    assert status_result.exit_code == 0, status_result.output
+    assert "Products needing rebuild: 3" in status_result.stdout

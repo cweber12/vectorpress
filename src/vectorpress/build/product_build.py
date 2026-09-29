@@ -66,7 +66,8 @@ derivative type it was converting (§35).
 (:mod:`vectorpress.build.previews`) renders at both fixed canvases from the
 same in-memory data this function has already gathered for the package
 itself -- no second read of any effective derivative. A rendering failure
-(no Chromium, an undefined template variable, a template requesting a
+(no Chromium, a catalog override with a syntax error or naming a missing
+template, an undefined template variable, a template requesting a
 disallowed URL) refuses the whole build the same way a DXF conversion
 failure does, before anything is written; previews are never inside the
 package or the ZIP (§14), and the manifest records their file names, never
@@ -105,7 +106,7 @@ from uuid import uuid4
 
 from vectorpress import __version__
 from vectorpress.build._dxf_conversion import DxfConversionError, svg_to_dxf_bytes
-from vectorpress.build.previews import PreviewRenderError, render_previews
+from vectorpress.build.previews import PreviewRenderError, PreviewRenderFailure, render_previews
 from vectorpress.build.product_resolution import ProductMember, resolve_product
 from vectorpress.catalog.assets import asset_dir
 from vectorpress.catalog.brand import load_brand
@@ -370,17 +371,6 @@ class DxfConversionFailure:
 
     asset_id: AssetId
     source_derivative_type: DerivativeType
-    message: str
-
-
-@dataclass(frozen=True)
-class PreviewRenderFailure:
-    """One preview rendering failure (§16, ADR 0014): the template it traces
-    to, when the failure names one (an undefined variable, a disallowed
-    URL), and the underlying error. ``template_name`` is ``None`` for a
-    Chromium-level failure such as no Chromium being installed."""
-
-    template_name: str | None
     message: str
 
 

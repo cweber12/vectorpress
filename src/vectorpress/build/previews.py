@@ -46,7 +46,7 @@ from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
 
-from jinja2 import Environment, UndefinedError
+from jinja2 import Environment, TemplateError, TemplateNotFound, TemplateSyntaxError, UndefinedError
 from playwright.sync_api import Browser, Playwright, Route, sync_playwright
 from playwright.sync_api import Error as PlaywrightError
 
@@ -118,15 +118,33 @@ CANVASES: tuple[Canvas, ...] = (
 
 
 class PreviewRenderError(Exception):
-    """One preview failed to render (ADR 0014): an undefined template
-    variable, a template requesting a remote or otherwise disallowed URL, or
-    Chromium itself failing to launch or render. ``template_name`` is set
-    whenever the failure traces to one template file; ``None`` for a
-    Chromium-level failure (no Chromium installed) that names no template."""
+    """One preview failed to render (ADR 0014): a template syntax error, a
+    missing template (a catalog override's own ``{% extends %}``/
+    ``{% include %}`` naming a file that does not exist), an undefined
+    template variable, a template requesting a remote or otherwise
+    disallowed URL, or Chromium itself failing to launch or render.
+    ``template_name`` is set whenever the failure traces to one template
+    file; ``None`` for a Chromium-level failure (no Chromium installed)
+    that names no template."""
 
     def __init__(self, message: str, template_name: str | None = None) -> None:
         super().__init__(message)
         self.template_name = template_name
+
+
+@dataclass(frozen=True)
+class PreviewRenderFailure:
+    """One preview rendering failure (§16, ADR 0014), as a plain value:
+    the template it traces to, when the failure names one, and the
+    underlying error's own message. ``template_name`` is ``None`` for a
+    Chromium-level failure such as no Chromium being installed. Shared by
+    :func:`~vectorpress.build.product_build.build_product` (a real build's
+    own refusal) and :mod:`~vectorpress.build.needs_rebuild` (a dry
+    render's own "previews out of date" detail) -- the same shape either
+    way, since both trace back to the identical :class:`PreviewRenderError`."""
+
+    template_name: str | None
+    message: str
 
 
 # --- the fixed preview context (ADR 0015) -----------------------------------
@@ -517,10 +535,27 @@ def _render_html(
     # environment's or the template's own globals, which StrictUndefined
     # does not gate: a catalog override reading anything else must still
     # fail, exactly the same as reading an unrelated undefined name.
-    template = environment.get_template(template_name)
+    #
+    # ``get_template`` and ``render`` share one try/except: a literal
+    # ``{% extends %}``/``{% include %}`` target is not always resolved at
+    # the same point (compile time for some Jinja versions/targets, render
+    # time for others), and every failure either can raise -- a syntax
+    # error, a missing file, an undefined variable -- must turn into a
+    # named :class:`PreviewRenderError` the same way, never an uncaught
+    # Jinja exception reaching a caller that never launches Chromium at all
+    # (needs-rebuild's own dry render, :func:`current_presentation_hash`).
     try:
+        template = environment.get_template(template_name)
         return template.render(**context)
+    except TemplateSyntaxError as exc:
+        raise PreviewRenderError(str(exc), template_name=exc.name or template_name) from exc
+    except TemplateNotFound as exc:
+        name = exc.name if isinstance(exc.name, str) else template_name
+        raise PreviewRenderError(str(exc), template_name=name) from exc
     except UndefinedError as exc:
+        name = template_name_from_traceback(exc, root, PREVIEWS_KIND) or template_name
+        raise PreviewRenderError(str(exc), template_name=name) from exc
+    except TemplateError as exc:
         name = template_name_from_traceback(exc, root, PREVIEWS_KIND) or template_name
         raise PreviewRenderError(str(exc), template_name=name) from exc
 

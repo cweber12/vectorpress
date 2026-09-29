@@ -28,7 +28,11 @@ from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
 
-from vectorpress.build.previews import current_presentation_hash
+from vectorpress.build.previews import (
+    PreviewRenderError,
+    PreviewRenderFailure,
+    current_presentation_hash,
+)
 from vectorpress.build.product_resolution import ProductMember, resolve_product
 from vectorpress.catalog.assets import asset_dir
 from vectorpress.catalog.brand import load_brand
@@ -118,7 +122,18 @@ class NeedsRebuildResult:
     rebuild would refuse on its own gate before ever reaching previews,
     which is not this comparison's concern (the same reasoning
     :func:`_brand_wording_differences` already applies to a missing
-    brand)."""
+    brand).
+
+    ``previews_render_failure`` is set only when computing the *current*
+    presentation hash itself failed to render: a catalog override -- or a
+    shipped template it extends -- with a syntax error, a missing file, or
+    an undefined variable (the same :class:`~vectorpress.build.previews.
+    PreviewRenderError` a real build would refuse on). ``previews_out_of_date``
+    is then also ``True`` -- a build would refuse identically, so this is
+    reported as the same reason rather than raised: needs-rebuild is a
+    read-only comparison (this module's own docstring), and a broken
+    catalog override must never crash ``vpress status`` or ``vpress
+    product``."""
 
     outcome: NeedsRebuildOutcome
     member_differences: list[MemberDifference]
@@ -128,6 +143,7 @@ class NeedsRebuildResult:
     manifest_format_outdated: bool
     previews_out_of_date: bool
     listing_changed: bool
+    previews_render_failure: PreviewRenderFailure | None
 
 
 def _current_member_content(
@@ -274,31 +290,53 @@ def _presentation_and_listing_differences(
     resolved_eligible_members: list[ProductMember],
     assets_by_id: dict[AssetId, Asset],
     content_by_member: dict[AssetId, dict[DerivativeType, bytes]],
-) -> tuple[bool, bool]:
+) -> tuple[bool, bool, PreviewRenderFailure | None]:
     """Whether the presentation hash (ADR 0014) or the listing hash (ADR
-    0017) has changed since ``manifest`` was written. Both ``False`` --
-    not compared at all -- when the catalog currently has no valid brand or
-    the product has no ``[listing]``: either way an actual rebuild would
-    refuse on its own listing/brand gate before ever reaching previews,
-    which is not this function's concern (the same reasoning
+    0017) has changed since ``manifest`` was written. Both ``False``, and
+    no failure -- not compared at all -- when the catalog currently has no
+    valid brand or the product has no ``[listing]``: either way an actual
+    rebuild would refuse on its own listing/brand gate before ever reaching
+    previews, which is not this function's concern (the same reasoning
     :func:`_brand_wording_differences` already applies to a missing
-    brand)."""
+    brand).
+
+    The listing hash is compared independently of whether the presentation
+    hash's own dry render succeeds: a broken catalog override says nothing
+    about whether ``[listing]`` also changed, and an edited listing field
+    must still be reported even when previews cannot currently render.
+
+    A :class:`~vectorpress.build.previews.PreviewRenderError` from the dry
+    render itself (a catalog override, or a shipped template it extends,
+    with a syntax error, a missing file, or an undefined variable) is
+    caught here, never left to propagate: it is reported as
+    ``previews_out_of_date=True`` with its own
+    :class:`~vectorpress.build.previews.PreviewRenderFailure` detail,
+    exactly the reason an actual rebuild would refuse for -- a read-only
+    command must never crash over a catalog problem a build would simply
+    name.
+    """
     if brand is None or product.listing is None:
-        return False, False
+        return False, False, None
+
+    listing_changed = _listing_hash(product.listing) != manifest.listing_hash
 
     files_by_folder = _current_files_by_folder(content_by_member, assets_by_id, product.formats)
-    current_presentation = current_presentation_hash(
-        root,
-        product,
-        brand,
-        resolved_eligible_members,
-        assets_by_id,
-        content_by_member,
-        files_by_folder,
-    )
+    try:
+        current_presentation = current_presentation_hash(
+            root,
+            product,
+            brand,
+            resolved_eligible_members,
+            assets_by_id,
+            content_by_member,
+            files_by_folder,
+        )
+    except PreviewRenderError as exc:
+        failure = PreviewRenderFailure(template_name=exc.template_name, message=str(exc))
+        return True, listing_changed, failure
+
     previews_out_of_date = current_presentation != manifest.presentation_hash
-    listing_changed = _listing_hash(product.listing) != manifest.listing_hash
-    return previews_out_of_date, listing_changed
+    return previews_out_of_date, listing_changed, None
 
 
 def _empty_result(
@@ -317,6 +355,7 @@ def _empty_result(
         manifest_format_outdated=manifest_format_outdated,
         previews_out_of_date=False,
         listing_changed=False,
+        previews_render_failure=None,
     )
 
 
@@ -348,7 +387,10 @@ def compute_needs_rebuild(
     the current presentation hash (ADR 0014) against a brand edit, a
     catalog template override, or a replaced mark or font file --
     **previews out of date** -- and the current ``[listing]`` hash (ADR
-    0017) against an edited listing field -- **listing changed**.
+    0017) against an edited listing field -- **listing changed**. A catalog
+    override that fails to render at all is reported as the same
+    **previews out of date** reason, with its own detail
+    (:attr:`NeedsRebuildResult.previews_render_failure`), never raised.
     """
     try:
         manifest = read_manifest(root, product.slug)
@@ -377,15 +419,17 @@ def compute_needs_rebuild(
     license_template_changed, readme_wording_changed = _brand_wording_differences(
         root, brand, manifest
     )
-    previews_out_of_date, listing_changed = _presentation_and_listing_differences(
-        root,
-        config,
-        product,
-        brand,
-        manifest,
-        resolved.eligible_members,
-        assets_by_id,
-        content_by_member,
+    previews_out_of_date, listing_changed, previews_render_failure = (
+        _presentation_and_listing_differences(
+            root,
+            config,
+            product,
+            brand,
+            manifest,
+            resolved.eligible_members,
+            assets_by_id,
+            content_by_member,
+        )
     )
 
     current_reference_size_in = resolve_reference_size_in(config, product)
@@ -414,4 +458,5 @@ def compute_needs_rebuild(
         manifest_format_outdated=False,
         previews_out_of_date=previews_out_of_date,
         listing_changed=listing_changed,
+        previews_render_failure=previews_render_failure,
     )
