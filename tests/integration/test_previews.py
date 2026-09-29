@@ -16,6 +16,7 @@ import pytest
 from PIL import Image
 from typer.testing import CliRunner
 
+from vectorpress.build.export import EXPORT_DIRNAME
 from vectorpress.catalog.manifests import read_manifest
 from vectorpress.cli.app import app
 
@@ -414,9 +415,14 @@ def test_a_product_with_more_than_12_members_and_2_derivative_types_produces_01_
         with Image.open(previews_dir / name) as image:
             assert image.size == sizes[canvas]
 
-    # Never inside the package or the ZIP (§14).
+    # Never inside the package or the ZIP (§14). "previews" and "export"
+    # are the build directory's own two non-package siblings beside the
+    # package dir (ADR 0014, ADR 0017) -- excluded by name the same way
+    # test_build.py identifies the package dir.
     package_dirs = [
-        p for p in many_members_build_dir.iterdir() if p.is_dir() and p.name != "previews"
+        p
+        for p in many_members_build_dir.iterdir()
+        if p.is_dir() and p.name not in ("previews", EXPORT_DIRNAME)
     ]
     assert len(package_dirs) == 1
     package_files = {p.relative_to(package_dirs[0]).as_posix() for p in package_dirs[0].rglob("*")}
