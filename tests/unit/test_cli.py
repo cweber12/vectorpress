@@ -509,10 +509,13 @@ def test_asset_lists_every_product_it_belongs_to_with_its_own_eligibility(
         "explicit\texcluded" in result.stdout
     )
     assert (
-        "pacific_coast_tide_pool_png_only\tpacific_coast_tide_pool_png_only\texplicit\texcluded"
-        in (result.stdout)
+        "pacific_coast_tide_pool_png_only\tPacific Coast Tide Pool \u2013 PNG Cut Files\t"
+        "explicit\texcluded" in (result.stdout)
     )
-    assert "kelp_forest_mini_pack\tkelp_forest_mini_pack\trule\texcluded" in result.stdout
+    assert (
+        "kelp_forest_mini_pack\tKelp Forest Mini Pack \u2013 SVG Cut Files\trule\texcluded"
+        in result.stdout
+    )
 
 
 def test_asset_in_no_collection_says_so_instead_of_an_empty_header(
@@ -864,7 +867,7 @@ def test_products_lists_every_fixture_product_with_slug_title_tier_collection_an
     )
     assert lines["pacific_coast_tide_pool_png_only"] == (
         "pacific_coast_tide_pool_png_only",
-        "pacific_coast_tide_pool_png_only",
+        "Pacific Coast Tide Pool \u2013 PNG Cut Files",
         "collection",
         "pacific_coast_tide_pool",
         "3",
@@ -872,7 +875,7 @@ def test_products_lists_every_fixture_product_with_slug_title_tier_collection_an
     )
     assert lines["kelp_forest_mini_pack"] == (
         "kelp_forest_mini_pack",
-        "kelp_forest_mini_pack",
+        "Kelp Forest Mini Pack \u2013 SVG Cut Files",
         "mini_pack",
         "inline (rule)",
         "1",
@@ -881,15 +884,30 @@ def test_products_lists_every_fixture_product_with_slug_title_tier_collection_an
 
 
 def test_products_falls_back_to_slug_when_there_is_no_listing(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    monkeypatch.chdir(FIXTURE_CATALOG_ROOT)
+    """A product with no ``[listing]`` yet still loads and lists -- ``vpress
+    products`` falls back to its slug. Every committed fixture product now
+    carries a drafted listing (ADR 0016), so this writes a temp-only one
+    with none into a private copy of the fixture instead."""
+    root = tmp_path / "catalog"
+    shutil.copytree(FIXTURE_CATALOG_ROOT, root)
+    (root / "products" / "no_listing_test_product.toml").write_text(
+        'derivative_types = ["cut_svg"]\n'
+        'formats = ["svg"]\n'
+        'tier = "individual"\n'
+        "price = 1.00\n\n"
+        "[membership]\n"
+        'asset_ids = ["owl_limpet"]\n',
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(root)
 
     result = runner.invoke(app, ["products"])
 
     assert result.exit_code == 0
     lines = {line.split("\t")[0]: line for line in result.stdout.splitlines() if line.strip()}
-    assert lines["kelp_forest_mini_pack"].split("\t")[1] == "kelp_forest_mini_pack"
+    assert lines["no_listing_test_product"].split("\t")[1] == "no_listing_test_product"
 
 
 def test_products_are_sorted_by_slug(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -50,7 +50,7 @@ from vectorpress.catalog.collections import load_collections
 from vectorpress.catalog.derivatives import DerivativeStateCounts
 from vectorpress.catalog.errors import CatalogConfigError, CatalogNotFoundError
 from vectorpress.catalog.findings import FindingsCurrencyState, findings_currency
-from vectorpress.catalog.listing_draft import ListingAppendOutcome, append_listing
+from vectorpress.catalog.listing_draft import COMMAND_NAME, ListingAppendOutcome, append_listing
 from vectorpress.catalog.load import load_catalog, load_catalog_config
 from vectorpress.catalog.locate import locate_catalog_root
 from vectorpress.catalog.metadata_problem import MetadataProblem
@@ -1786,7 +1786,8 @@ def build(
     format, plus README.txt and LICENSE.txt), its ZIP, and a manifest.
 
     Refuses and writes nothing -- leaving any previous build of this
-    product untouched -- without a valid catalog brand.toml naming an
+    product untouched -- for a product with no [listing] yet, naming
+    'vpress listing draft <slug>'; without a valid catalog brand.toml naming an
     existing license template (there is no default brand), if that license
     template names an unknown placeholder, if the product's membership does
     not fully resolve, if two members' customer file names collide (naming
@@ -1821,6 +1822,12 @@ def build(
     result = build_product(
         loaded, root, config, known_assets, known_collections, allow_unapproved=allow_unapproved
     )
+
+    if result.outcome is BuildOutcome.REFUSED_NO_LISTING:
+        typer.echo(
+            f"build: {slug} refused: no [listing] -- run `{COMMAND_NAME} {slug}` first", err=True
+        )
+        raise typer.Exit(code=1)
 
     if result.outcome is BuildOutcome.REFUSED_BRAND_PROBLEMS:
         assert result.brand_problems is not None

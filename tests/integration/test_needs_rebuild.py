@@ -436,7 +436,13 @@ def test_reference_size_change_flags_needs_rebuild_naming_the_change(
     product_path = temp_catalog_root / "products" / f"{PNG_ONLY_SLUG}.toml"
     text = product_path.read_text(encoding="utf-8")
     assert "reference_size_in" not in text
-    product_path.write_text(text + "reference_size_in = 6.0\n", encoding="utf-8")
+    # Inserted before the product's own [listing] table, not appended at
+    # the file's end: a bare key appended after a table header parses as
+    # that table's own key instead (TOML), and this fixture product now
+    # carries a drafted [listing] (ADR 0016).
+    table_start = text.index("\n[listing]")
+    new_text = text[: table_start + 1] + "reference_size_in = 6.0\n" + text[table_start + 1 :]
+    product_path.write_text(new_text, encoding="utf-8")
 
     output = _product_output(temp_catalog_root, PNG_ONLY_SLUG)
     assert "Build: needs rebuild" in output

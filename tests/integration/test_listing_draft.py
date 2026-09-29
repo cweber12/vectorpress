@@ -7,14 +7,20 @@ own product files must never carry a drafted listing this command didn't
 put there by hand (mirrors ``tests/integration/test_build.py``'s own
 reasoning for ``builds/``).
 
-``kelp_forest_mini_pack`` (inline membership, no ``[listing]`` yet) is the
-main fixture: its rule-based membership resolves to exactly one member
-(``purple_sea_urchin`` -- the only fixture asset tagged to the "Kelp
-forest" ecosystem), so its drafted values are easy to predict by hand and
-it exercises the inline-membership fallbacks (§18: ``short_title`` from the
-title-cased slug, ``category = ""``). ``pacific_coast_tide_pool_png_only``
-(collection_slug, no listing) covers the referenced-collection path and the
+``kelp_forest_mini_pack`` (inline membership) is the main fixture: its
+rule-based membership resolves to exactly one member (``purple_sea_urchin``
+-- the only fixture asset tagged to the "Kelp forest" ecosystem), so its
+drafted values are easy to predict by hand and it exercises the
+inline-membership fallbacks (§18: ``short_title`` from the title-cased
+slug, ``category = ""``). ``pacific_coast_tide_pool_png_only``
+(collection_slug) covers the referenced-collection path and the
 template-override and partial-listing scenarios.
+
+Both fixture products carry their own committed, already-drafted
+``[listing]`` (ADR 0016) -- every product needs one to build -- so
+``temp_catalog_root`` here strips it back off its copy of each: this module
+tests the draft command itself, which needs a product with no ``[listing]``
+yet to draft into.
 """
 
 import re
@@ -38,10 +44,28 @@ PNG_ONLY_SLUG = "pacific_coast_tide_pool_png_only"
 PNG_ONLY_PATH = Path("products") / f"{PNG_ONLY_SLUG}.toml"
 
 
+#: The header comment `vpress listing draft` itself opens a drafted table
+#: with (ADR 0016) -- the boundary stripped back off a fixture product's own
+#: already-drafted listing to restore the "no [listing] yet" state this
+#: module's tests need.
+_DRAFTED_HEADER_MARKER = "\n# Drafted by `vpress listing draft`"
+
+
+def _without_drafted_listing(text: str) -> str:
+    """``text`` with its own already-drafted ``[listing]`` table (and the
+    header comment above it) removed, reversing exactly what
+    :func:`~vectorpress.catalog.listing_draft.append_listing` appended."""
+    return text[: text.index(_DRAFTED_HEADER_MARKER)]
+
+
 @pytest.fixture
 def temp_catalog_root(tmp_path: Path) -> Path:
     root = tmp_path / "catalog"
     shutil.copytree(FIXTURE_CATALOG_ROOT, root)
+    for path in (root / MINI_PACK_PATH, root / PNG_ONLY_PATH):
+        path.write_text(
+            _without_drafted_listing(path.read_text(encoding="utf-8")), encoding="utf-8"
+        )
     return root
 
 

@@ -7,10 +7,11 @@ command writes real files under ``builds/``, and the fixture catalog must
 never contain one (``tests/fixtures/catalog/README.md``).
 
 Uses ``pacific_coast_tide_pool_png_only`` (``derivative_types =
-["transparent_png"]``, ``formats = ["png"]``, no ``[listing]``), the same
-PNG-only fixture product PRD 5's own acceptance test already exercises
-(``test_prd05_acceptance.py``): its package/ZIP name falls back to its slug,
-Title-Case-Hyphen, since it has no listing yet.
+["transparent_png"]``, ``formats = ["png"]``), the same PNG-only fixture
+product PRD 5's own acceptance test already exercises
+(``test_prd05_acceptance.py``): its package/ZIP name comes from its own
+drafted listing's ``short_title``, "Pacific Coast Tide Pool" (the
+referenced collection's own name), Title-Case-Hyphen.
 
 DXF conversion (ADR 0013) is exercised against
 ``pacific_coast_tide_pool_standard_pack``, whose ``derivative_types`` already
@@ -36,6 +37,7 @@ from typer.testing import CliRunner
 from vectorpress.build._dxf_conversion import (
     svg_to_dxf_bytes,  # pyright: ignore[reportPrivateUsage]
 )
+from vectorpress.catalog.listing_draft import COMMAND_NAME
 from vectorpress.catalog.manifests import read_manifest
 from vectorpress.cli.app import app
 from vectorpress.domain.asset import RightsStatus
@@ -46,7 +48,8 @@ runner = CliRunner()
 FIXTURE_CATALOG_ROOT = Path(__file__).parents[1] / "fixtures" / "catalog"
 
 PNG_ONLY_SLUG = "pacific_coast_tide_pool_png_only"
-PNG_ONLY_TOP_LEVEL = "Pacific-Coast-Tide-Pool-Png-Only"
+PNG_ONLY_TOP_LEVEL = "Pacific-Coast-Tide-Pool"
+PNG_ONLY_LISTING_TITLE = "Pacific Coast Tide Pool \u2013 PNG Cut Files"
 PNG_ONLY_MEMBERS = ("ochre_sea_star", "giant_green_anemone", "purple_sea_urchin")
 
 # (asset ID, its transparent_png customer filename): §20's slugified display
@@ -68,6 +71,22 @@ STANDARD_PACK_CUT_SVG_FILES = {
     "giant_green_anemone": "giant-green-anemone-cut.svg",
     "purple_sea_urchin": "purple-sea-urchin-cut.svg",
 }
+
+#: A minimal, valid [listing] table (§18) this module appends to every
+#: temp-only product it writes directly: build_product's own listing gate
+#: (ADR 0016) refuses any product with none, and these products exist to
+#: exercise one specific build behavior, never listing content.
+#: short_title = "" keeps package_name falling back to the product's own
+#: slug, so the *_TOP_LEVEL constant already paired with each one stays
+#: correct unchanged.
+_TEST_PRODUCT_LISTING_TOML = (
+    "\n[listing]\n"
+    'title = "Test product"\n'
+    'short_title = ""\n'
+    'description = "Test fixture."\n'
+    'category = ""\n'
+    'license_type = "Test License"\n'
+)
 
 
 @pytest.fixture
@@ -122,7 +141,7 @@ def _write_silhouette_only_dxf_product(root: Path, slug: str) -> None:
         'derivative_types = ["silhouette_svg"]\n'
         'formats = ["svg", "dxf"]\n'
         'tier = "individual"\n'
-        "price = 4.00\n",
+        "price = 4.00\n" + _TEST_PRODUCT_LISTING_TOML,
         encoding="utf-8",
     )
 
@@ -168,6 +187,16 @@ def _count_close_commands(svg_bytes: bytes) -> int:
 
 def _build_dir(root: Path, slug: str) -> Path:
     return root / "builds" / slug
+
+
+def _remove_listing_table(product_path: Path) -> None:
+    """Truncate ``product_path`` before its own ``[listing]`` table (ADR
+    0016): the temp-copy-with-the-listing-removed scenario the no-listing
+    build refusal needs. Leaves any header comment above the table in
+    place -- a dangling comment changes nothing about the product having no
+    ``listing`` key."""
+    text = product_path.read_text(encoding="utf-8")
+    product_path.write_text(text[: text.index("\n[listing]")] + "\n", encoding="utf-8")
 
 
 #: A fixed LICENSE.txt build year (§27), so a test asserting on rendered
@@ -230,11 +259,10 @@ def test_build_writes_readme_and_license_with_every_placeholder_substituted(
     readme_text = (package_dir / "README.txt").read_text(encoding="utf-8")
 
     # every {brand}/{product}/{copyright}/{year} placeholder is gone --
-    # PNG_ONLY_SLUG has no [listing] yet, so {product} falls back to its
-    # slug (§27).
+    # {product} comes from PNG_ONLY_SLUG's own drafted listing title (§27).
     assert "{" not in license_text
     assert "Tide Pool Studio" in license_text
-    assert PNG_ONLY_SLUG in license_text
+    assert PNG_ONLY_LISTING_TITLE in license_text
     assert "© Tide Pool Studio. All rights reserved." in license_text
     assert str(FIXED_LICENSE_YEAR) in license_text
 
@@ -243,6 +271,24 @@ def test_build_writes_readme_and_license_with_every_placeholder_substituted(
     assert "Included formats: PNG" in readme_text
     assert "Files checked at reference size: 3in" in readme_text
     assert "© Tide Pool Studio. All rights reserved." in readme_text
+
+
+@pytest.mark.integration
+def test_build_refuses_a_product_with_no_listing_naming_the_draft_command(
+    monkeypatch: pytest.MonkeyPatch, temp_catalog_root: Path
+) -> None:
+    """ADR 0016: a product can load and resolve without a [listing], but
+    vpress build refuses it before writing anything, naming `vpress listing
+    draft <slug>` -- checked before the brand gate, since it needs neither
+    brand nor membership to decide."""
+    _generate_and_approve_transparent_png(monkeypatch, temp_catalog_root)
+    _remove_listing_table(temp_catalog_root / "products" / f"{PNG_ONLY_SLUG}.toml")
+
+    result = runner.invoke(app, ["build", PNG_ONLY_SLUG])
+
+    assert result.exit_code == 1
+    assert f"{COMMAND_NAME} {PNG_ONLY_SLUG}" in result.output
+    assert not (temp_catalog_root / "builds").exists()
 
 
 @pytest.mark.integration
@@ -400,7 +446,7 @@ def _add_ai_generated_test_product(root: Path) -> None:
         'tier = "individual"\n'
         "price = 1.00\n\n"
         "[membership]\n"
-        'asset_ids = ["owl_limpet"]\n'
+        'asset_ids = ["owl_limpet"]\n' + _TEST_PRODUCT_LISTING_TOML
     )
     (root / "products" / "owl_limpet_test_product.toml").write_text(product_text, encoding="utf-8")
 
@@ -445,7 +491,7 @@ def _add_owl_limpet_ai_generated_product(root: Path) -> None:
         'tier = "individual"\n'
         "price = 1.00\n\n"
         "[membership]\n"
-        'asset_ids = ["owl_limpet"]\n'
+        'asset_ids = ["owl_limpet"]\n' + _TEST_PRODUCT_LISTING_TOML
     )
     (root / "products" / f"{_AI_GENERATED_PRODUCT_SLUG}.toml").write_text(
         product_text, encoding="utf-8"
@@ -1105,7 +1151,7 @@ def _add_oversized_cut_svg_product(root: Path, slug: str) -> None:
         "price = 1.00\n"
         "reference_size_in = 8.0\n\n"
         "[membership]\n"
-        'asset_ids = ["ochre_sea_star"]\n'
+        'asset_ids = ["ochre_sea_star"]\n' + _TEST_PRODUCT_LISTING_TOML
     )
     (root / "products" / f"{slug}.toml").write_text(product_text, encoding="utf-8")
 
@@ -1247,7 +1293,7 @@ def _add_one_color_flatcolor_duplicate_asset_and_product(root: Path) -> None:
         'tier = "individual"\n'
         "price = 1.00\n\n"
         "[membership]\n"
-        f'asset_ids = ["{FLATCOLOR_DUPLICATE_ASSET_ID}"]\n'
+        f'asset_ids = ["{FLATCOLOR_DUPLICATE_ASSET_ID}"]\n' + _TEST_PRODUCT_LISTING_TOML
     )
     (root / "products" / f"{FLATCOLOR_DUPLICATE_PRODUCT_SLUG}.toml").write_text(
         product_text, encoding="utf-8"

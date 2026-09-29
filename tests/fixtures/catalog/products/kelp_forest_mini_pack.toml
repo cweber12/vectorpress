@@ -1,7 +1,6 @@
 # Hand-authored product metadata (ADR 0005). The product slug is this
 # file's stem. Declares an inline collection (same Membership shape as a
-# collection file, ADR 0008) instead of referencing a collection slug, and
-# has no [listing] yet, since PRD 7 drafts that on first build (issue #7).
+# collection file, ADR 0008) instead of referencing a collection slug.
 #
 # reference_size_in overrides the catalog default (3.0 in) down to 1.0 in
 # (§9.1, ADR 0008, issue #38): a mini pack sells at a smaller physical size
@@ -23,3 +22,18 @@ ineligible_members = "exclude"
 [membership.rule]
 field = "ecosystems"
 values = ["Kelp forest"]
+
+# Drafted by `vpress listing draft` on 2026-09-28.
+# The tool never rewrites this table -- edit it by hand, or delete
+# it and run the command again to redraft.
+[listing]
+title = "Kelp Forest Mini Pack – SVG Cut Files"
+short_title = "Kelp Forest Mini Pack"
+description = "Hand-illustrated, scientifically accurate cut files."
+tags = ["cut file", "svg"]
+search_terms = ["purple sea urchin"]
+intended_uses = ["apparel", "stickers"]
+species_names = ["Strongylocentrotus purpuratus"]
+category = ""
+license_type = "Tide Pool Studio Personal & Small Business Use License"
+marketplace_notes = ""

@@ -42,6 +42,9 @@ FIXTURE_CATALOG_ROOT = Path(__file__).parents[1] / "fixtures" / "catalog"
 STANDARD_PACK_SLUG = "pacific_coast_tide_pool_standard_pack"
 STANDARD_PACK_TOP_LEVEL = "Tide-Pool-Collection"
 PNG_ONLY_SLUG = "pacific_coast_tide_pool_png_only"
+# PNG_ONLY_SLUG's own drafted listing short_title is the referenced
+# collection's name, "Pacific Coast Tide Pool" (ADR 0016).
+PNG_ONLY_TOP_LEVEL = "Pacific-Coast-Tide-Pool"
 MINI_PACK_SLUG = "kelp_forest_mini_pack"
 
 PACIFIC_COAST_MEMBERS = ("ochre_sea_star", "giant_green_anemone", "purple_sea_urchin")
@@ -75,6 +78,22 @@ def temp_catalog_root(tmp_path: Path) -> Path:
     root = tmp_path / "catalog"
     shutil.copytree(FIXTURE_CATALOG_ROOT, root)
     return root
+
+
+#: A minimal, valid [listing] table (§18), the same one test_build.py's own
+#: temp-only products use: build_product's own listing gate (ADR 0016)
+#: refuses any product with none, and these temp-only products exist to
+#: exercise one specific build behavior, never listing content.
+#: short_title = "" keeps package_name falling back to the product's own
+#: slug.
+_TEST_PRODUCT_LISTING_TOML = (
+    "\n[listing]\n"
+    'title = "Test product"\n'
+    'short_title = ""\n'
+    'description = "Test fixture."\n'
+    'category = ""\n'
+    'license_type = "Test License"\n'
+)
 
 
 #: A fixed LICENSE.txt build year (§27), the same fixed year test_build.py
@@ -200,7 +219,7 @@ def test_prd_06_acceptance_walkthrough(
         "price = 1.00\n"
         "reference_size_in = 8.0\n\n"
         "[membership]\n"
-        'asset_ids = ["ochre_sea_star"]\n',
+        'asset_ids = ["ochre_sea_star"]\n' + _TEST_PRODUCT_LISTING_TOML,
         encoding="utf-8",
     )
 
@@ -278,9 +297,7 @@ def test_prd_06_acceptance_walkthrough(
     )
     assert any(m["asset_id"] == "ochre_sea_star" for m in png_only_manifest["members"])
     assert png_only_manifest["excluded_members"] == []
-    png_only_package_dir = (
-        _build_dir(temp_catalog_root, PNG_ONLY_SLUG) / "Pacific-Coast-Tide-Pool-Png-Only"
-    )
+    png_only_package_dir = _build_dir(temp_catalog_root, PNG_ONLY_SLUG) / PNG_ONLY_TOP_LEVEL
     assert (png_only_package_dir / "PNG" / "ochre-sea-star-color.png").is_file()
 
     # === 5. A build without a valid brand.toml refuses. ===
@@ -320,7 +337,7 @@ def test_prd_06_acceptance_walkthrough(
         'tier = "individual"\n'
         "price = 1.00\n\n"
         "[membership]\n"
-        'asset_ids = ["owl_limpet"]\n',
+        'asset_ids = ["owl_limpet"]\n' + _TEST_PRODUCT_LISTING_TOML,
         encoding="utf-8",
     )
     runner.invoke(app, ["generate", "owl_limpet"])

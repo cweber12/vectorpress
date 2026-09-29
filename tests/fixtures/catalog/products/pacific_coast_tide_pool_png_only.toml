@@ -4,11 +4,25 @@
 # different derivative_types -- transparent_png only, formats png only --
 # so the identical membership resolves to a different eligible/excluded
 # breakdown depending which product asks (§10: "the same sea star can ship
-# in a PNG-only product while its cut file is still being fixed"). No
-# [listing] yet, since PRD 7 drafts that on first build.
+# in a PNG-only product while its cut file is still being fixed").
 
 collection_slug = "pacific_coast_tide_pool"
 derivative_types = ["transparent_png"]
 formats = ["png"]
 tier = "collection"
 price = 5.00
+
+# Drafted by `vpress listing draft` on 2026-09-28.
+# The tool never rewrites this table -- edit it by hand, or delete
+# it and run the command again to redraft.
+[listing]
+title = "Pacific Coast Tide Pool – PNG Cut Files"
+short_title = "Pacific Coast Tide Pool"
+description = "The tide pool subjects in this catalog, hand-picked rather than grouped by a\nrule.\n\nHand-illustrated, scientifically accurate cut files."
+tags = ["tide pool", "pacific coast", "color png", "png"]
+search_terms = ["giant green anemone", "ochre sea star", "purple sea urchin"]
+intended_uses = ["apparel", "wall art", "stickers"]
+species_names = ["Anthopleura xanthogrammica", "Pisaster ochraceus", "Strongylocentrotus purpuratus"]
+category = "Nature & Wildlife"
+license_type = "Tide Pool Studio Personal & Small Business Use License"
+marketplace_notes = ""
