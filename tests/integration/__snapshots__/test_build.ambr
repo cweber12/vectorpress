@@ -18605,6 +18605,82 @@
     }),
   ])
 # ---
+# name: test_export_listing_json_is_locked_by_snapshot[export_listing]
+  dict({
+    'asset_names': list([
+      'Giant Green Anemone',
+      'Ochre Sea Star',
+      'Purple Sea Urchin',
+    ]),
+    'collection_name': 'Pacific Coast Tide Pool',
+    'contents_summary': dict({
+      'file_names': list([
+        'PNG/giant-green-anemone-color.png',
+        'PNG/ochre-sea-star-color.png',
+        'PNG/purple-sea-urchin-color.png',
+      ]),
+      'formats': list([
+        'png',
+      ]),
+      'member_count': 3,
+      'reference_size_in': 3.0,
+    }),
+    'formats': list([
+      'png',
+    ]),
+    'listing': dict({
+      'category': 'Nature & Wildlife',
+      'description': '''
+        The tide pool subjects in this catalog, hand-picked rather than grouped by a
+        rule.
+        
+        Hand-illustrated, scientifically accurate cut files.
+      ''',
+      'intended_uses': list([
+        'apparel',
+        'wall art',
+        'stickers',
+      ]),
+      'license_type': 'Tide Pool Studio Personal & Small Business Use License',
+      'marketplace_notes': '',
+      'region': None,
+      'search_terms': list([
+        'giant green anemone',
+        'ochre sea star',
+        'purple sea urchin',
+      ]),
+      'short_title': 'Pacific Coast Tide Pool',
+      'species_names': list([
+        'Anthopleura xanthogrammica',
+        'Pisaster ochraceus',
+        'Strongylocentrotus purpuratus',
+      ]),
+      'tags': list([
+        'tide pool',
+        'pacific coast',
+        'color png',
+        'png',
+      ]),
+      'title': 'Pacific Coast Tide Pool – PNG Cut Files',
+    }),
+    'member_count': 3,
+    'previews': dict({
+      'landscape': list([
+        'previews/01-main-landscape.png',
+        'previews/02-included-landscape.png',
+        'previews/03-formats-landscape.png',
+      ]),
+      'square': list([
+        'previews/01-main-square.png',
+        'previews/02-included-square.png',
+        'previews/03-formats-square.png',
+      ]),
+    }),
+    'price': 5.0,
+    'zip_name': 'Pacific-Coast-Tide-Pool.zip',
+    'zip_size_bytes': '<int>',
+  })
+# ---
 # name: test_manifest_and_zip_listing_are_locked_by_snapshot[manifest]
   dict({
     'admitted_unapproved_members': list([

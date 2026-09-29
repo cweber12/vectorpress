@@ -28,6 +28,7 @@ import re
 import shutil
 import zipfile
 from pathlib import Path
+from typing import Any
 
 import ezdxf
 import pytest
@@ -38,6 +39,7 @@ from typer.testing import CliRunner
 from vectorpress.build._dxf_conversion import (
     svg_to_dxf_bytes,  # pyright: ignore[reportPrivateUsage]
 )
+from vectorpress.build.export import EXPORT_DIRNAME, LISTING_EXPORT_FILENAME
 from vectorpress.catalog.listing_draft import COMMAND_NAME
 from vectorpress.catalog.manifests import read_manifest
 from vectorpress.cli.app import app
@@ -1419,3 +1421,113 @@ def test_byte_identical_derivatives_output_and_manifest_section_are_locked_by_sn
     assert manifest["byte_identical_derivatives"] == snapshot(
         name="byte_identical_derivatives_manifest"
     )
+
+
+# --- export/listing.json (§18, §19, ADR 0017) -------------------------------
+
+#: PNG_ONLY_SLUG's three members, sorted by display name -- the order
+#: export/listing.json's own "asset_names" derived value uses (§18).
+PNG_ONLY_ASSET_NAMES = ["Giant Green Anemone", "Ochre Sea Star", "Purple Sea Urchin"]
+
+#: PNG_ONLY_SLUG renders three preview types (main, included, formats -- no
+#: variants with only one derivative type, no contents at three members) at
+#: both canvases, in upload order (§16) -- the same set
+#: ``test_previews.py``'s own ``EXPECTED_PREVIEWS`` locks.
+PNG_ONLY_PREVIEWS_BY_CANVAS = {
+    "square": [
+        "previews/01-main-square.png",
+        "previews/02-included-square.png",
+        "previews/03-formats-square.png",
+    ],
+    "landscape": [
+        "previews/01-main-landscape.png",
+        "previews/02-included-landscape.png",
+        "previews/03-formats-landscape.png",
+    ],
+}
+
+
+def _build_and_read_export(
+    monkeypatch: pytest.MonkeyPatch, temp_catalog_root: Path
+) -> tuple[Path, dict[str, Any]]:
+    _fix_license_year(monkeypatch)
+    _generate_and_approve_transparent_png(monkeypatch, temp_catalog_root)
+
+    result = runner.invoke(app, ["build", PNG_ONLY_SLUG])
+    assert result.exit_code == 0, result.output
+
+    build_dir = _build_dir(temp_catalog_root, PNG_ONLY_SLUG)
+    export = json.loads(
+        (build_dir / EXPORT_DIRNAME / LISTING_EXPORT_FILENAME).read_text(encoding="utf-8")
+    )
+    return build_dir, export
+
+
+@pytest.mark.integration
+def test_build_writes_export_listing_json_with_every_field(
+    monkeypatch: pytest.MonkeyPatch, temp_catalog_root: Path
+) -> None:
+    build_dir, export = _build_and_read_export(monkeypatch, temp_catalog_root)
+
+    assert export["listing"]["title"] == PNG_ONLY_LISTING_TITLE
+    assert export["listing"]["short_title"] == "Pacific Coast Tide Pool"
+
+    assert export["member_count"] == 3
+    assert export["formats"] == ["png"]
+    assert export["asset_names"] == PNG_ONLY_ASSET_NAMES
+    assert export["collection_name"] == "Pacific Coast Tide Pool"
+
+    assert export["contents_summary"] == {
+        "member_count": 3,
+        "formats": ["png"],
+        "file_names": sorted(f"PNG/{filename}" for filename in PNG_ONLY_FILES.values()),
+        "reference_size_in": 3.0,
+    }
+
+    assert export["price"] == 5.0
+
+    zip_path = build_dir / f"{PNG_ONLY_TOP_LEVEL}.zip"
+    assert export["zip_name"] == zip_path.name
+    assert export["zip_size_bytes"] == zip_path.stat().st_size
+
+
+@pytest.mark.integration
+def test_export_listing_json_preview_names_match_previews_dir_per_canvas_in_upload_order(
+    monkeypatch: pytest.MonkeyPatch, temp_catalog_root: Path
+) -> None:
+    build_dir, export = _build_and_read_export(monkeypatch, temp_catalog_root)
+
+    assert export["previews"] == PNG_ONLY_PREVIEWS_BY_CANVAS
+
+    previews_dir = build_dir / "previews"
+    on_disk = {p.name for p in previews_dir.iterdir() if p.is_file()}
+    for canvas_names in PNG_ONLY_PREVIEWS_BY_CANVAS.values():
+        for rel_path in canvas_names:
+            assert Path(rel_path).name in on_disk
+
+
+@pytest.mark.integration
+def test_nothing_under_export_is_in_the_zip(
+    monkeypatch: pytest.MonkeyPatch, temp_catalog_root: Path
+) -> None:
+    build_dir, _ = _build_and_read_export(monkeypatch, temp_catalog_root)
+
+    with zipfile.ZipFile(build_dir / f"{PNG_ONLY_TOP_LEVEL}.zip") as zip_file:
+        names = zip_file.namelist()
+    assert not any(EXPORT_DIRNAME in name for name in names)
+
+
+@pytest.mark.integration
+def test_export_listing_json_is_locked_by_snapshot(
+    monkeypatch: pytest.MonkeyPatch, temp_catalog_root: Path, snapshot: SnapshotAssertion
+) -> None:
+    _, export = _build_and_read_export(monkeypatch, temp_catalog_root)
+
+    # zip_size_bytes is a real byte count, not held to a fixed value across
+    # zlib/OS combinations (§36 only promises the ZIP itself is
+    # byte-identical run to run on one machine) -- normalized here so the
+    # snapshot never churns over a compressor version, only over its shape.
+    assert isinstance(export["zip_size_bytes"], int)
+    assert export["zip_size_bytes"] > 0
+    normalized = {**export, "zip_size_bytes": "<int>"}
+    assert normalized == snapshot(name="export_listing")

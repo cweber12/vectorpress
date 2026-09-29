@@ -80,6 +80,17 @@ def _title_cased_slug(slug: str) -> str:
     return slug.replace("_", " ").title()
 
 
+def collection_name(product: Product, collection: Collection | None) -> str:
+    """§18's "collection name" derived value (CONTEXT.md "Collection"): the
+    referenced collection's own ``name``, or -- for an inline membership,
+    which names no collection -- :func:`_title_cased_slug` of the product's
+    own slug. The one definition ``draft_listing``'s own ``short_title`` and
+    :mod:`~vectorpress.build.export`'s derived ``collection_name`` field
+    both use, so a product's collection name reads the same in a drafted
+    listing and in its generic export."""
+    return collection.name if collection is not None else _title_cased_slug(product.slug)
+
+
 def _format_phrase(formats: list[Format]) -> str:
     """The drafted title's format phrase (§18): every listed format's label,
     in the product's own declared order, joined with commas and a final
@@ -169,7 +180,7 @@ def draft_listing(
     ``description.txt.j2`` (:mod:`vectorpress.build.template_lookup`);
     every other field is computed directly, never templated.
     """
-    name = collection.name if collection is not None else _title_cased_slug(product.slug)
+    name = collection_name(product, collection)
     format_phrase = _format_phrase(product.formats)
     title = environment.get_template("title.txt.j2").render(name=name, format_phrase=format_phrase)
 
@@ -222,13 +233,15 @@ class ListingDraftResult:
     template_overrides: list[str] | None = None
 
 
-def _collection_for_product(
+def collection_for_product(
     product: Product, known_collections: list[Collection]
 ) -> Collection | None:
     """The collection a product references, or ``None`` for an inline
-    membership. Only reached once :func:`resolve_product` has already
-    confirmed a named ``collection_slug`` resolves, so the lookup here never
-    misses."""
+    membership. Only reached once :func:`~vectorpress.build.
+    product_resolution.resolve_product` has already confirmed a named
+    ``collection_slug`` resolves (:func:`draft_listing_for_product` and
+    :mod:`~vectorpress.build.export` both call this only after that check),
+    so the lookup here never misses."""
     if product.collection_slug is None:
         return None
     return next(c for c in known_collections if c.slug == product.collection_slug)
@@ -259,7 +272,7 @@ def draft_listing_for_product(
 
     assets_by_id = {asset.id: asset for asset in known_assets}
     members = [assets_by_id[member.asset_id] for member in resolved.members]
-    collection = _collection_for_product(product, known_collections)
+    collection = collection_for_product(product, known_collections)
     environment = template_environment(root, "listing")
     listing = draft_listing(product, collection, members, brand, environment)
     return ListingDraftResult(

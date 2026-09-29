@@ -84,6 +84,15 @@ today only ``previews/`` renders during a build, so it is
 export step adds its overrides to the same list, unchanged here. ``cli``
 only renders it.
 
+**Generic export (§18, §19, ADR 0017).** ``export/listing.json``
+(:mod:`vectorpress.build.export`) is assembled from the product's
+``[listing]``, this same manifest, its resolved eligible members and the
+loaded collections, then written under the temp dir the same way previews
+are -- beside ``package_dir``, never inside it, so it is never in the
+package or the ZIP. No CSV. A failure assembling or writing it is not
+caught specially: like every other write in the block below, it aborts the
+whole build and leaves the previous build (if any) untouched (§35).
+
 **All-or-nothing (§35).** Every file the build produces is written under a
 fresh temporary directory first; only once that succeeds does it replace
 ``builds/<product-slug>/`` in one move, so a failure never leaves that
@@ -106,6 +115,12 @@ from uuid import uuid4
 
 from vectorpress import __version__
 from vectorpress.build._dxf_conversion import DxfConversionError, svg_to_dxf_bytes
+from vectorpress.build.export import (
+    EXPORT_DIRNAME,
+    LISTING_EXPORT_FILENAME,
+    ListingExport,
+    build_listing_export,
+)
 from vectorpress.build.previews import PreviewRenderError, PreviewRenderFailure, render_previews
 from vectorpress.build.product_resolution import ProductMember, resolve_product
 from vectorpress.catalog.assets import asset_dir
@@ -534,6 +549,31 @@ def _manifest_json_bytes(manifest: Manifest) -> bytes:
     return json.dumps(payload, indent=2, sort_keys=True).encode("utf-8") + b"\n"
 
 
+def _listing_export_json_bytes(export: ListingExport) -> bytes:
+    """``export`` as deterministic JSON bytes (§36), the same shape
+    :func:`_manifest_json_bytes` gives ``manifest.json``: sorted keys, a
+    fixed 2-space indent, a trailing newline -- so unchanged inputs
+    serialize identically every time."""
+    payload = {
+        "listing": export.listing.model_dump(),
+        "member_count": export.member_count,
+        "formats": export.formats,
+        "asset_names": export.asset_names,
+        "collection_name": export.collection_name,
+        "contents_summary": {
+            "member_count": export.contents_summary.member_count,
+            "formats": export.contents_summary.formats,
+            "file_names": export.contents_summary.file_names,
+            "reference_size_in": export.contents_summary.reference_size_in,
+        },
+        "price": export.price,
+        "previews": export.previews,
+        "zip_name": export.zip_name,
+        "zip_size_bytes": export.zip_size_bytes,
+    }
+    return json.dumps(payload, indent=2, sort_keys=True).encode("utf-8") + b"\n"
+
+
 def _write_deterministic_zip(
     zip_path: Path, top_level_name: str, files: list[tuple[str, bytes]]
 ) -> None:
@@ -837,6 +877,19 @@ def build_product(
 
         zip_path = tmp_dir / f"{top_level_name}.zip"
         _write_deterministic_zip(zip_path, top_level_name, package_files)
+
+        listing_export = build_listing_export(
+            product,
+            manifest,
+            known_collections,
+            resolved.eligible_members,
+            assets_by_id,
+            zip_name=zip_path.name,
+            zip_size_bytes=zip_path.stat().st_size,
+        )
+        export_path = tmp_dir / EXPORT_DIRNAME / LISTING_EXPORT_FILENAME
+        export_path.parent.mkdir(parents=True, exist_ok=True)
+        export_path.write_bytes(_listing_export_json_bytes(listing_export))
 
         (tmp_dir / MANIFEST_FILENAME).write_bytes(_manifest_json_bytes(manifest))
 
