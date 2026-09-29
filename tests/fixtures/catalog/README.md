@@ -46,7 +46,11 @@ committed fixture never contains `derived/`. Later slices add `overrides/`
 
 `builds/<product-slug>/` is the tool-owned output of `vpress build`: a package
 directory, its ZIP, and `manifest.json`, all written under a temporary copy of this
-fixture, never here and never anywhere else in the catalog (ADR 0005).
+fixture, never here and never anywhere else in the catalog (ADR 0005). Beside them,
+never inside the package or the ZIP: `previews/` (marketplace preview PNGs, `01`-`05`
+at `square` and `landscape` canvases, §16, ADR 0014) and `export/` (`listing.json`
+plus one pasteable text bundle per marketplace -- `etsy.txt`, `creative-fabrica.txt`,
+`design-bundles.txt`, `direct-store.txt` -- §18, §19, ADR 0016, ADR 0017).
 
 ## Assets
 
@@ -254,3 +258,9 @@ and collection slugs, actually exist is checked live by `vpress product`
 (`build.product_resolution`, ADR 0011), the same reference-problem
 mechanism a collection's own membership uses; this fixture's committed
 products all resolve cleanly.
+
+Every product's `[listing]` is also what `vpress build` renders into previews
+(`title`, `short_title`) and drafts into `builds/<slug>/export/` (§16, §18,
+ADR 0014, ADR 0017): `pacific_coast_tide_pool_standard_pack`'s stays hand-authored
+throughout, while the other two products' listings are stripped back off and
+redrafted by `vpress listing draft` in tests that exercise that command directly.

@@ -1,6 +1,6 @@
 # PRD 7 — Previews, Listing Metadata, and Marketplace Export
 
-Status: not started
+Status: complete (real-catalog check #129 pending)
 Depends on: see `docs/PLAN.md` Part 3 dependency graph
 
 **Goal.** Each built product has marketplace-ready preview images, an authoritative
