@@ -61,6 +61,12 @@ from vectorpress.domain.eligibility import (
 from vectorpress.domain.product import Product
 from vectorpress.pipeline.eligibility import included_derivatives
 
+#: The field a product's ``[previews] featured`` reference problem is
+#: attributed to (:func:`featured_reference_problems`), mirroring
+#: ``PRODUCT_COLLECTION_SLUG_FIELD`` and the ``membership.*`` fields
+#: :mod:`~vectorpress.catalog.collection_resolution` already uses.
+FEATURED_FIELD = "previews.featured"
+
 
 class MemberEligibility(StrEnum):
     """Whether one resolved member may ship in this product (§10, §10.1,
@@ -156,6 +162,28 @@ def _resolved_members_and_reference_problems(
     return resolution.members, membership_reference_problems(path, resolution)
 
 
+def featured_reference_problems(
+    product: Product, resolved_members: list[ResolvedMember], config: CatalogConfig
+) -> list[MetadataProblem]:
+    """A ``[previews] featured`` asset ID that names no resolved member
+    (§16, CONTEXT.md "Featured member") is a product metadata problem
+    naming the ID -- checked here rather than on the domain model, since
+    only resolution knows the product's current membership. Not scoped to
+    eligible members: a featured ID resolved but excluded from one build is
+    a per-build preview concern (:func:`~vectorpress.build.previews
+    ._featured_asset_ids`), never a reference problem.
+    """
+    if product.previews is None:
+        return []
+    resolved_ids = {member.asset_id for member in resolved_members}
+    path = product_toml_path(config, product.slug)
+    return [
+        MetadataProblem(path, FEATURED_FIELD, f"unknown asset ID: {asset_id!r}")
+        for asset_id in product.previews.featured
+        if asset_id not in resolved_ids
+    ]
+
+
 def resolve_product(
     product: Product,
     root: Path,
@@ -181,6 +209,10 @@ def resolve_product(
     resolved_members, reference_problems = _resolved_members_and_reference_problems(
         product, config, known_assets, known_collections
     )
+    reference_problems = [
+        *reference_problems,
+        *featured_reference_problems(product, resolved_members, config),
+    ]
     assets_by_id = {asset.id: asset for asset in known_assets}
 
     members: list[ProductMember] = []

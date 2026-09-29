@@ -24,6 +24,7 @@ from vectorpress.build.previews import (
     PreviewPage,
     PreviewRenderError,
     PreviewType,
+    _featured_asset_ids,  # pyright: ignore[reportPrivateUsage]
     _pages,  # pyright: ignore[reportPrivateUsage]
     _renders,  # pyright: ignore[reportPrivateUsage]
     preview_members,
@@ -35,7 +36,7 @@ from vectorpress.domain.brand import Brand, BrandCardStyle, BrandTypography
 from vectorpress.domain.derivative_type import DerivativeType
 from vectorpress.domain.format import Format
 from vectorpress.domain.listing import Listing
-from vectorpress.domain.product import Product
+from vectorpress.domain.product import Previews, Product
 
 _SQUARE = Canvas("square", 2000, 2000)
 
@@ -245,6 +246,83 @@ def test_render_main_html_shows_at_most_nine_featured_members(tmp_path: Path) ->
     html = _render(tmp_path, members=members, assets_by_id=assets_by_id)
 
     assert sum(f"Member {i}" in html for i in range(12)) == 9
+
+
+# --- `featured`: `[previews] featured` order (§16, CONTEXT.md "Featured member") --
+
+
+def test_featured_asset_ids_leads_with_listed_ids_then_the_rest_by_display_name() -> None:
+    product = _product(previews=Previews(featured=["z", "a"]))
+    # Already in display-name order, as `_preview_context` would pass it.
+    members_by_display_name = [_member("a"), _member("m"), _member("z")]
+
+    result = _featured_asset_ids(product, members_by_display_name)
+
+    assert result == ["z", "a", "m"]
+
+
+def test_featured_asset_ids_drops_a_listed_id_absent_from_this_builds_members() -> None:
+    """A featured ID resolved but excluded from this build is simply
+    missing from ``members_by_display_name`` (product resolution already
+    filtered it out) -- dropped here without error, never its own
+    preview (§16)."""
+    product = _product(previews=Previews(featured=["excluded_elsewhere", "a"]))
+    members_by_display_name = [_member("a")]
+
+    result = _featured_asset_ids(product, members_by_display_name)
+
+    assert result == ["a"]
+
+
+def test_featured_asset_ids_without_a_previews_table_is_plain_display_name_order() -> None:
+    """A product without ``[previews]`` behaves as before: display-name
+    order, unchanged by any featured list."""
+    product = _product()
+    members_by_display_name = [_member("a"), _member("m"), _member("z")]
+
+    result = _featured_asset_ids(product, members_by_display_name)
+
+    assert result == ["a", "m", "z"]
+
+
+def test_render_main_html_leads_with_featured_members_in_listed_order(tmp_path: Path) -> None:
+    assets_by_id = {
+        "a": _asset("a", "Anemone"),
+        "m": _asset("m", "Mid"),
+        "z": _asset("z", "Zebra"),
+    }
+    members = [_member("a"), _member("m"), _member("z")]
+    product = _product(previews=Previews(featured=["z", "a"]))
+
+    html = _render(tmp_path, product=product, members=members, assets_by_id=assets_by_id)
+
+    assert html.index("Zebra") < html.index("Anemone") < html.index("Mid")
+
+
+def test_render_main_html_with_featured_order_is_locked_by_snapshot(
+    tmp_path: Path, snapshot: SnapshotAssertion
+) -> None:
+    assets_by_id = {
+        "a": _asset("a", "Anemone"),
+        "m": _asset("m", "Mid"),
+        "z": _asset("z", "Zebra"),
+    }
+    members = [_member("a"), _member("m"), _member("z")]
+    product = _product(previews=Previews(featured=["z", "a"]))
+
+    with pytest.MonkeyPatch.context() as monkeypatch:
+        monkeypatch.setattr(
+            "vectorpress.build.previews._shipped_font_data_uris",
+            lambda: {
+                "inter_regular": "data:font/woff2;base64,AAAA",
+                "inter_bold": "data:font/woff2;base64,AAAA",
+                "space_grotesk_regular": "data:font/woff2;base64,AAAA",
+                "space_grotesk_bold": "data:font/woff2;base64,AAAA",
+            },
+        )
+        html = _render(tmp_path, product=product, members=members, assets_by_id=assets_by_id)
+
+    assert _DATA_URI_RE.sub("data:<omitted>", html) == snapshot
 
 
 # --- brand.css names only shipped fonts, never a system font (ADR 0014) ----

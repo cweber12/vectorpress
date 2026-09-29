@@ -52,9 +52,6 @@ from vectorpress.domain.product import Product
 #: ``templates/previews/`` first, then the shipped folder of the same name.
 PREVIEWS_KIND = "previews"
 
-#: §16's "up to 9 featured members" on ``main``.
-FEATURED_LIMIT = 9
-
 
 @dataclass(frozen=True)
 class PreviewType:
@@ -366,6 +363,26 @@ def _images_by_type(content_by_type: dict[DerivativeType, bytes]) -> dict[str, s
     }
 
 
+def _members_by_display_name(
+    eligible_members: list[ProductMember], assets_by_id: dict[AssetId, Asset]
+) -> list[ProductMember]:
+    return sorted(eligible_members, key=lambda member: assets_by_id[member.asset_id].display_name)
+
+
+def _preview_member(
+    member: ProductMember,
+    assets_by_id: dict[AssetId, Asset],
+    content_by_member: dict[AssetId, dict[DerivativeType, bytes]],
+) -> PreviewMember:
+    asset = assets_by_id[member.asset_id]
+    content_by_type = content_by_member.get(member.asset_id, {})
+    return PreviewMember(
+        display_name=asset.display_name,
+        image_url=_stand_in_image_url(content_by_type),
+        images_by_type=_images_by_type(content_by_type),
+    )
+
+
 def preview_members(
     eligible_members: list[ProductMember],
     assets_by_id: dict[AssetId, Asset],
@@ -373,25 +390,47 @@ def preview_members(
 ) -> list[PreviewMember]:
     """Every eligible member as a :class:`PreviewMember` (§16: "drawn only
     from the manifest's included members... using each member's effective
-    derivative"), in display-name order -- the order ``main`` leads with
-    absent a hand-authored ``[previews] featured`` list, which this slice
-    does not read yet (CONTEXT.md "Featured member": "until the featured
-    slice lands, featured is the first 9 members in display-name order")."""
-    ordered = sorted(
-        eligible_members, key=lambda member: assets_by_id[member.asset_id].display_name
-    )
-    members: list[PreviewMember] = []
-    for member in ordered:
-        asset = assets_by_id[member.asset_id]
-        content_by_type = content_by_member.get(member.asset_id, {})
-        members.append(
-            PreviewMember(
-                display_name=asset.display_name,
-                image_url=_stand_in_image_url(content_by_type),
-                images_by_type=_images_by_type(content_by_type),
-            )
-        )
-    return members
+    derivative"), in display-name order -- the order ``included`` and
+    ``contents`` read directly. ``main`` and ``variants`` read ``featured``
+    instead (:func:`_featured_members`), a reordering of this same list, not
+    a second, separately-built one."""
+    return [
+        _preview_member(member, assets_by_id, content_by_member)
+        for member in _members_by_display_name(eligible_members, assets_by_id)
+    ]
+
+
+def _featured_asset_ids(
+    product: Product, members_by_display_name: list[ProductMember]
+) -> list[AssetId]:
+    """§16's featured order: ``[previews] featured``'s own asset IDs, in
+    listed order, then the rest of this build's eligible members in
+    ``members_by_display_name``'s own order (CONTEXT.md "Featured member").
+    A listed ID resolved but excluded from this build is simply absent from
+    ``members_by_display_name``, so it drops out here without error -- an
+    ID that names no resolved member at all is a product metadata problem
+    product resolution already reported
+    (:func:`~vectorpress.build.product_resolution.featured_reference_problems`).
+    """
+    eligible_ids = {member.asset_id for member in members_by_display_name}
+    listed = product.previews.featured if product.previews is not None else []
+    leading = [asset_id for asset_id in listed if asset_id in eligible_ids]
+    leading_ids = set(leading)
+    rest = [
+        member.asset_id for member in members_by_display_name if member.asset_id not in leading_ids
+    ]
+    return [*leading, *rest]
+
+
+def _featured_members(
+    product: Product,
+    members_by_display_name: list[ProductMember],
+    previews_by_asset_id: dict[AssetId, PreviewMember],
+) -> list[PreviewMember]:
+    return [
+        previews_by_asset_id[asset_id]
+        for asset_id in _featured_asset_ids(product, members_by_display_name)
+    ]
 
 
 def _render_html(
@@ -431,12 +470,17 @@ def _preview_context(
     content_by_member: dict[AssetId, dict[DerivativeType, bytes]],
     files_by_folder: dict[str, list[str]],
 ) -> _PreviewContext:
-    members = preview_members(eligible_members, assets_by_id, content_by_member)
+    ordered_members = _members_by_display_name(eligible_members, assets_by_id)
+    previews_by_asset_id = {
+        member.asset_id: _preview_member(member, assets_by_id, content_by_member)
+        for member in ordered_members
+    }
+    members = [previews_by_asset_id[member.asset_id] for member in ordered_members]
     return _PreviewContext(
         brand=_preview_brand(root, brand),
         product=_preview_product(product, files_by_folder, len(eligible_members)),
         members=members,
-        featured=members[:FEATURED_LIMIT],
+        featured=_featured_members(product, ordered_members, previews_by_asset_id),
     )
 
 

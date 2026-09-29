@@ -8,10 +8,11 @@ A product is exactly one collection (referenced by slug) or an inline one
 (the same ``Membership`` shape a collection file uses), plus presentation:
 included derivative types, included deliverable formats, an optional
 reference size override, tier and family labels, price, how an ineligible
-member is handled (§10), and an optional listing (issue #7, ADR 0008).
-Whether a referenced collection slug, or an inline membership's asset IDs
-and collection slugs, actually exist is left to PRD 5 (this module has no
-catalog awareness, per ADR 0006).
+member is handled (§10), an optional listing (issue #7, ADR 0008), and an
+optional ``[previews] featured`` order (§16). Whether a referenced
+collection slug, an inline membership's asset IDs and collection slugs, or
+a featured asset ID, actually exist is left to product resolution (this
+module has no catalog awareness, per ADR 0006).
 """
 
 from enum import StrEnum
@@ -19,6 +20,7 @@ from typing import Annotated, Any, cast
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validator, model_validator
 
+from vectorpress.domain.asset import AssetId
 from vectorpress.domain.collection import CollectionSlug
 from vectorpress.domain.derivative_type import DerivativeType
 from vectorpress.domain.format import Format
@@ -58,6 +60,19 @@ class IneligibleMembersMode(StrEnum):
     EXCLUDE = "exclude"
 
 
+class Previews(BaseModel):
+    """A product's optional ``[previews] featured`` table (§16, CONTEXT.md
+    "Featured member"): the asset IDs that lead ``main`` and ``variants``,
+    in the order given, ahead of the rest of the product's included
+    members. Whether a listed ID actually names a resolved member is left
+    to product resolution, the only layer that knows the product's current
+    membership (ADR 0006's domain/catalog split)."""
+
+    model_config = ConfigDict(strict=True, extra="forbid", frozen=True)
+
+    featured: list[AssetId] = Field(default_factory=list)
+
+
 class Product(BaseModel):
     """One product's hand-authored metadata (``<slug>.toml``).
 
@@ -93,6 +108,7 @@ class Product(BaseModel):
         default=IneligibleMembersMode.REFUSE, strict=False
     )
     listing: Listing | None = None
+    previews: Previews | None = None
 
     @model_validator(mode="before")
     @classmethod
