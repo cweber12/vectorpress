@@ -1,18 +1,28 @@
 """build.export: the generic marketplace export's own contents summary and
-assembly (§18, §19, ADR 0016, ADR 0017).
+assembly, and the marketplace text bundles built from it (§18, §19, ADR
+0015, ADR 0016, ADR 0017).
 
 Everything here runs against hand-built domain objects, the same style
 ``test_build_previews.py`` and ``test_build_listing_draft.py`` already use --
-no catalog, no build. Writing ``export/listing.json`` itself, and locking
-its full shape with a snapshot, is ``test_build.py``'s job (it needs a real
-build's manifest and ZIP).
+no catalog, no build. Writing ``export/listing.json`` and the bundle files
+themselves, and locking their full shape with a snapshot, is
+``test_build.py``'s job (it needs a real build's manifest and ZIP).
 """
 
+from pathlib import Path
+
+import pytest
+
 from vectorpress.build.export import (
+    MARKETPLACE_BUNDLES,
     ContentsSummary,
+    ExportRenderError,
+    ListingExport,
     _preview_names_by_canvas,  # pyright: ignore[reportPrivateUsage]
     build_listing_export,
     contents_summary,
+    render_contents_summary_text,
+    render_marketplace_bundles,
 )
 from vectorpress.build.product_resolution import MemberEligibility, ProductMember
 from vectorpress.domain.asset import Asset
@@ -288,3 +298,243 @@ def test_build_listing_export_contents_summary_is_the_contents_summary_function_
     )
     assert export.contents_summary == contents_summary(manifest, product)
     assert isinstance(export.contents_summary, ContentsSummary)
+
+
+# --- render_contents_summary_text ------------------------------------------
+
+
+def _summary(**overrides: object) -> ContentsSummary:
+    fields: dict[str, object] = {
+        "member_count": 2,
+        "formats": ["svg", "png"],
+        "file_names": ["PNG/a-color.png", "SVG/a-cut.svg"],
+        "reference_size_in": 3.0,
+    }
+    fields.update(overrides)
+    return ContentsSummary(**fields)  # type: ignore[arg-type]
+
+
+def test_render_contents_summary_text_uses_singular_member_for_one() -> None:
+    text = render_contents_summary_text(_summary(member_count=1))
+    assert "1 member," in text
+    assert "1 members," not in text
+
+
+def test_render_contents_summary_text_uses_plural_members_for_more_than_one() -> None:
+    text = render_contents_summary_text(_summary(member_count=2))
+    assert "2 members," in text
+
+
+def test_render_contents_summary_text_uppercases_every_format() -> None:
+    text = render_contents_summary_text(_summary(formats=["svg", "png"]))
+    assert "SVG, PNG" in text
+
+
+def test_render_contents_summary_text_prints_the_formatted_reference_size() -> None:
+    text = render_contents_summary_text(_summary(reference_size_in=1.5))
+    assert "1.5in" in text
+
+
+def test_render_contents_summary_text_lists_every_file_name() -> None:
+    text = render_contents_summary_text(_summary(file_names=["DXF/a-cut.dxf", "SVG/a-cut.svg"]))
+    assert "- DXF/a-cut.dxf" in text
+    assert "- SVG/a-cut.svg" in text
+
+
+# --- render_marketplace_bundles ---------------------------------------------
+
+
+def _listing_export(**overrides: object) -> ListingExport:
+    fields: dict[str, object] = {
+        "listing": Listing(
+            title="Test Product",
+            short_title="Test Product",
+            description="A test pitch.",
+            tags=["cut file", "svg"],
+            category="Nature & Wildlife",
+            license_type="Test License",
+        ),
+        "member_count": 2,
+        "formats": ["svg"],
+        "asset_names": ["A", "B"],
+        "collection_name": "Test Collection",
+        "contents_summary": _summary(),
+        "price": 12.5,
+        "previews": {
+            "square": ["previews/01-main-square.png", "previews/02-included-square.png"],
+            "landscape": ["previews/01-main-landscape.png"],
+        },
+        "zip_name": "Test-Product.zip",
+        "zip_size_bytes": 1000,
+    }
+    fields.update(overrides)
+    return ListingExport(**fields)  # type: ignore[arg-type]
+
+
+def _bundle_texts(tmp_path: Path, export: ListingExport | None = None) -> dict[str, str]:
+    result = render_marketplace_bundles(tmp_path, export or _listing_export())
+    return {rel_path: data.decode("utf-8") for rel_path, data in result.files}
+
+
+def test_render_marketplace_bundles_writes_all_four_under_export() -> None:
+    assert {bundle.filename for bundle in MARKETPLACE_BUNDLES} == {
+        "etsy.txt",
+        "creative-fabrica.txt",
+        "design-bundles.txt",
+        "direct-store.txt",
+    }
+
+
+def test_render_marketplace_bundles_writes_one_file_per_bundle_under_export(
+    tmp_path: Path,
+) -> None:
+    texts = _bundle_texts(tmp_path)
+    assert set(texts) == {
+        "export/etsy.txt",
+        "export/creative-fabrica.txt",
+        "export/design-bundles.txt",
+        "export/direct-store.txt",
+    }
+
+
+def test_render_marketplace_bundles_description_is_listing_description_then_contents_summary(
+    tmp_path: Path,
+) -> None:
+    export = _listing_export()
+    expected = (
+        f"{export.listing.description}\n\n{render_contents_summary_text(export.contents_summary)}"
+    )
+    texts = _bundle_texts(tmp_path, export)
+    for text in texts.values():
+        assert expected in text
+
+
+def test_render_marketplace_bundles_etsy_and_direct_store_list_square_previews(
+    tmp_path: Path,
+) -> None:
+    texts = _bundle_texts(tmp_path)
+    for path in ("export/etsy.txt", "export/direct-store.txt"):
+        assert "01-main-square.png" in texts[path]
+        assert "02-included-square.png" in texts[path]
+        assert "01-main-landscape.png" not in texts[path]
+
+
+def test_render_marketplace_bundles_creative_fabrica_and_design_bundles_list_landscape_previews(
+    tmp_path: Path,
+) -> None:
+    texts = _bundle_texts(tmp_path)
+    for path in ("export/creative-fabrica.txt", "export/design-bundles.txt"):
+        assert "01-main-landscape.png" in texts[path]
+        assert "01-main-square.png" not in texts[path]
+
+
+def test_render_marketplace_bundles_images_are_file_names_without_the_previews_prefix(
+    tmp_path: Path,
+) -> None:
+    texts = _bundle_texts(tmp_path)
+    assert "previews/01-main-square.png" not in texts["export/etsy.txt"]
+    assert "01-main-square.png" in texts["export/etsy.txt"]
+
+
+def test_render_marketplace_bundles_only_etsy_has_a_who_made_section(tmp_path: Path) -> None:
+    texts = _bundle_texts(tmp_path)
+    assert "WHO MADE" in texts["export/etsy.txt"]
+    assert "WHO MADE" not in texts["export/creative-fabrica.txt"]
+    assert "WHO MADE" not in texts["export/design-bundles.txt"]
+    assert "WHO MADE" not in texts["export/direct-store.txt"]
+
+
+def test_render_marketplace_bundles_carries_price_category_title_and_zip_name(
+    tmp_path: Path,
+) -> None:
+    export = _listing_export(price=9.99, zip_name="Some-Product.zip")
+    texts = _bundle_texts(tmp_path, export)
+    for text in texts.values():
+        assert export.listing.title in text
+        assert export.listing.category in text
+        assert "9.99" in text
+        assert "Some-Product.zip" in text
+
+
+def test_render_marketplace_bundles_carries_edited_listing_text(tmp_path: Path) -> None:
+    """Editing the listing (before a rebuild) carries into every bundle --
+    nothing about a bundle's own text is cached or drawn from anywhere else."""
+    export = _listing_export(
+        listing=Listing(
+            title="Edited Title",
+            short_title="Edited Title",
+            description="An edited pitch.",
+            category="Edited Category",
+            license_type="Test License",
+        )
+    )
+    texts = _bundle_texts(tmp_path, export)
+    for text in texts.values():
+        assert "Edited Title" in text
+        assert "An edited pitch." in text
+        assert "Edited Category" in text
+
+
+def test_render_marketplace_bundles_catalog_override_changes_content_and_is_named(
+    tmp_path: Path,
+) -> None:
+    override_dir = tmp_path / "templates" / "export"
+    override_dir.mkdir(parents=True)
+    (override_dir / "etsy.txt.j2").write_text("CUSTOM TITLE\n{{ title }}\n", encoding="utf-8")
+
+    result = render_marketplace_bundles(tmp_path, _listing_export())
+
+    files = dict(result.files)
+    assert files["export/etsy.txt"] == b"CUSTOM TITLE\nTest Product\n"
+    assert result.template_overrides == ["templates/export/etsy.txt.j2"]
+
+
+def test_render_marketplace_bundles_catalog_override_reading_an_undefined_variable_fails_naming_the_template(
+    tmp_path: Path,
+) -> None:
+    override_dir = tmp_path / "templates" / "export"
+    override_dir.mkdir(parents=True)
+    (override_dir / "etsy.txt.j2").write_text(
+        "{{ this_is_not_in_the_context }}\n", encoding="utf-8"
+    )
+
+    with pytest.raises(ExportRenderError) as excinfo:
+        render_marketplace_bundles(tmp_path, _listing_export())
+
+    assert excinfo.value.template_name == "etsy.txt.j2"
+    assert "this_is_not_in_the_context" in str(excinfo.value)
+
+
+def test_render_marketplace_bundles_catalog_override_with_a_syntax_error_fails_naming_the_template(
+    tmp_path: Path,
+) -> None:
+    override_dir = tmp_path / "templates" / "export"
+    override_dir.mkdir(parents=True)
+    (override_dir / "etsy.txt.j2").write_text("{% if %}broken\n", encoding="utf-8")
+
+    with pytest.raises(ExportRenderError) as excinfo:
+        render_marketplace_bundles(tmp_path, _listing_export())
+
+    assert excinfo.value.template_name == "etsy.txt.j2"
+
+
+def test_render_marketplace_bundles_catalog_override_extending_a_missing_template_fails_naming_it(
+    tmp_path: Path,
+) -> None:
+    override_dir = tmp_path / "templates" / "export"
+    override_dir.mkdir(parents=True)
+    (override_dir / "etsy.txt.j2").write_text(
+        '{% extends "does-not-exist.txt.j2" %}\n', encoding="utf-8"
+    )
+
+    with pytest.raises(ExportRenderError) as excinfo:
+        render_marketplace_bundles(tmp_path, _listing_export())
+
+    assert "does-not-exist.txt.j2" in str(excinfo.value)
+
+
+def test_render_marketplace_bundles_with_no_catalog_templates_dir_uses_shipped_only(
+    tmp_path: Path,
+) -> None:
+    result = render_marketplace_bundles(tmp_path, _listing_export())
+    assert result.template_overrides == []

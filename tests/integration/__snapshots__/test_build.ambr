@@ -18758,6 +18758,153 @@
     'Pacific-Coast-Tide-Pool/README.txt',
   ])
 # ---
+# name: test_marketplace_bundles_are_locked_by_snapshot[marketplace_bundles]
+  dict({
+    'creative-fabrica.txt': '''
+      TITLE
+      Pacific Coast Tide Pool – PNG Cut Files
+      
+      DESCRIPTION
+      The tide pool subjects in this catalog, hand-picked rather than grouped by a
+      rule.
+      
+      Hand-illustrated, scientifically accurate cut files.
+      
+      What's included: 3 members, PNG files, checked to cut cleanly at 3in.
+      
+      Files:
+      - PNG/giant-green-anemone-color.png
+      - PNG/ochre-sea-star-color.png
+      - PNG/purple-sea-urchin-color.png
+      
+      TAGS
+      tide pool, pacific coast, color png, png
+      
+      PRICE
+      $5.00
+      
+      CATEGORY
+      Nature & Wildlife
+      
+      IMAGES
+      01-main-landscape.png
+      02-included-landscape.png
+      03-formats-landscape.png
+      
+      FILES
+      Pacific-Coast-Tide-Pool.zip
+  
+    ''',
+    'design-bundles.txt': '''
+      TITLE
+      Pacific Coast Tide Pool – PNG Cut Files
+      
+      DESCRIPTION
+      The tide pool subjects in this catalog, hand-picked rather than grouped by a
+      rule.
+      
+      Hand-illustrated, scientifically accurate cut files.
+      
+      What's included: 3 members, PNG files, checked to cut cleanly at 3in.
+      
+      Files:
+      - PNG/giant-green-anemone-color.png
+      - PNG/ochre-sea-star-color.png
+      - PNG/purple-sea-urchin-color.png
+      
+      TAGS
+      tide pool, pacific coast, color png, png
+      
+      PRICE
+      $5.00
+      
+      CATEGORY
+      Nature & Wildlife
+      
+      IMAGES
+      01-main-landscape.png
+      02-included-landscape.png
+      03-formats-landscape.png
+      
+      FILES
+      Pacific-Coast-Tide-Pool.zip
+  
+    ''',
+    'direct-store.txt': '''
+      TITLE
+      Pacific Coast Tide Pool – PNG Cut Files
+      
+      DESCRIPTION
+      The tide pool subjects in this catalog, hand-picked rather than grouped by a
+      rule.
+      
+      Hand-illustrated, scientifically accurate cut files.
+      
+      What's included: 3 members, PNG files, checked to cut cleanly at 3in.
+      
+      Files:
+      - PNG/giant-green-anemone-color.png
+      - PNG/ochre-sea-star-color.png
+      - PNG/purple-sea-urchin-color.png
+      
+      TAGS
+      tide pool, pacific coast, color png, png
+      
+      PRICE
+      $5.00
+      
+      CATEGORY
+      Nature & Wildlife
+      
+      IMAGES
+      01-main-square.png
+      02-included-square.png
+      03-formats-square.png
+      
+      FILES
+      Pacific-Coast-Tide-Pool.zip
+  
+    ''',
+    'etsy.txt': '''
+      TITLE
+      Pacific Coast Tide Pool – PNG Cut Files
+      
+      DESCRIPTION
+      The tide pool subjects in this catalog, hand-picked rather than grouped by a
+      rule.
+      
+      Hand-illustrated, scientifically accurate cut files.
+      
+      What's included: 3 members, PNG files, checked to cut cleanly at 3in.
+      
+      Files:
+      - PNG/giant-green-anemone-color.png
+      - PNG/ochre-sea-star-color.png
+      - PNG/purple-sea-urchin-color.png
+      
+      TAGS
+      tide pool, pacific coast, color png, png
+      
+      PRICE
+      $5.00
+      
+      CATEGORY
+      Nature & Wildlife
+      
+      WHO MADE
+      I did
+      
+      IMAGES
+      01-main-square.png
+      02-included-square.png
+      03-formats-square.png
+      
+      FILES
+      Pacific-Coast-Tide-Pool.zip
+  
+    ''',
+  })
+# ---
 # name: test_readme_and_license_text_are_locked_by_snapshot[license]
   '''
   Tide Pool Studio Personal & Small Business Use License

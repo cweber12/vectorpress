@@ -1817,8 +1817,9 @@ def build(
     template names an unknown placeholder, if the product's membership does
     not fully resolve, if two members' customer file names collide (naming
     every asset ID sharing that name), if a DXF conversion fails (naming the
-    asset), or if a preview fails to render (naming the template, for an
-    undefined variable or a disallowed URL). An ineligible member (listing
+    asset), if a preview fails to render (naming the template, for an
+    undefined variable or a disallowed URL), or if a marketplace export
+    bundle fails to render (naming the template). An ineligible member (listing
     each with its reasons, the same as 'vpress product') refuses the build
     under this product's
     default ineligible_members = "refuse"; set to "exclude", it ships the
@@ -1927,6 +1928,18 @@ def build(
             f"{preview_failure.template_name}: {preview_failure.message}"
             if preview_failure.template_name is not None
             else preview_failure.message
+        )
+        typer.echo(f"  {named}")
+        raise typer.Exit(code=1)
+
+    if result.outcome is BuildOutcome.REFUSED_EXPORT_RENDER_FAILURE:
+        export_failure = result.export_render_failure
+        assert export_failure is not None
+        typer.echo(f"build: {slug} refused: marketplace export rendering failed", err=True)
+        named = (
+            f"{export_failure.template_name}: {export_failure.message}"
+            if export_failure.template_name is not None
+            else export_failure.message
         )
         typer.echo(f"  {named}")
         raise typer.Exit(code=1)

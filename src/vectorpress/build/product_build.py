@@ -93,6 +93,15 @@ package or the ZIP. No CSV. A failure assembling or writing it is not
 caught specially: like every other write in the block below, it aborts the
 whole build and leaves the previous build (if any) untouched (§35).
 
+**Marketplace bundles (§19, ADR 0015, ADR 0017).** One pasteable text file
+per marketplace (:data:`~vectorpress.build.export.MARKETPLACE_BUNDLES`) is
+rendered from that same :class:`~vectorpress.build.export.ListingExport`
+and written alongside ``listing.json``, under ``export/`` -- never in the
+package or the ZIP. A catalog override with a syntax error, a missing
+template or an undefined variable refuses the whole build the same way a
+preview render failure does, naming the template; their own catalog
+overrides join :attr:`BuildResult.template_overrides`.
+
 **All-or-nothing (§35).** Every file the build produces is written under a
 fresh temporary directory first; only once that succeeds does it replace
 ``builds/<product-slug>/`` in one move, so a failure never leaves that
@@ -118,8 +127,11 @@ from vectorpress.build._dxf_conversion import DxfConversionError, svg_to_dxf_byt
 from vectorpress.build.export import (
     EXPORT_DIRNAME,
     LISTING_EXPORT_FILENAME,
+    ExportRenderError,
+    ExportRenderFailure,
     ListingExport,
     build_listing_export,
+    render_marketplace_bundles,
 )
 from vectorpress.build.previews import PreviewRenderError, PreviewRenderFailure, render_previews
 from vectorpress.build.product_resolution import ProductMember, resolve_product
@@ -364,7 +376,7 @@ def _preview_upload_order_key(rel_path: str) -> tuple[int, int, str]:
 
 class BuildOutcome(StrEnum):
     """One ``vpress build`` outcome (§14, §35): built, or refused for one of
-    eight reasons, each leaving the previous build (if any) untouched and
+    nine reasons, each leaving the previous build (if any) untouched and
     writing nothing new."""
 
     BUILT = "built"
@@ -376,6 +388,7 @@ class BuildOutcome(StrEnum):
     REFUSED_NAME_COLLISION = "refused_name_collision"
     REFUSED_DXF_CONVERSION_FAILURE = "refused_dxf_conversion_failure"
     REFUSED_PREVIEW_RENDER_FAILURE = "refused_preview_render_failure"
+    REFUSED_EXPORT_RENDER_FAILURE = "refused_export_render_failure"
 
 
 @dataclass(frozen=True)
@@ -394,12 +407,12 @@ class BuildResult:
     """The outcome of one :func:`build_product` call. Exactly one of
     ``brand_problems``, ``unknown_license_placeholders``,
     ``reference_problems``, ``ineligible_members``, ``name_collisions``,
-    ``dxf_conversion_failure`` or ``preview_render_failure`` is set for its
-    matching refusal outcome (:attr:`BuildOutcome.REFUSED_NO_LISTING`
-    carries none -- the slug the caller already has is enough to name the
-    draft command); ``manifest``/``package_dir``/``zip_path``/
-    ``template_overrides`` are set exactly when ``outcome`` is
-    :attr:`BuildOutcome.BUILT`."""
+    ``dxf_conversion_failure``, ``preview_render_failure`` or
+    ``export_render_failure`` is set for its matching refusal outcome
+    (:attr:`BuildOutcome.REFUSED_NO_LISTING` carries none -- the slug the
+    caller already has is enough to name the draft command);
+    ``manifest``/``package_dir``/``zip_path``/``template_overrides`` are set
+    exactly when ``outcome`` is :attr:`BuildOutcome.BUILT`."""
 
     outcome: BuildOutcome
     brand_problems: list[MetadataProblem] | None = None
@@ -409,6 +422,7 @@ class BuildResult:
     name_collisions: list[NameCollision] | None = None
     dxf_conversion_failure: DxfConversionFailure | None = None
     preview_render_failure: PreviewRenderFailure | None = None
+    export_render_failure: ExportRenderFailure | None = None
     manifest: Manifest | None = None
     package_dir: Path | None = None
     zip_path: Path | None = None
@@ -891,10 +905,29 @@ def build_product(
         export_path.parent.mkdir(parents=True, exist_ok=True)
         export_path.write_bytes(_listing_export_json_bytes(listing_export))
 
+        # One pasteable text file per marketplace, beside listing.json --
+        # never in the package or the ZIP (this module's own docstring).
+        # Their own catalog overrides join the previews' already-gathered
+        # list, so the build report names every override actually used.
+        bundle_result = render_marketplace_bundles(root, listing_export)
+        for rel_path, data in bundle_result.files:
+            file_path = tmp_dir / rel_path
+            file_path.parent.mkdir(parents=True, exist_ok=True)
+            file_path.write_bytes(data)
+        template_overrides = sorted({*template_overrides, *bundle_result.template_overrides})
+
         (tmp_dir / MANIFEST_FILENAME).write_bytes(_manifest_json_bytes(manifest))
 
         target_dir = builds_dir / product.slug
         _swap_into_place(tmp_dir, target_dir)
+    except ExportRenderError as exc:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+        return BuildResult(
+            BuildOutcome.REFUSED_EXPORT_RENDER_FAILURE,
+            export_render_failure=ExportRenderFailure(
+                template_name=exc.template_name, message=str(exc)
+            ),
+        )
     except BaseException:
         shutil.rmtree(tmp_dir, ignore_errors=True)
         raise
