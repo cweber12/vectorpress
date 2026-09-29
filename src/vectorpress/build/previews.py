@@ -41,7 +41,11 @@ from playwright.sync_api import Browser, Playwright, Route, sync_playwright
 from playwright.sync_api import Error as PlaywrightError
 
 from vectorpress.build.product_resolution import ProductMember
-from vectorpress.build.template_lookup import template_environment, template_name_from_traceback
+from vectorpress.build.template_lookup import (
+    template_environment,
+    template_name_from_traceback,
+    used_overrides,
+)
 from vectorpress.domain.asset import Asset, AssetId
 from vectorpress.domain.brand import Brand
 from vectorpress.domain.derivative_type import DerivativeType
@@ -593,6 +597,19 @@ def _screenshot(html: str, canvas: Canvas, template_name: str) -> bytes:
     return png_bytes
 
 
+@dataclass(frozen=True)
+class PreviewRenderResult:
+    """:func:`render_previews`'s own result: the rendered preview files,
+    plus the catalog ``templates/previews/`` overrides this render actually
+    used (ADR 0015's build report list) -- both drawn from the one
+    environment every type/canvas render shares, so the override list
+    reflects exactly this build's own renders, not merely what the
+    catalog's ``templates/previews/`` folder happens to hold."""
+
+    files: list[tuple[str, bytes]]
+    template_overrides: list[str]
+
+
 def render_previews(
     root: Path,
     product: Product,
@@ -601,7 +618,7 @@ def render_previews(
     assets_by_id: dict[AssetId, Asset],
     content_by_member: dict[AssetId, dict[DerivativeType, bytes]],
     files_by_folder: dict[str, list[str]],
-) -> list[tuple[str, bytes]]:
+) -> PreviewRenderResult:
     """Render every :data:`PREVIEW_TYPES` entry that applies at both fixed
     canvases (§16): ``(path under previews/, PNG bytes)`` pairs, sizes
     exactly matching each :data:`Canvas`. ``variants`` and ``contents`` are
@@ -639,7 +656,7 @@ def render_previews(
                 results.append(
                     (f"previews/{preview_type.number}-{name}-{canvas.name}.png", png_bytes)
                 )
-    return results
+    return PreviewRenderResult(files=results, template_overrides=used_overrides(environment))
 
 
 def _renders(preview_type: PreviewType, product: Product, member_count: int) -> bool:

@@ -29,7 +29,7 @@ from pathlib import Path
 from jinja2 import Environment
 
 from vectorpress.build.product_resolution import resolve_product
-from vectorpress.build.template_lookup import template_environment
+from vectorpress.build.template_lookup import template_environment, used_overrides
 from vectorpress.catalog.metadata_problem import MetadataProblem
 from vectorpress.domain.asset import Asset
 from vectorpress.domain.brand import Brand
@@ -211,11 +211,15 @@ class ListingDraftOutcome(StrEnum):
 class ListingDraftResult:
     """The outcome of one :func:`draft_listing_for_product` call: exactly
     one of ``listing`` or ``reference_problems`` is set, matching
-    ``outcome``."""
+    ``outcome``. ``template_overrides`` -- the catalog ``templates/listing/``
+    files this draft actually used (ADR 0015) -- is set alongside
+    ``listing``; ``cli`` names them the same way ``vpress build`` names its
+    own."""
 
     outcome: ListingDraftOutcome
     listing: Listing | None = None
     reference_problems: list[MetadataProblem] | None = None
+    template_overrides: list[str] | None = None
 
 
 def _collection_for_product(
@@ -258,4 +262,8 @@ def draft_listing_for_product(
     collection = _collection_for_product(product, known_collections)
     environment = template_environment(root, "listing")
     listing = draft_listing(product, collection, members, brand, environment)
-    return ListingDraftResult(ListingDraftOutcome.DRAFTED, listing=listing)
+    return ListingDraftResult(
+        ListingDraftOutcome.DRAFTED,
+        listing=listing,
+        template_overrides=used_overrides(environment),
+    )

@@ -446,6 +446,26 @@ def test_render_main_html_is_locked_by_snapshot(
     assert _DATA_URI_RE.sub("data:<omitted>", html) == snapshot
 
 
+# --- acceptance: a catalog brand.css override changes the rendered HTML (ADR 0015) --
+
+
+def test_catalog_override_of_brand_css_changes_the_rendered_html_locked_by_snapshot(
+    tmp_path: Path, snapshot: SnapshotAssertion
+) -> None:
+    """A catalog ``templates/previews/brand.css`` override is reached only
+    through ``_base.html.j2``'s own ``{% include %}`` (ADR 0015), never a
+    top-level lookup of its own -- the rendered ``<style>`` block is the
+    override's own text, not the shipped stylesheet, once it exists."""
+    override_dir = tmp_path / "templates" / "previews"
+    override_dir.mkdir(parents=True)
+    (override_dir / "brand.css").write_text("body { background: hotpink; }\n", encoding="utf-8")
+
+    html = _render(tmp_path)
+
+    assert "body { background: hotpink; }" in html
+    assert html == snapshot
+
+
 # --- `included` (§16 nn=02): up to 12 members, labeled with display names --
 
 
