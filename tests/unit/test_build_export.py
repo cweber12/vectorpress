@@ -21,9 +21,11 @@ from vectorpress.build.export import (
     _preview_names_by_canvas,  # pyright: ignore[reportPrivateUsage]
     build_listing_export,
     contents_summary,
+    measure_export_limits,
     render_contents_summary_text,
     render_marketplace_bundles,
 )
+from vectorpress.build.marketplace_limits import ETSY_TAG_MAX_COUNT, ETSY_TITLE_MAX_CHARS
 from vectorpress.build.product_resolution import MemberEligibility, ProductMember
 from vectorpress.domain.asset import Asset
 from vectorpress.domain.collection import Collection
@@ -121,6 +123,8 @@ def _manifest(**overrides: object) -> Manifest:
         "previews": [],
         "presentation_hash": "hash",
         "listing_hash": "hash",
+        "export_limit_warnings": [],
+        "export_does_not_fit": [],
     }
     fields.update(overrides)
     return Manifest(**fields)  # type: ignore[arg-type]
@@ -538,3 +542,96 @@ def test_render_marketplace_bundles_with_no_catalog_templates_dir_uses_shipped_o
 ) -> None:
     result = render_marketplace_bundles(tmp_path, _listing_export())
     assert result.template_overrides == []
+
+
+# --- measure_export_limits (§19, ADR 0017) -----------------------------------
+
+
+def test_measure_export_limits_within_every_limit_produces_no_warnings() -> None:
+    result = measure_export_limits(_listing_export())
+    assert result.warnings == []
+    assert result.does_not_fit == []
+
+
+def test_measure_export_limits_flags_an_over_limit_title_and_lists_the_overflow_tag() -> None:
+    """The acceptance scenario: a 141-character title and 14 tags -- the
+    title is flagged, the 14th tag is listed as not fitting, and nothing
+    about the listing itself is touched (ADR 0017's "warn, never truncate
+    or refuse")."""
+    title = "x" * (ETSY_TITLE_MAX_CHARS + 1)
+    tags = [f"tag{i}" for i in range(1, ETSY_TAG_MAX_COUNT + 2)]  # 14 tags
+    export = _listing_export(
+        listing=Listing(
+            title=title,
+            short_title="Short",
+            description="A test pitch.",
+            tags=tags,
+            category="Nature & Wildlife",
+            license_type="Test License",
+        )
+    )
+    result = measure_export_limits(export)
+
+    etsy_title_warnings = [
+        w for w in result.warnings if w.marketplace == "etsy" and w.field == "title"
+    ]
+    assert len(etsy_title_warnings) == 1
+    assert str(ETSY_TITLE_MAX_CHARS + 1) in etsy_title_warnings[0].measure
+
+    etsy_tag_overflow = [
+        item for item in result.does_not_fit if item.marketplace == "etsy" and item.field == "tags"
+    ]
+    assert [item.item for item in etsy_tag_overflow] == [f"tag{ETSY_TAG_MAX_COUNT + 1}"]
+
+
+# --- render_marketplace_bundles inline limit flags (§19, ADR 0017) ----------
+
+
+def test_render_marketplace_bundles_flags_an_over_limit_title_inline_in_etsy(
+    tmp_path: Path,
+) -> None:
+    title = "x" * (ETSY_TITLE_MAX_CHARS + 1)
+    export = _listing_export(
+        listing=Listing(
+            title=title,
+            short_title="Short",
+            description="A test pitch.",
+            tags=["cut file", "svg"],
+            category="Nature & Wildlife",
+            license_type="Test License",
+        )
+    )
+    texts = _bundle_texts(tmp_path, export)
+    assert title in texts["export/etsy.txt"]  # the title itself is never truncated
+    assert "LIMIT" in texts["export/etsy.txt"]
+    assert str(ETSY_TITLE_MAX_CHARS) in texts["export/etsy.txt"]
+
+
+def test_render_marketplace_bundles_lists_the_fourteenth_tag_under_does_not_fit_in_etsy(
+    tmp_path: Path,
+) -> None:
+    tags = [f"tag{i}" for i in range(1, ETSY_TAG_MAX_COUNT + 2)]  # 14 tags
+    export = _listing_export(
+        listing=Listing(
+            title="Test Product",
+            short_title="Test Product",
+            description="A test pitch.",
+            tags=tags,
+            category="Nature & Wildlife",
+            license_type="Test License",
+        )
+    )
+    texts = _bundle_texts(tmp_path, export)
+    text = texts["export/etsy.txt"]
+    assert ", ".join(tags) in text  # every tag still ships, unchanged
+    assert "DOES NOT FIT" in text
+    assert f"tag{ETSY_TAG_MAX_COUNT + 1}" in text.split("DOES NOT FIT")[1]
+
+
+def test_render_marketplace_bundles_within_every_limit_has_no_limit_or_does_not_fit_markers(
+    tmp_path: Path,
+) -> None:
+    texts = _bundle_texts(tmp_path)
+    for text in texts.values():
+        assert "LIMIT" not in text
+        assert "DOES NOT FIT" not in text

@@ -44,7 +44,11 @@ from vectorpress.catalog.listing_draft import COMMAND_NAME
 from vectorpress.catalog.manifests import read_manifest
 from vectorpress.cli.app import app
 from vectorpress.domain.asset import RightsStatus
-from vectorpress.domain.manifest import ManifestAssetRightsStatus
+from vectorpress.domain.manifest import (
+    ManifestAssetRightsStatus,
+    ManifestExportDoesNotFit,
+    ManifestExportLimitWarning,
+)
 
 runner = CliRunner()
 
@@ -1658,3 +1662,141 @@ def test_build_refuses_when_a_catalog_export_template_reads_an_undefined_variabl
     # product's own build directory is ever written -- the refusal removes
     # its temporary directory, leaving no builds/<slug>/ at all (§35).
     assert not _build_dir(temp_catalog_root, PNG_ONLY_SLUG).exists()
+
+
+# --- cited marketplace limits (§19, ADR 0017) --------------------------------
+
+#: One character past Etsy's own 140-character title limit.
+_OVER_LIMIT_TITLE = "T" * 141
+
+#: 14 tags -- one past Etsy's own 13-tag limit; every one short and clean,
+#: so the only violation tripped is the count itself.
+_FOURTEEN_TAGS = [f"tag{i}" for i in range(1, 15)]
+
+
+def _write_over_limit_listing(product_path: Path) -> None:
+    """Rewrite ``PNG_ONLY_SLUG``'s own ``[listing]`` title and tags to trip
+    exactly two cited Etsy limits (ADR 0017): a 141-character title, and a
+    14th tag past Etsy's own 13-tag limit. Everything else about the
+    listing -- and the listing file's every other byte -- is left alone,
+    the same targeted string-replace ``test_editing_listing_text_and_
+    rebuilding_carries_the_edit_into_every_bundle`` above already uses."""
+    text = product_path.read_text(encoding="utf-8")
+
+    before_title = f'title = "{PNG_ONLY_LISTING_TITLE}"'
+    assert before_title in text
+    text = text.replace(before_title, f'title = "{_OVER_LIMIT_TITLE}"')
+
+    before_tags = 'tags = ["tide pool", "pacific coast", "color png", "png"]'
+    assert before_tags in text
+    tags_literal = ", ".join(f'"{tag}"' for tag in _FOURTEEN_TAGS)
+    text = text.replace(before_tags, f"tags = [{tags_literal}]")
+
+    product_path.write_text(text, encoding="utf-8")
+
+
+@pytest.mark.integration
+def test_build_still_succeeds_for_a_title_and_tag_count_over_etsys_own_limits(
+    monkeypatch: pytest.MonkeyPatch, temp_catalog_root: Path
+) -> None:
+    """The PRD's own acceptance scenario: a 141-character title and 14 tags
+    build successfully -- the Etsy bundle flags the title inline and lists
+    the 14th tag under "does not fit", and the build output reports both
+    (ADR 0017's "warn, never truncate or refuse")."""
+    _fix_license_year(monkeypatch)
+    _generate_and_approve_transparent_png(monkeypatch, temp_catalog_root)
+    _write_over_limit_listing(temp_catalog_root / "products" / f"{PNG_ONLY_SLUG}.toml")
+
+    result = runner.invoke(app, ["build", PNG_ONLY_SLUG])
+
+    assert result.exit_code == 0, result.output
+    assert "Export limit warnings: 1" in result.output
+    assert "etsy\ttitle\t141 characters (limit 140)" in result.output
+    assert "Does not fit: 1" in result.output
+    assert "etsy\ttags\ttag14" in result.output
+
+    build_dir = _build_dir(temp_catalog_root, PNG_ONLY_SLUG)
+    etsy_text = _read_bundle(build_dir, "etsy.txt")
+    assert _OVER_LIMIT_TITLE in etsy_text  # the title itself is never truncated
+    assert "LIMIT: 141 characters (limit 140)" in etsy_text
+    assert ", ".join(_FOURTEEN_TAGS) in etsy_text  # every tag still ships, unchanged
+    assert "DOES NOT FIT: tag14" in etsy_text
+
+    # Only Etsy cites a title or tag-count limit (the table's own six
+    # rows) -- no other bundle is touched by either violation.
+    for filename in ("creative-fabrica.txt", "design-bundles.txt", "direct-store.txt"):
+        text = _read_bundle(build_dir, filename)
+        assert "LIMIT" not in text
+        assert "DOES NOT FIT" not in text
+
+
+@pytest.mark.integration
+def test_manifest_records_the_export_limit_warning_and_the_does_not_fit_item(
+    monkeypatch: pytest.MonkeyPatch, temp_catalog_root: Path
+) -> None:
+    _fix_license_year(monkeypatch)
+    _generate_and_approve_transparent_png(monkeypatch, temp_catalog_root)
+    _write_over_limit_listing(temp_catalog_root / "products" / f"{PNG_ONLY_SLUG}.toml")
+
+    result = runner.invoke(app, ["build", PNG_ONLY_SLUG])
+    assert result.exit_code == 0, result.output
+
+    manifest_json = json.loads(
+        (_build_dir(temp_catalog_root, PNG_ONLY_SLUG) / "manifest.json").read_text(encoding="utf-8")
+    )
+    assert manifest_json["export_limit_warnings"] == [
+        {"marketplace": "etsy", "field": "title", "measure": "141 characters (limit 140)"}
+    ]
+    assert manifest_json["export_does_not_fit"] == [
+        {"marketplace": "etsy", "field": "tags", "item": "tag14"}
+    ]
+
+    # read_manifest (catalog.manifests) parses this same file back without
+    # raising ManifestFormatError.
+    parsed = read_manifest(temp_catalog_root, PNG_ONLY_SLUG)
+    assert parsed is not None
+    assert parsed.export_limit_warnings == [
+        ManifestExportLimitWarning(
+            marketplace="etsy", field="title", measure="141 characters (limit 140)"
+        )
+    ]
+    assert parsed.export_does_not_fit == [
+        ManifestExportDoesNotFit(marketplace="etsy", field="tags", item="tag14")
+    ]
+
+
+@pytest.mark.integration
+def test_a_product_within_every_cited_limit_produces_no_export_warnings(
+    monkeypatch: pytest.MonkeyPatch, temp_catalog_root: Path
+) -> None:
+    """``PNG_ONLY_SLUG``'s own drafted listing (a short title, four short
+    tags, a small ZIP) sits under every cited limit unmodified -- the
+    ordinary case, with nothing to warn about."""
+    build_dir, _ = _build_and_read_export(monkeypatch, temp_catalog_root)
+
+    manifest_json = json.loads((build_dir / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest_json["export_limit_warnings"] == []
+    assert manifest_json["export_does_not_fit"] == []
+
+    for filename in ("etsy.txt", "creative-fabrica.txt", "design-bundles.txt", "direct-store.txt"):
+        text = _read_bundle(build_dir, filename)
+        assert "LIMIT" not in text
+        assert "DOES NOT FIT" not in text
+
+
+@pytest.mark.integration
+def test_export_limit_warnings_and_does_not_fit_are_locked_by_snapshot(
+    monkeypatch: pytest.MonkeyPatch, temp_catalog_root: Path, snapshot: SnapshotAssertion
+) -> None:
+    _fix_license_year(monkeypatch)
+    _generate_and_approve_transparent_png(monkeypatch, temp_catalog_root)
+    _write_over_limit_listing(temp_catalog_root / "products" / f"{PNG_ONLY_SLUG}.toml")
+
+    result = runner.invoke(app, ["build", PNG_ONLY_SLUG])
+    assert result.exit_code == 0, result.output
+
+    build_dir = _build_dir(temp_catalog_root, PNG_ONLY_SLUG)
+    manifest_json = json.loads((build_dir / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest_json["export_limit_warnings"] == snapshot(name="export_limit_warnings")
+    assert manifest_json["export_does_not_fit"] == snapshot(name="export_does_not_fit")
+    assert _read_bundle(build_dir, "etsy.txt") == snapshot(name="etsy_bundle_flagged")

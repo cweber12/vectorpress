@@ -18,3 +18,6 @@ IMAGES
 
 FILES
 {{ zip_name }}
+{%- if warnings.get("zip") %}
+LIMIT: {{ warnings.get("zip") }}
+{%- endif %}

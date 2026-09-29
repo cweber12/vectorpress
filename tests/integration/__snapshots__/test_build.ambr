@@ -18605,6 +18605,66 @@
     }),
   ])
 # ---
+# name: test_export_limit_warnings_and_does_not_fit_are_locked_by_snapshot[etsy_bundle_flagged]
+  '''
+  TITLE
+  TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT
+  LIMIT: 141 characters (limit 140)
+  
+  DESCRIPTION
+  The tide pool subjects in this catalog, hand-picked rather than grouped by a
+  rule.
+  
+  Hand-illustrated, scientifically accurate cut files.
+  
+  What's included: 3 members, PNG files, checked to cut cleanly at 3in.
+  
+  Files:
+  - PNG/giant-green-anemone-color.png
+  - PNG/ochre-sea-star-color.png
+  - PNG/purple-sea-urchin-color.png
+  
+  TAGS
+  tag1, tag2, tag3, tag4, tag5, tag6, tag7, tag8, tag9, tag10, tag11, tag12, tag13, tag14
+  DOES NOT FIT: tag14
+  
+  PRICE
+  $5.00
+  
+  CATEGORY
+  Nature & Wildlife
+  
+  WHO MADE
+  I did
+  
+  IMAGES
+  01-main-square.png
+  02-included-square.png
+  03-formats-square.png
+  
+  FILES
+  Pacific-Coast-Tide-Pool.zip
+  
+  '''
+# ---
+# name: test_export_limit_warnings_and_does_not_fit_are_locked_by_snapshot[export_does_not_fit]
+  list([
+    dict({
+      'field': 'tags',
+      'item': 'tag14',
+      'marketplace': 'etsy',
+    }),
+  ])
+# ---
+# name: test_export_limit_warnings_and_does_not_fit_are_locked_by_snapshot[export_limit_warnings]
+  list([
+    dict({
+      'field': 'title',
+      'marketplace': 'etsy',
+      'measure': '141 characters (limit 140)',
+    }),
+  ])
+# ---
 # name: test_export_listing_json_is_locked_by_snapshot[export_listing]
   dict({
     'asset_names': list([
@@ -18707,6 +18767,10 @@
     'dxf_members': list([
     ]),
     'excluded_members': list([
+    ]),
+    'export_does_not_fit': list([
+    ]),
+    'export_limit_warnings': list([
     ]),
     'license_template_hash': '5ebd27971491321fa49369d43df7f17cdc3d79dae210de60edb0b785a9f3d2e8',
     'license_year': 2026,

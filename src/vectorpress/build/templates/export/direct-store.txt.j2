@@ -6,6 +6,12 @@ DESCRIPTION
 
 TAGS
 {{ tags|join(", ") }}
+{%- if warnings.get("tags") %}
+LIMIT: {{ warnings.get("tags") }}
+{%- endif %}
+{%- if does_not_fit.get("tags") %}
+DOES NOT FIT: {{ does_not_fit.get("tags")|join(", ") }}
+{%- endif %}
 
 PRICE
 ${{ "%.2f"|format(price) }}
@@ -15,6 +21,12 @@ CATEGORY
 
 IMAGES
 {{ images|join("\n") }}
+{%- if warnings.get("images") %}
+LIMIT: {{ warnings.get("images") }}
+{%- endif %}
+{%- if does_not_fit.get("images") %}
+DOES NOT FIT: {{ does_not_fit.get("images")|join(", ") }}
+{%- endif %}
 
 FILES
 {{ zip_name }}

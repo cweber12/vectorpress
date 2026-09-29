@@ -1985,6 +1985,12 @@ def build(
             " source for the redundant type in asset.toml to make it impossible"
             " (e.g. no flatcolor source for one-color art)"
         )
+    typer.echo(f"Export limit warnings: {len(result.manifest.export_limit_warnings)}")
+    for warning in result.manifest.export_limit_warnings:
+        typer.echo(f"  {warning.marketplace}\t{warning.field}\t{warning.measure}")
+    typer.echo(f"Does not fit: {len(result.manifest.export_does_not_fit)}")
+    for item in result.manifest.export_does_not_fit:
+        typer.echo(f"  {item.marketplace}\t{item.field}\t{item.item}")
     typer.echo(f"Previews: {len(result.manifest.previews)}")
     for preview in result.manifest.previews:
         typer.echo(f"  {preview}")

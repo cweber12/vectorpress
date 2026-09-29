@@ -1,11 +1,20 @@
 TITLE
 {{ title }}
+{%- if warnings.get("title") %}
+LIMIT: {{ warnings.get("title") }}
+{%- endif %}
 
 DESCRIPTION
 {{ description }}
 
 TAGS
 {{ tags|join(", ") }}
+{%- if warnings.get("tags") %}
+LIMIT: {{ warnings.get("tags") }}
+{%- endif %}
+{%- if does_not_fit.get("tags") %}
+DOES NOT FIT: {{ does_not_fit.get("tags")|join(", ") }}
+{%- endif %}
 
 PRICE
 ${{ "%.2f"|format(price) }}
@@ -18,6 +27,15 @@ WHO MADE
 
 IMAGES
 {{ images|join("\n") }}
+{%- if warnings.get("images") %}
+LIMIT: {{ warnings.get("images") }}
+{%- endif %}
+{%- if does_not_fit.get("images") %}
+DOES NOT FIT: {{ does_not_fit.get("images")|join(", ") }}
+{%- endif %}
 
 FILES
 {{ zip_name }}
+{%- if warnings.get("zip") %}
+LIMIT: {{ warnings.get("zip") }}
+{%- endif %}

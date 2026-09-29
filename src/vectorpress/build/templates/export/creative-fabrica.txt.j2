@@ -15,6 +15,12 @@ CATEGORY
 
 IMAGES
 {{ images|join("\n") }}
+{%- if warnings.get("images") %}
+LIMIT: {{ warnings.get("images") }}
+{%- endif %}
 
 FILES
 {{ zip_name }}
+{%- if warnings.get("zip") %}
+LIMIT: {{ warnings.get("zip") }}
+{%- endif %}
